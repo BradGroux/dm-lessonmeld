@@ -1,0 +1,126 @@
+import DMLessonMeldCore
+import Foundation
+import Testing
+
+@Suite("LessonMeld preferences")
+struct LessonMeldPreferencesTests {
+    @Test("Defaults are local-first and curriculum focused")
+    func defaults() {
+        let preferences = LessonMeldPreferences()
+
+        #expect(preferences.privacy.localOnlyMode)
+        #expect(preferences.privacy.includeMediaPathsInAgentManifests == false)
+        #expect(preferences.privacy.includeTranscriptReferencesInAgentManifests == false)
+        #expect(preferences.privacy.excludeMediaFromBackups)
+        #expect(preferences.integrations.learnHouseEnabled)
+        #expect(preferences.integrations.agentManifestsEnabled)
+        #expect(preferences.general.defaultTemplateID == "workshop-lesson")
+        #expect(preferences.capture.captureMicrophone)
+        #expect(preferences.capture.microphoneDeviceID == nil)
+        #expect(preferences.capture.captureWebcam)
+        #expect(preferences.capture.captureInteractionMetadata)
+        #expect(preferences.capture.quickRecordDurationSeconds == 300)
+        #expect(preferences.capture.webcamFPS == 30)
+        #expect(preferences.capture.webcamAspectRatio == .widescreen16x9)
+        #expect(preferences.capture.webcamFrameShape == .roundedRectangle)
+        #expect(preferences.capture.showFloatingWebcamPreview)
+        #expect(preferences.capture.hideRecorderControlsFromCapture == false)
+        #expect(preferences.capture.showRecorderControlTooltips)
+        #expect(preferences.annotation.paletteHexColors.count == 8)
+        #expect(preferences.export.createArchiveByDefault)
+        #expect(preferences.onboardingCompleted == false)
+    }
+
+    @Test("Normalization clamps risky values and keeps safe fallbacks")
+    func normalization() {
+        let preferences = LessonMeldPreferences(
+            general: GeneralPreferences(defaultProjectDirectory: "", defaultTemplateID: ""),
+            capture: CapturePreferences(
+                quickRecordDurationSeconds: 0,
+                fps: 144,
+                microphoneDeviceID: "  built-in-mic  ",
+                webcamFPS: 999,
+                webcamCornerRadius: 999,
+                webcamRelativeSize: 0.01,
+                countdownSeconds: 99
+            ),
+            annotation: AnnotationPreferences(defaultColorHex: "nope", paletteHexColors: ["00ff00", "invalid"], lineWidth: 100),
+            shortcuts: [.quickRecord: "  Option+Command+R  "]
+        )
+
+        #expect(preferences.general.defaultProjectDirectory == "~/Movies/DMLessonMeld")
+        #expect(preferences.general.defaultTemplateID == "workshop-lesson")
+        #expect(preferences.capture.quickRecordDurationSeconds == 1)
+        #expect(preferences.capture.fps == 60)
+        #expect(preferences.capture.microphoneDeviceID == "built-in-mic")
+        #expect(preferences.capture.webcamFPS == 30)
+        #expect(preferences.capture.webcamCornerRadius == 64)
+        #expect(preferences.capture.webcamRelativeSize == 0.10)
+        #expect(preferences.capture.countdownSeconds == 10)
+        #expect(preferences.annotation.defaultColorHex == "#FFD733")
+        #expect(preferences.annotation.paletteHexColors == ["#00FF00"])
+        #expect(preferences.annotation.lineWidth == 24)
+        #expect(preferences.shortcuts[.quickRecord] == "option+command+r")
+        #expect(preferences.shortcuts[.showSettings] == "command+,")
+    }
+
+    @Test("Preferences round trip through JSON")
+    func codableRoundTrip() throws {
+        let completedAt = Date(timeIntervalSince1970: 1_715_000_000)
+        let preferences = LessonMeldPreferences(
+            firstRunCompletedAt: completedAt,
+            capture: CapturePreferences(
+                quickRecordDurationSeconds: 600,
+                captureSystemAudio: true,
+                captureMicrophone: true,
+                microphoneDeviceID: "external-mic",
+                captureWebcam: true
+            ),
+            privacy: PrivacyPreferences(includeMediaPathsInAgentManifests: true)
+        )
+
+        let data = try JSONEncoder().encode(preferences)
+        let decoded = try JSONDecoder().decode(LessonMeldPreferences.self, from: data)
+
+        #expect(decoded == preferences)
+        #expect(decoded.onboardingCompleted)
+    }
+
+    @Test("Legacy v1 preferences migrate webcam capture and quick record defaults")
+    func legacyWebcamDefaultMigration() throws {
+        let json = """
+        {
+          "schemaVersion": 1,
+          "capture": {
+            "quickRecordDurationSeconds": 5,
+            "fps": 60,
+            "includeCursor": true,
+            "captureSystemAudio": false,
+            "captureMicrophone": true,
+            "captureWebcam": false,
+            "cameraResolution": "1080p",
+            "countdownSeconds": 3,
+            "rememberLastRegion": true
+          }
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(LessonMeldPreferences.self, from: json)
+
+        #expect(decoded.schemaVersion == LessonMeldPreferences.currentSchemaVersion)
+        #expect(decoded.capture.captureWebcam)
+        #expect(decoded.capture.quickRecordDurationSeconds == 300)
+        #expect(decoded.capture.webcamFPS == 30)
+        #expect(decoded.capture.showFloatingWebcamPreview)
+    }
+
+    @Test("Shortcuts encode as stable JSON object for Git backup")
+    func shortcutsEncodeAsObject() throws {
+        let data = try JSONEncoder().encode(LessonMeldPreferences())
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let shortcuts = try #require(json["shortcuts"] as? [String: String])
+
+        #expect(shortcuts["showSettings"] == "command+,")
+        #expect(shortcuts["quickRecord"] == "option+command+r")
+    }
+}

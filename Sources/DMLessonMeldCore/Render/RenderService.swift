@@ -1,0 +1,1188 @@
+import AVFoundation
+import CoreGraphics
+import Foundation
+import QuartzCore
+
+public typealias RenderProgressHandler = @MainActor @Sendable (Double) -> Void
+
+public protocol RenderService: Sendable {
+    func makePlan(projectURL: URL, destinationURL: URL, preset: RenderPreset) throws -> RenderPlan
+    func inspect(
+        projectURL: URL,
+        destinationURL: URL,
+        preset: RenderPreset,
+        validationOptions: RenderValidationOptions
+    ) throws -> RenderInspection
+    func export(projectURL: URL, destinationURL: URL, preset: RenderPreset) async throws -> URL
+    func export(plan: RenderPlan) async throws -> URL
+    func export(plan: RenderPlan, progress: RenderProgressHandler?) async throws -> URL
+}
+
+public final class AVFoundationRenderService: RenderService, @unchecked Sendable {
+    public init() {}
+
+    public func makePlan(
+        projectURL: URL,
+        destinationURL: URL,
+        preset: RenderPreset = RenderPreset()
+    ) throws -> RenderPlan {
+        let manifest = try ProjectBundle.loadManifest(at: projectURL)
+        let editDecisionList = try loadEditDecisionListIfPresent(projectURL: projectURL)
+        return try RenderPlan.make(
+            manifest: manifest,
+            projectURL: projectURL,
+            destinationURL: destinationURL,
+            preset: preset,
+            editDecisionList: editDecisionList
+        )
+    }
+
+    public func inspect(
+        projectURL: URL,
+        destinationURL: URL,
+        preset: RenderPreset = RenderPreset(),
+        validationOptions: RenderValidationOptions = RenderValidationOptions()
+    ) throws -> RenderInspection {
+        let manifest = try ProjectBundle.loadManifest(at: projectURL)
+        let editDecisionList = try loadEditDecisionListIfPresent(projectURL: projectURL)
+
+        do {
+            let plan = try RenderPlan.make(
+                manifest: manifest,
+                projectURL: projectURL,
+                destinationURL: destinationURL,
+                preset: preset,
+                editDecisionList: editDecisionList
+            )
+            return RenderInspection(
+                projectURL: projectURL,
+                lessonTitle: manifest.metadata.lessonTitle,
+                hasWebcamOverlay: plan.webcamOverlay != nil,
+                hasCursorEffects: plan.cursorSource != nil,
+                hasAnnotations: plan.annotationSource != nil,
+                hasCaptions: plan.captionSource != nil,
+                hasZoomRegions: !plan.zoomRegions.isEmpty,
+                audioSourceCount: plan.audioSources.count,
+                plan: plan,
+                issues: plan.validate(options: validationOptions)
+            )
+        } catch let error as RenderPlanError {
+            return RenderInspection(
+                projectURL: projectURL,
+                lessonTitle: manifest.metadata.lessonTitle,
+                hasWebcamOverlay: manifest.media.webcam != nil,
+                hasCursorEffects: manifest.media.cursorMetadata != nil,
+                hasAnnotations: manifest.media.annotations != nil,
+                hasCaptions: !manifest.media.transcripts.isEmpty || !manifest.media.captions.isEmpty,
+                hasZoomRegions: !(editDecisionList?.enabledZoomRegions.isEmpty ?? true),
+                audioSourceCount: [manifest.media.microphoneAudio, manifest.media.systemAudio].compactMap { $0 }.count,
+                plan: nil,
+                issues: [
+                    RenderValidationIssue(
+                        severity: .error,
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
+    }
+
+    public func export(
+        projectURL: URL,
+        destinationURL: URL,
+        preset: RenderPreset = RenderPreset()
+    ) async throws -> URL {
+        try await export(plan: makePlan(projectURL: projectURL, destinationURL: destinationURL, preset: preset))
+    }
+
+    public func export(plan: RenderPlan) async throws -> URL {
+        try await export(plan: plan, progress: nil)
+    }
+
+    public func export(plan: RenderPlan, progress: RenderProgressHandler?) async throws -> URL {
+        let issues = plan.validate(options: .export)
+        let errors = issues.filter { $0.severity == .error }
+        if !errors.isEmpty {
+            throw RenderValidationError(issues: issues)
+        }
+
+        try FileManager.default.createDirectory(
+            at: plan.destinationURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        if plan.webcamOverlay == nil,
+           plan.audioSources.isEmpty,
+           plan.cursorSource == nil,
+           plan.annotationSource == nil,
+           plan.captionSource == nil,
+           plan.zoomRegions.isEmpty {
+            return try await exportSingleAsset(plan, progress: progress)
+        }
+
+        return try await exportComposition(plan, progress: progress)
+    }
+
+    private func exportSingleAsset(_ plan: RenderPlan, progress: RenderProgressHandler?) async throws -> URL {
+        let asset = AVURLAsset(url: plan.screenVideo.url)
+        guard let session = AVAssetExportSession(asset: asset, presetName: presetName(for: plan.preset.quality)) else {
+            throw RenderExportError.unableToCreateExportSession
+        }
+
+        try await export(session: session, to: plan.destinationURL, as: plan.preset.fileType, progress: progress)
+        return plan.destinationURL
+    }
+
+    private func exportComposition(_ plan: RenderPlan, progress: RenderProgressHandler?) async throws -> URL {
+        let composition = AVMutableComposition()
+        let screenAsset = AVURLAsset(url: plan.screenVideo.url)
+        let screenDuration = try await screenAsset.load(.duration)
+        let screenVideoTracks = try await screenAsset.loadTracks(withMediaType: .video)
+
+        guard let screenVideoTrack = screenVideoTracks.first else {
+            throw RenderExportError.missingVideoTrack(plan.screenVideo.relativePath)
+        }
+
+        guard let compositionScreenTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw RenderExportError.unableToCreateCompositionTrack
+        }
+
+        try compositionScreenTrack.insertTimeRange(
+            CMTimeRange(start: .zero, duration: screenDuration),
+            of: screenVideoTrack,
+            at: .zero
+        )
+
+        try await insertAudioTracks(from: screenAsset, into: composition, duration: screenDuration)
+
+        for source in plan.audioSources {
+            let audioAsset = AVURLAsset(url: source.url)
+            try await insertAudioTracks(from: audioAsset, into: composition, duration: screenDuration)
+        }
+
+        let screenNaturalSize = try await screenVideoTrack.load(.naturalSize)
+        let screenPreferredTransform = try await screenVideoTrack.load(.preferredTransform)
+        let renderSize = displaySize(naturalSize: screenNaturalSize, preferredTransform: screenPreferredTransform)
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: screenDuration)
+
+        let screenInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionScreenTrack)
+        screenInstruction.setTransform(screenPreferredTransform, at: .zero)
+        applyZoomRegions(
+            plan.zoomRegions,
+            to: screenInstruction,
+            baseTransform: screenPreferredTransform,
+            renderSize: renderSize,
+            duration: screenDuration
+        )
+
+        var layerInstructions = [screenInstruction]
+        var webcamGeometry: PictureInPictureRenderGeometry?
+
+        if let webcamOverlay = plan.webcamOverlay {
+            let webcamOverlayComposition = try await insertWebcamOverlay(
+                webcamOverlay,
+                into: composition,
+                duration: screenDuration,
+                renderSize: renderSize
+            )
+            layerInstructions.insert(webcamOverlayComposition.instruction, at: 0)
+            webcamGeometry = webcamOverlayComposition.geometry
+        }
+
+        instruction.layerInstructions = layerInstructions
+
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.renderSize = renderSize
+        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        videoComposition.instructions = [instruction]
+        try applyOverlayLayersIfNeeded(
+            plan: plan,
+            videoComposition: videoComposition,
+            renderSize: renderSize,
+            webcamGeometry: webcamGeometry
+        )
+
+        guard let session = AVAssetExportSession(asset: composition, presetName: presetName(for: plan.preset.quality)) else {
+            throw RenderExportError.unableToCreateExportSession
+        }
+        session.videoComposition = videoComposition
+
+        try await export(session: session, to: plan.destinationURL, as: plan.preset.fileType, progress: progress)
+        return plan.destinationURL
+    }
+
+    private func applyOverlayLayersIfNeeded(
+        plan: RenderPlan,
+        videoComposition: AVMutableVideoComposition,
+        renderSize: CGSize,
+        webcamGeometry: PictureInPictureRenderGeometry?
+    ) throws {
+        let overlayLayers = try overlayLayers(
+            plan: plan,
+            renderSize: renderSize,
+            webcamGeometry: webcamGeometry
+        )
+        guard !overlayLayers.isEmpty else { return }
+
+        let parentLayer = CALayer()
+        parentLayer.frame = CGRect(origin: .zero, size: renderSize)
+        parentLayer.isGeometryFlipped = false
+
+        let videoLayer = CALayer()
+        videoLayer.frame = parentLayer.bounds
+        parentLayer.addSublayer(videoLayer)
+
+        let overlayLayer = CALayer()
+        overlayLayer.frame = parentLayer.bounds
+        overlayLayer.masksToBounds = true
+        for layer in overlayLayers {
+            overlayLayer.addSublayer(layer)
+        }
+        parentLayer.addSublayer(overlayLayer)
+
+        videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
+            postProcessingAsVideoLayer: videoLayer,
+            in: parentLayer
+        )
+    }
+
+    private func overlayLayers(
+        plan: RenderPlan,
+        renderSize: CGSize,
+        webcamGeometry: PictureInPictureRenderGeometry?
+    ) throws -> [CALayer] {
+        var layers: [CALayer] = []
+        var screenBoundLayers: [CALayer] = []
+        let interactionMetadata = try plan.cursorSource.map { try loadInteractionMetadata(from: $0.url) }
+
+        if let annotationSource = plan.annotationSource {
+            let store = try loadAnnotationStore(from: annotationSource.url)
+            if store.isVisible {
+                screenBoundLayers.append(contentsOf: store.annotations.filter(\.isVisible).map {
+                    annotationLayer(for: $0, renderSize: renderSize)
+                })
+            }
+        }
+
+        if let interactionMetadata {
+            screenBoundLayers.append(contentsOf: cursorLayers(for: interactionMetadata, renderSize: renderSize))
+        }
+
+        if !screenBoundLayers.isEmpty {
+            let screenBoundContainer = CALayer()
+            screenBoundContainer.anchorPoint = .zero
+            screenBoundContainer.position = .zero
+            screenBoundContainer.bounds = CGRect(origin: .zero, size: renderSize)
+            screenBoundContainer.masksToBounds = true
+            for layer in screenBoundLayers {
+                screenBoundContainer.addSublayer(layer)
+            }
+            applyOverlayZoomRegions(plan.zoomRegions, to: screenBoundContainer, renderSize: renderSize)
+            layers.append(screenBoundContainer)
+        }
+
+        if let webcamOverlay = plan.webcamOverlay, let webcamGeometry {
+            layers.append(contentsOf: pictureInPictureStyleLayers(
+                for: webcamOverlay,
+                geometry: webcamGeometry,
+                renderSize: renderSize
+            ))
+        }
+
+        if let captionSource = plan.captionSource {
+            let transcript = try loadTranscript(from: captionSource.url)
+            layers.append(contentsOf: transcript.segments.compactMap {
+                captionLayer(for: $0, renderSize: renderSize)
+            })
+        }
+
+        if let interactionMetadata {
+            layers.append(contentsOf: keyboardLayers(for: interactionMetadata, renderSize: renderSize))
+        }
+
+        return layers
+    }
+
+    private func pictureInPictureStyleLayers(
+        for overlay: PictureInPictureOverlay,
+        geometry: PictureInPictureRenderGeometry,
+        renderSize: CGSize
+    ) -> [CALayer] {
+        var layers: [CALayer] = []
+
+        if overlay.placement.shadowEnabled {
+            let shadowLayer = CAShapeLayer()
+            shadowLayer.frame = geometry.frame
+            shadowLayer.path = pictureInPicturePath(
+                frameShape: overlay.placement.frameShape,
+                bounds: shadowLayer.bounds,
+                cornerRadius: geometry.cornerRadius
+            )
+            shadowLayer.fillColor = CGColor(red: 0, green: 0, blue: 0, alpha: 0.001)
+            shadowLayer.shadowColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+            shadowLayer.shadowOpacity = 0.34
+            shadowLayer.shadowRadius = max(5, min(renderSize.width, renderSize.height) * 0.015)
+            shadowLayer.shadowOffset = CGSize(
+                width: 0,
+                height: -max(3, min(renderSize.width, renderSize.height) * 0.006)
+            )
+            shadowLayer.shadowPath = shadowLayer.path
+            layers.append(shadowLayer)
+        }
+
+        if overlay.placement.borderEnabled {
+            let borderWidth = max(1, min(renderSize.width, renderSize.height) * 0.0018)
+            let borderLayer = CAShapeLayer()
+            borderLayer.frame = geometry.frame
+            borderLayer.path = pictureInPicturePath(
+                frameShape: overlay.placement.frameShape,
+                bounds: borderLayer.bounds,
+                cornerRadius: geometry.cornerRadius,
+                inset: borderWidth / 2
+            )
+            borderLayer.fillColor = nil
+            borderLayer.strokeColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.68)
+            borderLayer.lineWidth = borderWidth
+            layers.append(borderLayer)
+        }
+
+        return layers
+    }
+
+    private func pictureInPicturePath(
+        frameShape: PictureInPictureFrameShape,
+        bounds: CGRect,
+        cornerRadius: CGFloat,
+        inset: CGFloat = 0
+    ) -> CGPath {
+        let rect = bounds.insetBy(dx: inset, dy: inset)
+        switch frameShape {
+        case .circle:
+            return CGPath(ellipseIn: rect, transform: nil)
+        case .square:
+            return CGPath(rect: rect, transform: nil)
+        case .roundedRectangle:
+            let radius = max(0, min(cornerRadius - inset, min(rect.width, rect.height) / 2))
+            return CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        }
+    }
+
+    private func loadAnnotationStore(from url: URL) throws -> AnnotationStore {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return AnnotationStore()
+        }
+        let data = try Data(contentsOf: url)
+        return try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+    }
+
+    private func loadTranscript(from url: URL) throws -> TranscriptDocument {
+        let data = try Data(contentsOf: url)
+        return try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
+    }
+
+    private func loadInteractionMetadata(from url: URL) throws -> InteractionMetadataDocument {
+        let data = try Data(contentsOf: url)
+        return try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
+    }
+
+    private func loadEditDecisionListIfPresent(projectURL: URL) throws -> EditDecisionList? {
+        guard EditDecisionListFile.exists(in: projectURL) else {
+            return nil
+        }
+        return try EditDecisionListFile.load(fromProject: projectURL)
+    }
+
+    private func applyZoomRegions(
+        _ zoomRegions: [ZoomRegion],
+        to instruction: AVMutableVideoCompositionLayerInstruction,
+        baseTransform: CGAffineTransform,
+        renderSize: CGSize,
+        duration: CMTime
+    ) {
+        guard !zoomRegions.isEmpty else { return }
+
+        let totalSeconds = CMTimeGetSeconds(duration)
+        guard totalSeconds.isFinite, totalSeconds > 0 else { return }
+
+        for region in zoomRegions.sorted(by: { $0.range.startSeconds < $1.range.startSeconds }) {
+            let startSeconds = max(0, min(region.range.startSeconds, totalSeconds))
+            let endSeconds = max(startSeconds, min(region.range.endSeconds, totalSeconds))
+            guard endSeconds > startSeconds else { continue }
+
+            let regionDuration = endSeconds - startSeconds
+            let rampDuration = min(0.22, regionDuration / 3)
+            let zoomTransform = zoomTransform(for: region, baseTransform: baseTransform, renderSize: renderSize)
+
+            if rampDuration > 0 {
+                instruction.setTransformRamp(
+                    fromStart: baseTransform,
+                    toEnd: zoomTransform,
+                    timeRange: timeRange(startSeconds: startSeconds, durationSeconds: rampDuration)
+                )
+            } else {
+                instruction.setTransform(zoomTransform, at: time(startSeconds))
+            }
+
+            let holdStart = startSeconds + rampDuration
+            let outStart = endSeconds - rampDuration
+            if outStart > holdStart {
+                instruction.setTransform(zoomTransform, at: time(holdStart))
+                instruction.setTransform(zoomTransform, at: time(outStart))
+            }
+
+            if rampDuration > 0 {
+                instruction.setTransformRamp(
+                    fromStart: zoomTransform,
+                    toEnd: baseTransform,
+                    timeRange: timeRange(startSeconds: outStart, durationSeconds: rampDuration)
+                )
+            }
+            instruction.setTransform(baseTransform, at: time(endSeconds))
+        }
+    }
+
+    private func zoomTransform(
+        for region: ZoomRegion,
+        baseTransform: CGAffineTransform,
+        renderSize: CGSize
+    ) -> CGAffineTransform {
+        let scale = CGFloat(max(1, region.scale))
+        let focusPoint = CGPoint(
+            x: CGFloat(region.focusRect.centerX) * renderSize.width,
+            y: renderSize.height - CGFloat(region.focusRect.centerY) * renderSize.height
+        )
+        let renderCenter = CGPoint(x: renderSize.width / 2, y: renderSize.height / 2)
+        let translation = CGAffineTransform(
+            translationX: renderCenter.x - focusPoint.x * scale,
+            y: renderCenter.y - focusPoint.y * scale
+        )
+        return baseTransform
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(translation)
+    }
+
+    private func applyOverlayZoomRegions(
+        _ zoomRegions: [ZoomRegion],
+        to layer: CALayer,
+        renderSize: CGSize
+    ) {
+        guard !zoomRegions.isEmpty else { return }
+
+        for region in zoomRegions.sorted(by: { $0.range.startSeconds < $1.range.startSeconds }) {
+            let startSeconds = max(0, region.range.startSeconds)
+            let endSeconds = max(startSeconds, region.range.endSeconds)
+            guard endSeconds > startSeconds else { continue }
+
+            let regionDuration = endSeconds - startSeconds
+            let rampDuration = min(0.22, regionDuration / 3)
+            let zoomTransform = zoomTransform(for: region, baseTransform: .identity, renderSize: renderSize)
+            let zoom3D = CATransform3DMakeAffineTransform(zoomTransform)
+            let identity3D = CATransform3DIdentity
+
+            if rampDuration > 0 {
+                let zoomIn = CABasicAnimation(keyPath: "transform")
+                zoomIn.fromValue = identity3D
+                zoomIn.toValue = zoom3D
+                zoomIn.beginTime = AVCoreAnimationBeginTimeAtZero + startSeconds
+                zoomIn.duration = rampDuration
+                zoomIn.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                zoomIn.fillMode = .forwards
+                zoomIn.isRemovedOnCompletion = false
+                layer.add(zoomIn, forKey: "overlay-zoom-in-\(region.id)")
+            }
+
+            let outStart = endSeconds - rampDuration
+            if rampDuration > 0 {
+                let zoomOut = CABasicAnimation(keyPath: "transform")
+                zoomOut.fromValue = zoom3D
+                zoomOut.toValue = identity3D
+                zoomOut.beginTime = AVCoreAnimationBeginTimeAtZero + outStart
+                zoomOut.duration = rampDuration
+                zoomOut.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                zoomOut.fillMode = .forwards
+                zoomOut.isRemovedOnCompletion = false
+                layer.add(zoomOut, forKey: "overlay-zoom-out-\(region.id)")
+            }
+        }
+    }
+
+    private func time(_ seconds: Double) -> CMTime {
+        CMTime(seconds: seconds, preferredTimescale: 600)
+    }
+
+    private func timeRange(startSeconds: Double, durationSeconds: Double) -> CMTimeRange {
+        CMTimeRange(
+            start: time(startSeconds),
+            duration: time(max(0, durationSeconds))
+        )
+    }
+
+    private func cursorLayers(for metadata: InteractionMetadataDocument, renderSize: CGSize) -> [CALayer] {
+        var layers: [CALayer] = []
+
+        if metadata.rendersCursorPointer,
+           let cursorLayer = animatedCursorLayer(for: metadata.cursorSamples, renderSize: renderSize) {
+            layers.append(cursorLayer)
+        }
+
+        layers.append(contentsOf: metadata.clicks.compactMap {
+            clickLayer(for: $0, renderSize: renderSize)
+        })
+
+        return layers
+    }
+
+    private func animatedCursorLayer(for samples: [CursorSample], renderSize: CGSize) -> CALayer? {
+        let visibleSamples = samples.sorted { $0.timestampSeconds < $1.timestampSeconds }
+        guard let first = visibleSamples.first else { return nil }
+
+        let layer = CAShapeLayer()
+        let scale = max(0.65, min(renderSize.width / 1920, 1.6))
+        layer.frame = .zero
+        layer.path = cursorPointerPath(scale: scale)
+        layer.fillColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.96)
+        layer.strokeColor = CGColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.95)
+        layer.lineWidth = max(1.4, 2.2 * scale)
+        layer.lineJoin = .round
+        layer.lineCap = .round
+        layer.position = renderPoint(first.position, renderSize: renderSize)
+        layer.opacity = first.isVisible ? 1 : 0
+
+        guard visibleSamples.count > 1, let last = visibleSamples.last else {
+            return layer
+        }
+
+        let start = first.timestampSeconds
+        let duration = max(last.timestampSeconds - start, 0.05)
+        let denominator = duration == 0 ? 1 : duration
+        let keyTimes = visibleSamples.map {
+            NSNumber(value: min(1, max(0, ($0.timestampSeconds - start) / denominator)))
+        }
+
+        let positionAnimation = CAKeyframeAnimation(keyPath: "position")
+        positionAnimation.values = visibleSamples.map {
+            NSValue(point: renderPoint($0.position, renderSize: renderSize))
+        }
+        positionAnimation.keyTimes = keyTimes
+        positionAnimation.beginTime = AVCoreAnimationBeginTimeAtZero + start
+        positionAnimation.duration = duration
+        positionAnimation.calculationMode = .linear
+        positionAnimation.fillMode = .forwards
+        positionAnimation.isRemovedOnCompletion = false
+        layer.add(positionAnimation, forKey: "cursor-position")
+
+        let opacityAnimation = CAKeyframeAnimation(keyPath: "opacity")
+        opacityAnimation.values = visibleSamples.map { $0.isVisible ? 1 : 0 }
+        opacityAnimation.keyTimes = keyTimes
+        opacityAnimation.beginTime = AVCoreAnimationBeginTimeAtZero + start
+        opacityAnimation.duration = duration
+        opacityAnimation.calculationMode = .discrete
+        opacityAnimation.fillMode = .forwards
+        opacityAnimation.isRemovedOnCompletion = false
+        layer.add(opacityAnimation, forKey: "cursor-opacity")
+
+        return layer
+    }
+
+    private func clickLayer(for click: CursorClick, renderSize: CGSize) -> CALayer? {
+        guard click.phase == .down else { return nil }
+
+        let scale = max(0.75, min(renderSize.width / 1920, 1.8))
+        let radius = CGFloat(19 * scale * Double(click.clickCount))
+        let point = renderPoint(click.position, renderSize: renderSize)
+        let rect = CGRect(
+            x: point.x - radius,
+            y: point.y - radius,
+            width: radius * 2,
+            height: radius * 2
+        )
+
+        let layer = CAShapeLayer()
+        layer.frame = rect
+        layer.path = CGPath(ellipseIn: layer.bounds, transform: nil)
+        layer.fillColor = nil
+        layer.strokeColor = clickColor(click.button)
+        layer.lineWidth = max(3, 4 * scale)
+        layer.opacity = 0
+
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = 0.85
+        opacity.toValue = 0
+
+        let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
+        scaleAnimation.fromValue = 0.45
+        scaleAnimation.toValue = 1.9
+
+        let group = CAAnimationGroup()
+        group.animations = [opacity, scaleAnimation]
+        group.beginTime = AVCoreAnimationBeginTimeAtZero + click.timestampSeconds
+        group.duration = 0.42
+        group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        group.fillMode = .removed
+        group.isRemovedOnCompletion = true
+        layer.add(group, forKey: "click-\(click.timestampSeconds)")
+
+        return layer
+    }
+
+    private func cursorPointerPath(scale: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: .zero)
+        path.addLine(to: CGPoint(x: 0, y: -34 * scale))
+        path.addLine(to: CGPoint(x: 10 * scale, y: -25 * scale))
+        path.addLine(to: CGPoint(x: 16 * scale, y: -40 * scale))
+        path.addLine(to: CGPoint(x: 24 * scale, y: -36 * scale))
+        path.addLine(to: CGPoint(x: 17 * scale, y: -22 * scale))
+        path.addLine(to: CGPoint(x: 31 * scale, y: -22 * scale))
+        path.closeSubpath()
+        return path
+    }
+
+    private func renderPoint(_ point: NormalizedCapturePoint, renderSize: CGSize) -> CGPoint {
+        CGPoint(
+            x: CGFloat(point.x) * renderSize.width,
+            y: renderSize.height - CGFloat(point.y) * renderSize.height
+        )
+    }
+
+    private func clickColor(_ button: CursorClickButton) -> CGColor {
+        switch button {
+        case .left:
+            CGColor(red: 1, green: 0.84, blue: 0.21, alpha: 0.95)
+        case .right:
+            CGColor(red: 0.34, green: 0.64, blue: 1, alpha: 0.95)
+        case .middle:
+            CGColor(red: 0.76, green: 0.39, blue: 0.98, alpha: 0.95)
+        case .other:
+            CGColor(red: 1, green: 1, blue: 1, alpha: 0.88)
+        }
+    }
+
+    private func keyboardLayers(for metadata: InteractionMetadataDocument, renderSize: CGSize) -> [CALayer] {
+        metadata.keystrokes.compactMap {
+            keyboardLayer(for: $0, renderSize: renderSize)
+        }
+    }
+
+    private func keyboardLayer(for event: KeyboardMetadataEvent, renderSize: CGSize) -> CALayer? {
+        guard event.phase == .down, !event.isRepeat, let label = keyboardLabel(for: event) else {
+            return nil
+        }
+
+        let fontSize = max(18, min(renderSize.height * 0.038, 30))
+        let horizontalPadding: CGFloat = 16
+        let verticalPadding: CGFloat = 9
+        let width = min(max(CGFloat(label.count) * fontSize * 0.58 + horizontalPadding * 2, 96), renderSize.width * 0.55)
+        let height = fontSize * 1.25 + verticalPadding * 2
+        let margin = max(renderSize.width * 0.035, 28)
+        let frame = CGRect(
+            x: renderSize.width - width - margin,
+            y: renderSize.height - height - margin,
+            width: width,
+            height: height
+        )
+
+        let container = CALayer()
+        container.frame = frame
+        container.opacity = 0
+
+        let background = CALayer()
+        background.frame = container.bounds
+        background.backgroundColor = CGColor(red: 0.03, green: 0.035, blue: 0.04, alpha: 0.82)
+        background.cornerRadius = 9
+        background.borderColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.18)
+        background.borderWidth = 1
+        container.addSublayer(background)
+
+        let text = CATextLayer()
+        text.string = label
+        text.font = "Helvetica-Bold" as CFTypeRef
+        text.fontSize = fontSize
+        text.foregroundColor = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        text.alignmentMode = .center
+        text.contentsScale = 2
+        text.frame = container.bounds.insetBy(dx: horizontalPadding, dy: verticalPadding)
+        container.addSublayer(text)
+
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = 1
+        animation.toValue = 1
+        animation.beginTime = AVCoreAnimationBeginTimeAtZero + event.timestampSeconds
+        animation.duration = 0.9
+        animation.fillMode = .removed
+        animation.isRemovedOnCompletion = true
+        container.add(animation, forKey: "keyboard-\(event.timestampSeconds)-\(event.keyCode)")
+        return container
+    }
+
+    private func keyboardLabel(for event: KeyboardMetadataEvent) -> String? {
+        let key = keyLabel(for: event)
+        guard !key.isEmpty else { return nil }
+
+        var parts: [String] = []
+        if event.modifiers.contains(.control) {
+            parts.append("Control")
+        }
+        if event.modifiers.contains(.option) {
+            parts.append("Option")
+        }
+        if event.modifiers.contains(.shift) {
+            parts.append("Shift")
+        }
+        if event.modifiers.contains(.command) {
+            parts.append("Command")
+        }
+        if event.modifiers.contains(.function) {
+            parts.append("Fn")
+        }
+
+        if parts.isEmpty, key.count == 1, key.rangeOfCharacter(from: .alphanumerics) != nil {
+            return nil
+        }
+
+        parts.append(key)
+        return parts.joined(separator: "+")
+    }
+
+    private func keyLabel(for event: KeyboardMetadataEvent) -> String {
+        if let characters = event.characters {
+            switch characters {
+            case "\r":
+                return "Return"
+            case "\t":
+                return "Tab"
+            case " ":
+                return "Space"
+            case "\u{1B}":
+                return "Esc"
+            default:
+                let trimmed = characters.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed.uppercased()
+                }
+            }
+        }
+
+        switch event.keyCode {
+        case 36:
+            return "Return"
+        case 48:
+            return "Tab"
+        case 49:
+            return "Space"
+        case 51:
+            return "Delete"
+        case 53:
+            return "Esc"
+        case 123:
+            return "Left"
+        case 124:
+            return "Right"
+        case 125:
+            return "Down"
+        case 126:
+            return "Up"
+        default:
+            return "Key \(event.keyCode)"
+        }
+    }
+
+    private func captionLayer(for segment: TranscriptSegment, renderSize: CGSize) -> CALayer? {
+        let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, segment.endSeconds > segment.startSeconds else {
+            return nil
+        }
+
+        let maxWidth = min(renderSize.width * 0.82, 980)
+        let fontSize = max(18, min(renderSize.height * 0.045, 34))
+        let lineHeight = fontSize * 1.28
+        let estimatedLines = max(1, min(3, Int(ceil(Double(text.count) / 42.0))))
+        let height = CGFloat(estimatedLines) * lineHeight + 22
+        let frame = CGRect(
+            x: (renderSize.width - maxWidth) / 2,
+            y: max(renderSize.height * 0.07, 28),
+            width: maxWidth,
+            height: height
+        )
+
+        let container = CALayer()
+        container.frame = frame
+        container.opacity = 0
+
+        let background = CALayer()
+        background.frame = container.bounds
+        background.backgroundColor = CGColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.72)
+        background.cornerRadius = 10
+        container.addSublayer(background)
+
+        let textLayer = CATextLayer()
+        textLayer.string = text
+        textLayer.font = "Helvetica-Bold" as CFTypeRef
+        textLayer.fontSize = fontSize
+        textLayer.foregroundColor = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        textLayer.alignmentMode = .center
+        textLayer.contentsScale = 2
+        textLayer.isWrapped = true
+        textLayer.frame = container.bounds.insetBy(dx: 18, dy: 10)
+        container.addSublayer(textLayer)
+
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = 1
+        animation.toValue = 1
+        animation.beginTime = AVCoreAnimationBeginTimeAtZero + segment.startSeconds
+        animation.duration = max(segment.endSeconds - segment.startSeconds, 0.05)
+        animation.fillMode = .removed
+        animation.isRemovedOnCompletion = true
+        container.add(animation, forKey: "caption-\(segment.id)")
+        return container
+    }
+
+    private func annotationLayer(for annotation: AnnotationItem, renderSize: CGSize) -> CALayer {
+        let points = annotation.canvasPoints(for: renderSize)
+        let layer: CALayer
+        switch annotation.kind {
+        case .pen, .highlighter, .laser:
+            layer = pathLayer(
+                path: polyline(points, renderSize: renderSize),
+                annotation: annotation,
+                fillColor: nil
+            )
+        case .line:
+            layer = pathLayer(
+                path: endpointLine(points, renderSize: renderSize),
+                annotation: annotation,
+                fillColor: nil
+            )
+        case .arrow:
+            layer = pathLayer(
+                path: arrowPath(points, renderSize: renderSize),
+                annotation: annotation,
+                fillColor: nil
+            )
+        case .rectangle:
+            let rect = flippedRect(points.boundingRect, renderSize: renderSize)
+            layer = pathLayer(
+                path: CGPath(rect: rect, transform: nil),
+                annotation: annotation,
+                fillColor: nil
+            )
+        case .ellipse:
+            let rect = flippedRect(points.boundingRect, renderSize: renderSize)
+            layer = pathLayer(
+                path: CGPath(ellipseIn: rect, transform: nil),
+                annotation: annotation,
+                fillColor: nil
+            )
+        case .whiteboard, .blackboard:
+            let rect = flippedRect(points.boundingRect, renderSize: renderSize)
+            layer = pathLayer(
+                path: CGPath(rect: rect, transform: nil),
+                annotation: annotation,
+                fillColor: annotation.fillColor
+            )
+        case .text:
+            layer = textLayer(for: annotation, points: points, renderSize: renderSize)
+        }
+        applyTiming(to: layer, annotation: annotation)
+        return layer
+    }
+
+    private func pathLayer(
+        path: CGPath,
+        annotation: AnnotationItem,
+        fillColor: RGBAColor?
+    ) -> CAShapeLayer {
+        let layer = CAShapeLayer()
+        layer.frame = .zero
+        layer.path = path
+        layer.fillColor = fillColor.map { cgColor($0, opacity: annotation.opacity) }
+        layer.strokeColor = cgColor(annotation.color, opacity: annotation.opacity)
+        layer.lineWidth = annotation.lineWidth
+        layer.lineCap = .round
+        layer.lineJoin = .round
+        return layer
+    }
+
+    private func textLayer(for annotation: AnnotationItem, points: [CGPoint], renderSize: CGSize) -> CALayer {
+        guard let point = points.first else {
+            return CALayer()
+        }
+
+        let style = annotation.textStyle ?? AnnotationTextStyle()
+        let text = annotation.text ?? ""
+        let lines = text.components(separatedBy: .newlines)
+        let longestLineCount = lines.map(\.count).max() ?? text.count
+        let width = max(CGFloat(longestLineCount) * style.fontSize * 0.62, style.fontSize * 2)
+        let height = max(CGFloat(max(lines.count, 1)) * style.fontSize * 1.3, style.fontSize)
+
+        let layer = CATextLayer()
+        layer.string = text
+        layer.fontSize = style.fontSize
+        layer.font = fontName(for: style.weight) as CFTypeRef
+        layer.foregroundColor = cgColor(annotation.color, opacity: annotation.opacity)
+        layer.alignmentMode = .left
+        layer.contentsScale = 2
+        layer.isWrapped = true
+        layer.frame = CGRect(
+            x: point.x,
+            y: renderSize.height - point.y - height,
+            width: width,
+            height: height
+        )
+        return layer
+    }
+
+    private func applyTiming(to layer: CALayer, annotation: AnnotationItem) {
+        guard let timeRange = annotation.timeRange, timeRange.isValid else { return }
+        layer.opacity = 0
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = 1
+        animation.toValue = 1
+        animation.beginTime = AVCoreAnimationBeginTimeAtZero + timeRange.startSeconds
+        animation.duration = max(timeRange.endSeconds - timeRange.startSeconds, 0.05)
+        animation.fillMode = .removed
+        animation.isRemovedOnCompletion = true
+        layer.add(animation, forKey: "annotation-\(annotation.id.uuidString)")
+    }
+
+    private func polyline(_ points: [CGPoint], renderSize: CGSize) -> CGPath {
+        let path = CGMutablePath()
+        guard let first = points.first else { return path }
+        path.move(to: flippedPoint(first, renderSize: renderSize))
+        for point in points.dropFirst() {
+            path.addLine(to: flippedPoint(point, renderSize: renderSize))
+        }
+        return path
+    }
+
+    private func endpointLine(_ points: [CGPoint], renderSize: CGSize) -> CGPath {
+        let path = CGMutablePath()
+        guard let first = points.first, let last = points.last else { return path }
+        path.move(to: flippedPoint(first, renderSize: renderSize))
+        path.addLine(to: flippedPoint(last, renderSize: renderSize))
+        return path
+    }
+
+    private func arrowPath(_ points: [CGPoint], renderSize: CGSize) -> CGPath {
+        let path = CGMutablePath()
+        guard let originalStart = points.first, let originalEnd = points.last else { return path }
+        let start = flippedPoint(originalStart, renderSize: renderSize)
+        let end = flippedPoint(originalEnd, renderSize: renderSize)
+        guard start != end else { return path }
+
+        path.move(to: start)
+        path.addLine(to: end)
+
+        let angle = atan2(end.y - start.y, end.x - start.x)
+        let length: CGFloat = 18
+        let spread: CGFloat = .pi / 7
+        let left = CGPoint(
+            x: end.x - length * cos(angle - spread),
+            y: end.y - length * sin(angle - spread)
+        )
+        let right = CGPoint(
+            x: end.x - length * cos(angle + spread),
+            y: end.y - length * sin(angle + spread)
+        )
+        path.move(to: left)
+        path.addLine(to: end)
+        path.addLine(to: right)
+        return path
+    }
+
+    private func flippedPoint(_ point: CGPoint, renderSize: CGSize) -> CGPoint {
+        CGPoint(x: point.x, y: renderSize.height - point.y)
+    }
+
+    private func flippedRect(_ rect: CGRect, renderSize: CGSize) -> CGRect {
+        CGRect(
+            x: rect.minX,
+            y: renderSize.height - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
+    }
+
+    private func cgColor(_ color: RGBAColor, opacity: Double) -> CGColor {
+        CGColor(
+            red: color.red,
+            green: color.green,
+            blue: color.blue,
+            alpha: color.alpha * opacity
+        )
+    }
+
+    private func fontName(for weight: AnnotationTextWeight) -> String {
+        switch weight {
+        case .regular:
+            "Helvetica"
+        case .medium:
+            "Helvetica-Medium"
+        case .semibold:
+            "Helvetica-Bold"
+        case .bold:
+            "Helvetica-Bold"
+        }
+    }
+
+    private func insertWebcamOverlay(
+        _ overlay: PictureInPictureOverlay,
+        into composition: AVMutableComposition,
+        duration: CMTime,
+        renderSize: CGSize
+    ) async throws -> WebcamOverlayComposition {
+        let webcamAsset = AVURLAsset(url: overlay.source.url)
+        let webcamVideoTracks = try await webcamAsset.loadTracks(withMediaType: .video)
+        guard let webcamVideoTrack = webcamVideoTracks.first else {
+            throw RenderExportError.missingVideoTrack(overlay.source.relativePath)
+        }
+
+        guard let compositionWebcamTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw RenderExportError.unableToCreateCompositionTrack
+        }
+
+        let webcamDuration = try await webcamAsset.load(.duration)
+        try compositionWebcamTrack.insertTimeRange(
+            CMTimeRange(start: .zero, duration: min(duration, webcamDuration)),
+            of: webcamVideoTrack,
+            at: .zero
+        )
+
+        let naturalSize = try await webcamVideoTrack.load(.naturalSize)
+        let preferredTransform = try await webcamVideoTrack.load(.preferredTransform)
+        let sourceDisplaySize = displaySize(naturalSize: naturalSize, preferredTransform: preferredTransform)
+        let geometry = overlay.placement.resolvedRenderGeometry(
+            sourceSize: sourceDisplaySize,
+            renderSize: renderSize
+        )
+
+        let horizontalScale = overlay.placement.isMirrored ? -geometry.sourceScale : geometry.sourceScale
+        let translationX = overlay.placement.isMirrored ? geometry.videoFrame.maxX : geometry.videoFrame.minX
+        let transform = preferredTransform
+            .concatenating(CGAffineTransform(scaleX: horizontalScale, y: geometry.sourceScale))
+            .concatenating(CGAffineTransform(translationX: translationX, y: geometry.videoFrame.minY))
+
+        let instruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionWebcamTrack)
+        instruction.setTransform(transform, at: .zero)
+        instruction.setCropRectangle(geometry.cropRect, at: .zero)
+        return WebcamOverlayComposition(instruction: instruction, geometry: geometry)
+    }
+
+    private func insertAudioTracks(
+        from asset: AVAsset,
+        into composition: AVMutableComposition,
+        duration: CMTime
+    ) async throws {
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        for audioTrack in audioTracks {
+            guard let compositionAudioTrack = composition.addMutableTrack(
+                withMediaType: .audio,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            ) else {
+                throw RenderExportError.unableToCreateCompositionTrack
+            }
+
+            let sourceDuration = try await asset.load(.duration)
+            try compositionAudioTrack.insertTimeRange(
+                CMTimeRange(start: .zero, duration: min(duration, sourceDuration)),
+                of: audioTrack,
+                at: .zero
+            )
+        }
+    }
+
+    private func displaySize(naturalSize: CGSize, preferredTransform: CGAffineTransform) -> CGSize {
+        let transformed = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+        return CGSize(width: abs(transformed.width), height: abs(transformed.height))
+    }
+
+    private func presetName(for quality: RenderQuality) -> String {
+        switch quality {
+        case .medium:
+            AVAssetExportPresetMediumQuality
+        case .highest:
+            AVAssetExportPresetHighestQuality
+        }
+    }
+
+    private func avFileType(for fileType: RenderFileType) -> AVFileType {
+        switch fileType {
+        case .mp4:
+            .mp4
+        case .mov:
+            .mov
+        }
+    }
+
+    private func export(
+        session: AVAssetExportSession,
+        to destinationURL: URL,
+        as fileType: RenderFileType,
+        progress: RenderProgressHandler?
+    ) async throws {
+        let sessionBox = ExportSessionBox(session)
+        let progressTask = Task { @MainActor in
+            guard let progress else { return }
+            progress(Double(sessionBox.session.progress))
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                progress(Double(sessionBox.session.progress))
+            }
+        }
+        defer { progressTask.cancel() }
+
+        do {
+            try await session.export(to: destinationURL, as: avFileType(for: fileType))
+            await progress?(1)
+        } catch is CancellationError {
+            session.cancelExport()
+            throw RenderExportError.exportCancelled
+        } catch {
+            throw RenderExportError.exportFailed(error.localizedDescription)
+        }
+    }
+}
+
+private final class ExportSessionBox: @unchecked Sendable {
+    let session: AVAssetExportSession
+
+    init(_ session: AVAssetExportSession) {
+        self.session = session
+    }
+}
+
+private struct WebcamOverlayComposition {
+    var instruction: AVMutableVideoCompositionLayerInstruction
+    var geometry: PictureInPictureRenderGeometry
+}
+
+public enum RenderExportError: Error, Equatable, LocalizedError, Sendable {
+    case unableToCreateExportSession
+    case unableToCreateCompositionTrack
+    case missingVideoTrack(String)
+    case exportFailed(String)
+    case exportCancelled
+
+    public var errorDescription: String? {
+        switch self {
+        case .unableToCreateExportSession:
+            "Unable to create an AVFoundation export session."
+        case .unableToCreateCompositionTrack:
+            "Unable to create an AVFoundation composition track."
+        case .missingVideoTrack(let path):
+            "No video track found in \(path)."
+        case .exportFailed(let message):
+            message
+        case .exportCancelled:
+            "Render export was cancelled."
+        }
+    }
+}

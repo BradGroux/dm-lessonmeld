@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>Digital Meld LessonMeld</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundleExecutable</key>
+  <string>DMLessonMeld</string>
+  <key>CFBundleIdentifier</key>
+  <string>io.digitalmeld.dm-lessonmeld</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>LessonMeld</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.0.1</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>dmlm</string>
+      </array>
+      <key>CFBundleTypeName</key>
+      <string>Digital Meld LessonMeld Project</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>io.digitalmeld.lessonmeld.project</string>
+      </array>
+      <key>LSTypeIsPackage</key>
+      <true/>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>io.digitalmeld.lessonmeld.project</string>
+      <key>UTTypeDescription</key>
+      <string>Digital Meld LessonMeld Project</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>com.apple.package</string>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>dmlm</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.productivity</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>15.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Digital Meld LessonMeld records instructor voice tracks locally when microphone capture is enabled.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Digital Meld LessonMeld records webcam picture-in-picture video locally when webcam capture is enabled.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Digital Meld LessonMeld records your selected screen, window, or region locally for lesson capture.</string>
+  <key>NSInputMonitoringUsageDescription</key>
+  <string>Digital Meld LessonMeld uses input monitoring for local teaching interaction metadata when enabled.</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright (c) 2026 Digital Meld. MIT licensed.</string>
+</dict>
+</plist>

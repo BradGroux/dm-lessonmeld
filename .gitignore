@@ -1,0 +1,29 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+
+# dm-lessonmeld local output
+*.dmlm/
+*.dmlesson/
+Exports/
+Caches/
+Diagnostics/
+Secrets/
+*.mov
+*.mp4
+*.m4a
+*.wav
+*.aiff
+*.heic
+*.png
+!Packaging/AppIcon.png
+*.jpg
+*.jpeg
+*.gif
+
+# Keep source-owned documentation assets explicit if they are added later.
+!docs/assets/

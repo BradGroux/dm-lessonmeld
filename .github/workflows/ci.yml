@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Validate packaging
+        run: |
+          plutil -lint Packaging/Info.plist
+          test -f Packaging/AppIcon.icns
+          bash -n scripts/build-app.sh
+          bash -n scripts/package-app.sh
+          bash -n scripts/package-release.sh
+          ruby -c Casks/dm-lessonmeld.rb
+          brew style Casks/dm-lessonmeld.rb
+          scripts/build-app.sh release >/dev/null
+          codesign --verify --strict --deep "Packaging/Digital Meld LessonMeld.app"

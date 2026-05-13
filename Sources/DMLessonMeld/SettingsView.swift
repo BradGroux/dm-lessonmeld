@@ -1,0 +1,905 @@
+import AppKit
+import DMLessonMeldCore
+import SwiftUI
+
+struct LessonMeldSettingsView: View {
+    @ObservedObject var preferences: AppPreferencesController
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
+    @State private var selectedSection: SettingsSection = .capture
+    @State private var draft: LessonMeldPreferences
+    @State private var saveMessage = "Saved"
+
+    init(preferences: AppPreferencesController) {
+        self.preferences = preferences
+        _draft = State(initialValue: preferences.snapshot.normalized())
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            settingsToolbar
+            Divider()
+
+            HStack(spacing: 0) {
+                sidebar
+                    .frame(width: 190)
+                Divider()
+                contentPane
+            }
+        }
+        .frame(minWidth: 900, idealWidth: 920, minHeight: 620, idealHeight: 640)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            refreshDraft()
+            applyPendingSettingsRequest()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lessonMeldOpenSettingsRequested)) { notification in
+            applySettingsRequest(notification)
+        }
+    }
+
+    private var hasUnsavedChanges: Bool {
+        draft.normalized() != preferences.snapshot.normalized()
+    }
+
+    private var settingsToolbar: some View {
+        HStack(spacing: 12) {
+            Button {
+                dismiss()
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+            }
+
+            Spacer()
+
+            Text(hasUnsavedChanges ? "Unsaved changes" : saveMessage)
+                .font(.caption)
+                .foregroundStyle(hasUnsavedChanges ? .orange : .secondary)
+
+            Button("Revert") {
+                refreshDraft()
+            }
+            .disabled(!hasUnsavedChanges)
+
+            Button("Save") {
+                preferences.replace(with: draft)
+                refreshDraft()
+                saveMessage = "Saved"
+            }
+            .keyboardShortcut("s", modifiers: .command)
+            .disabled(!hasUnsavedChanges)
+        }
+        .padding(.top, 54)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
+    }
+
+    private var contentPane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                sectionView
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 24)
+            .frame(maxWidth: 760, alignment: .topLeading)
+        }
+        .frame(minWidth: 540)
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Settings")
+                .font(.title2.weight(.semibold))
+                .padding(.bottom, 12)
+
+            ForEach(SettingsSection.allCases) { section in
+                Button {
+                    selectedSection = section
+                } label: {
+                    Label(section.title, systemImage: section.symbolName)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(selectedSection == section ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+
+            Button("Reset Defaults") {
+                draft = LessonMeldPreferences()
+                saveMessage = "Defaults staged"
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(.top, 16)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+    }
+
+    @ViewBuilder private var sectionView: some View {
+        switch selectedSection {
+        case .general:
+            generalSection
+        case .capture:
+            captureSection
+        case .annotations:
+            annotationsSection
+        case .export:
+            exportSection
+        case .community:
+            communitySection
+        case .privacy:
+            privacySection
+        case .shortcuts:
+            shortcutsSection
+        case .diagnostics:
+            diagnosticsSection
+        }
+    }
+
+    private var generalSection: some View {
+        SettingsSectionView(title: "General", subtitle: "Default project and template behavior.") {
+            Picker("Appearance", selection: binding(\.general.appearance)) {
+                ForEach(AppAppearance.allCases) { appearance in
+                    Text(appearance.rawValue.capitalized).tag(appearance)
+                }
+            }
+            TextField("Project folder", text: binding(\.general.defaultProjectDirectory))
+            TextField("Default template", text: binding(\.general.defaultTemplateID))
+            Toggle("Open main window at launch", isOn: binding(\.general.showMainWindowAtLaunch))
+            Toggle("Open annotation overlay at launch", isOn: binding(\.general.showAnnotationOverlayAtLaunch))
+            Toggle("Show hover tooltips throughout the app", isOn: binding(\.capture.showRecorderControlTooltips))
+        }
+    }
+
+    private var captureSection: some View {
+        SettingsSectionView(title: "Capture", subtitle: "Recording defaults for teaching and workshop sessions.") {
+            Stepper("Quick record duration: \(formatDuration(draft.capture.quickRecordDurationSeconds))", value: intBinding(\.capture.quickRecordDurationSeconds), in: 1...3_600, step: 30)
+            Picker("Screen frame rate", selection: intBinding(\.capture.fps)) {
+                Text("30 fps").tag(30)
+                Text("60 fps").tag(60)
+            }
+            Toggle("Include cursor", isOn: binding(\.capture.includeCursor))
+            Toggle("Capture click and shortcut metadata", isOn: binding(\.capture.captureInteractionMetadata))
+            Toggle("Capture microphone by default", isOn: binding(\.capture.captureMicrophone))
+            Picker("Microphone input", selection: optionalStringBinding(\.capture.microphoneDeviceID)) {
+                Text("System Default").tag(String?.none)
+                ForEach(MicrophoneCaptureDevices.available, id: \.id) { device in
+                    Text(device.name).tag(Optional(device.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(!draft.capture.captureMicrophone)
+            Toggle("Capture webcam by default", isOn: binding(\.capture.captureWebcam))
+            Toggle("Capture system audio by default", isOn: binding(\.capture.captureSystemAudio))
+            Toggle("Remember last region", isOn: binding(\.capture.rememberLastRegion))
+            Toggle("Hide recorder controls from screenshots and recordings", isOn: binding(\.capture.hideRecorderControlsFromCapture))
+
+            Divider()
+
+            Label("Webcam", systemImage: "web.camera")
+                .font(.headline)
+            Picker("Webcam resolution", selection: binding(\.capture.cameraResolution)) {
+                ForEach(CameraResolution.allCases) { resolution in
+                    Text(resolution.rawValue).tag(resolution)
+                }
+            }
+            Picker("Webcam frame rate", selection: intBinding(\.capture.webcamFPS)) {
+                ForEach(CapturePreferences.supportedWebcamFPS, id: \.self) { fps in
+                    Text("\(fps) fps").tag(fps)
+                }
+            }
+            Picker("Webcam format", selection: binding(\.capture.webcamAspectRatio)) {
+                ForEach(WebcamAspectRatio.allCases) { aspectRatio in
+                    Text(aspectRatio.displayName).tag(aspectRatio)
+                }
+            }
+            .disabled(draft.capture.webcamFrameShape == .circle)
+            .opacity(draft.capture.webcamFrameShape == .circle ? 0.48 : 1)
+            .help(draft.capture.webcamFrameShape == .circle ? "Circle webcam frames always use a 1:1 crop." : "Choose the webcam frame format.")
+            Picker("Webcam shape", selection: binding(\.capture.webcamFrameShape)) {
+                ForEach(WebcamFrameShape.allCases) { shape in
+                    Text(shape.displayName).tag(shape)
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Webcam size")
+                    Spacer()
+                    Text("\(Int((draft.capture.webcamRelativeSize * 100).rounded()))%")
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: doubleBinding(\.capture.webcamRelativeSize), in: 0.10...0.40)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Corner radius")
+                    Spacer()
+                    Text("\(Int(draft.capture.webcamCornerRadius.rounded())) px")
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: doubleBinding(\.capture.webcamCornerRadius), in: 0...64)
+                    .disabled(draft.capture.webcamFrameShape == .circle)
+            }
+            Toggle("Mirror webcam", isOn: binding(\.capture.webcamMirror))
+            Toggle("Show webcam border", isOn: binding(\.capture.webcamBorderEnabled))
+            Toggle("Show webcam shadow", isOn: binding(\.capture.webcamShadowEnabled))
+            Toggle("Show floating webcam preview while recording", isOn: binding(\.capture.showFloatingWebcamPreview))
+        }
+    }
+
+    private var annotationsSection: some View {
+        SettingsSectionView(title: "Annotations", subtitle: "Shared defaults for the embedded overlay and lesson annotation tools.") {
+            Picker("Default tool", selection: binding(\.annotation.defaultTool)) {
+                ForEach(AnnotationToolID.allCases) { tool in
+                    Text(tool.rawValue.capitalized).tag(tool)
+                }
+            }
+
+            Divider()
+
+            Text("Default Stroke")
+                .font(.headline)
+            AnnotationColorRow(
+                title: "Default color",
+                hex: binding(\.annotation.defaultColorHex),
+                canMakeDefault: false,
+                canRemove: false,
+                onMakeDefault: {},
+                onRemove: {}
+            )
+            Stepper("Line width: \(Int(draft.annotation.lineWidth))", value: doubleBinding(\.annotation.lineWidth), in: 1...24)
+            Toggle("Show toolbar when overlay opens", isOn: binding(\.annotation.toolbarVisibleOnOverlayOpen))
+
+            Divider()
+
+            HStack {
+                Text("Palette")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    draft.annotation.paletteHexColors.append("#FFFFFF")
+                    saveMessage = "Unsaved"
+                } label: {
+                    Label("Add Color", systemImage: "plus")
+                }
+                Button("Reset Palette") {
+                    draft.annotation.paletteHexColors = AnnotationPreferences().paletteHexColors
+                    saveMessage = "Unsaved"
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(draft.annotation.paletteHexColors.indices), id: \.self) { index in
+                    AnnotationColorRow(
+                        title: "Color \(index + 1)",
+                        hex: paletteColorBinding(index),
+                        canMakeDefault: draft.annotation.paletteHexColors[index].normalizedHexString != draft.annotation.defaultColorHex.normalizedHexString,
+                        canRemove: draft.annotation.paletteHexColors.count > 1,
+                        onMakeDefault: {
+                            if let normalized = draft.annotation.paletteHexColors[index].normalizedHexString {
+                                draft.annotation.defaultColorHex = normalized
+                                saveMessage = "Unsaved"
+                            }
+                        },
+                        onRemove: {
+                            if draft.annotation.paletteHexColors.indices.contains(index), draft.annotation.paletteHexColors.count > 1 {
+                                draft.annotation.paletteHexColors.remove(at: index)
+                                saveMessage = "Unsaved"
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private var exportSection: some View {
+        SettingsSectionView(title: "Export", subtitle: "Renderer and LearnHouse package defaults.") {
+            Picker("Render quality", selection: binding(\.export.defaultRenderQuality)) {
+                ForEach(RenderQualityID.allCases) { quality in
+                    Text(quality.rawValue.capitalized).tag(quality)
+                }
+            }
+            Picker("File type", selection: binding(\.export.defaultFileType)) {
+                ForEach(RenderFileTypeID.allCases) { fileType in
+                    Text(fileType.rawValue.uppercased()).tag(fileType)
+                }
+            }
+            Toggle("Build LearnHouse package by default", isOn: binding(\.export.defaultLearnHousePackage))
+            Toggle("Create LearnHouse zip archive", isOn: binding(\.export.createArchiveByDefault))
+            Toggle("Reveal export after completion", isOn: binding(\.export.revealExportAfterCompletion))
+            Toggle("Enable LearnHouse out of the box", isOn: binding(\.integrations.learnHouseEnabled))
+            Toggle("Enable agent manifests", isOn: binding(\.integrations.agentManifestsEnabled))
+        }
+    }
+
+    private var communitySection: some View {
+        SettingsSectionView(title: "Community", subtitle: "Start Small, Think Big links for courses, episodes, and live discussion.") {
+            CommunityLinkButton(
+                title: "SSTB.ai",
+                subtitle: "Community and learning platform for practical AI education.",
+                systemImage: "globe",
+                url: CommunityLinks.sstb
+            )
+
+            CommunityLinkButton(
+                title: "SSTB Podcast Playlist",
+                subtitle: "Start Small, Think Big episodes on YouTube.",
+                systemImage: "play.rectangle",
+                url: CommunityLinks.podcastPlaylist
+            )
+
+            CommunityLinkButton(
+                title: "SSTB Discord",
+                subtitle: "Join the community for agents, automation, and shipping useful things.",
+                systemImage: "bubble.left.and.bubble.right",
+                url: CommunityLinks.discord
+            )
+        }
+    }
+
+    private var privacySection: some View {
+        SettingsSectionView(title: "Privacy", subtitle: "Local-only defaults and Git-safe backup posture.") {
+            Toggle("Local-only mode", isOn: binding(\.privacy.localOnlyMode))
+            Toggle("Allow Git backups for non-sensitive settings/templates", isOn: binding(\.privacy.allowGitBackupsForSettings))
+            TextField("Config backup root", text: binding(\.privacy.configBackupRootPath))
+            Toggle("Exclude media from backups", isOn: binding(\.privacy.excludeMediaFromBackups))
+            Toggle("Include media paths in agent manifests", isOn: binding(\.privacy.includeMediaPathsInAgentManifests))
+            Toggle("Include transcript references in agent manifests", isOn: binding(\.privacy.includeTranscriptReferencesInAgentManifests))
+            ConfigBackupSettingsPanel(preferences: preferences)
+        }
+    }
+
+    private var shortcutsSection: some View {
+        SettingsSectionView(title: "Shortcuts", subtitle: "Stored shortcut preferences for menu commands, command palette actions, and future global handlers.") {
+            ForEach(LessonMeldShortcutAction.allCases) { action in
+                HStack {
+                    Text(action.displayName)
+                        .frame(width: 190, alignment: .leading)
+                    TextField("Shortcut", text: shortcutBinding(action))
+                        .font(.system(.body, design: .monospaced))
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+
+            Text("Current handlers use native menu shortcuts where available; persisted values give the global shortcut controller a stable source of truth.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        let diagnostics = AppDiagnostics.current
+        return SettingsSectionView(title: "Diagnostics", subtitle: "Current launch state and macOS permission health.") {
+            diagnosticsRow("Onboarding", preferences.snapshot.onboardingCompleted ? "Completed" : "Pending")
+            diagnosticsRow("Previous exit", preferences.previousExitWasClean ? "Clean" : "Recovered after abnormal exit")
+            diagnosticsRow("Safe mode", preferences.launchDiagnostics.safeMode ? "Enabled" : "Disabled")
+            diagnosticsRow("Launch count", "\(preferences.launchDiagnostics.launchCount)")
+            diagnosticsRow("Screen Recording", ScreenCapturePermission.isGranted ? "Granted" : "Missing")
+            diagnosticsRow("Microphone", MicrophonePermission.isGranted ? "Granted" : "Missing")
+            diagnosticsRow("Camera", CameraPermission.isGranted ? "Granted" : "Missing")
+            diagnosticsRow("Settings backup", draft.privacy.allowGitBackupsForSettings ? "Allowed for config only" : "Disabled")
+
+            Divider()
+
+            Text("App Readiness")
+                .font(.headline)
+            Text(diagnostics.summary)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(diagnostics.modules) { module in
+                    DiagnosticModuleRow(module: module)
+                }
+            }
+
+            Divider()
+
+            Text("CLI")
+                .font(.headline)
+            Text(diagnostics.cliSummary)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(diagnostics.cliCommands.joined(separator: "\n"))
+                .font(.system(.body, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Open Screen Recording Settings") {
+                NSWorkspace.shared.open(ScreenCapturePermission.privacySettingsURL)
+            }
+            Button("Open Microphone Settings") {
+                NSWorkspace.shared.open(MicrophonePermission.privacySettingsURL)
+            }
+            Button("Open Camera Settings") {
+                NSWorkspace.shared.open(CameraPermission.privacySettingsURL)
+            }
+            Button("Review Onboarding") {
+                openWindow(id: "onboarding")
+                NSApplication.shared.activate()
+            }
+        }
+    }
+
+    private func diagnosticsRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<LessonMeldPreferences, Value>) -> Binding<Value> {
+        Binding {
+            draft[keyPath: keyPath]
+        } set: { value in
+            draft[keyPath: keyPath] = value
+            saveMessage = "Unsaved"
+        }
+    }
+
+    private func intBinding(_ keyPath: WritableKeyPath<LessonMeldPreferences, Int>) -> Binding<Int> {
+        binding(keyPath)
+    }
+
+    private func doubleBinding(_ keyPath: WritableKeyPath<LessonMeldPreferences, Double>) -> Binding<Double> {
+        binding(keyPath)
+    }
+
+    private func optionalStringBinding(_ keyPath: WritableKeyPath<LessonMeldPreferences, String?>) -> Binding<String?> {
+        Binding {
+            draft[keyPath: keyPath]
+        } set: { value in
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            draft[keyPath: keyPath] = trimmed.isEmpty ? nil : trimmed
+            saveMessage = "Unsaved"
+        }
+    }
+
+    private func formatDuration(_ seconds: Int) -> String {
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        if minutes == 0 {
+            return "\(seconds)s"
+        }
+        if remainder == 0 {
+            return "\(minutes)m"
+        }
+        return "\(minutes)m \(remainder)s"
+    }
+
+    private func shortcutBinding(_ action: LessonMeldShortcutAction) -> Binding<String> {
+        Binding {
+            draft.shortcuts[action] ?? ""
+        } set: { value in
+            draft.shortcuts[action] = value
+            saveMessage = "Unsaved"
+        }
+    }
+
+    private func paletteColorBinding(_ index: Int) -> Binding<String> {
+        Binding {
+            guard draft.annotation.paletteHexColors.indices.contains(index) else {
+                return "#FFFFFF"
+            }
+            return draft.annotation.paletteHexColors[index]
+        } set: { value in
+            guard draft.annotation.paletteHexColors.indices.contains(index) else { return }
+            draft.annotation.paletteHexColors[index] = value
+            saveMessage = "Unsaved"
+        }
+    }
+
+    private func refreshDraft() {
+        draft = preferences.snapshot.normalized()
+        saveMessage = "Saved"
+    }
+
+    private func applyPendingSettingsRequest() {
+        guard let rawValue = LessonMeldSettingsRequest.pendingSectionRawValue,
+              let section = SettingsSection(rawValue: rawValue)
+        else {
+            return
+        }
+
+        selectedSection = section
+        LessonMeldSettingsRequest.pendingSectionRawValue = nil
+    }
+
+    private func applySettingsRequest(_ notification: Notification) {
+        if let rawValue = notification.userInfo?[LessonMeldSettingsRequest.sectionUserInfoKey] as? String,
+           let section = SettingsSection(rawValue: rawValue) {
+            selectedSection = section
+            return
+        }
+
+        applyPendingSettingsRequest()
+    }
+}
+
+private struct AnnotationColorRow: View {
+    var title: String
+    @Binding var hex: String
+    var canMakeDefault: Bool
+    var canRemove: Bool
+    var onMakeDefault: () -> Void
+    var onRemove: () -> Void
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                rowContent
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                rowContent
+            }
+        }
+    }
+
+    private var rowContent: some View {
+        Group {
+            Text(title)
+                .frame(width: 120, alignment: .leading)
+            ColorSwatch(hex: hex)
+            ColorPicker("", selection: colorBinding, supportsOpacity: false)
+                .labelsHidden()
+                .frame(width: 44)
+            TextField("Hex", text: $hex)
+                .font(.system(.body, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 110)
+
+            if canMakeDefault {
+                Button("Default") {
+                    onMakeDefault()
+                }
+            }
+
+            if canRemove {
+                Button {
+                    onRemove()
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Remove \(title)")
+            }
+        }
+    }
+
+    private var colorBinding: Binding<Color> {
+        Binding {
+            Color(hex: hex) ?? Color(nsColor: .textColor)
+        } set: { color in
+            if let nextHex = color.hexString {
+                hex = nextHex
+            }
+        }
+    }
+}
+
+private struct ColorSwatch: View {
+    var hex: String
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(Color(hex: hex) ?? .clear)
+            .frame(width: 30, height: 24)
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(.secondary.opacity(0.55), lineWidth: 1)
+            }
+            .accessibilityLabel(hex.normalizedHexString ?? "Invalid color")
+    }
+}
+
+private extension String {
+    var normalizedHexString: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
+        guard raw.count == 6, raw.allSatisfy({ $0.isHexDigit }) else {
+            return nil
+        }
+        return "#\(raw.uppercased())"
+    }
+}
+
+private extension Color {
+    init?(hex: String) {
+        guard let normalized = hex.normalizedHexString else {
+            return nil
+        }
+        let raw = String(normalized.dropFirst())
+        guard let value = UInt32(raw, radix: 16) else {
+            return nil
+        }
+
+        self.init(nsColor: NSColor(
+            calibratedRed: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        ))
+    }
+
+    var hexString: String? {
+        guard let color = NSColor(self).usingColorSpace(.sRGB) else {
+            return nil
+        }
+        let red = Int((color.redComponent * 255).rounded())
+        let green = Int((color.greenComponent * 255).rounded())
+        let blue = Int((color.blueComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X", red, green, blue)
+    }
+}
+
+private struct ConfigBackupSettingsPanel: View {
+    @ObservedObject var preferences: AppPreferencesController
+    @State private var message = "Writes current settings to JSON before committing safe config files."
+    @State private var isWorking = false
+    @State private var messageIsError = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+
+            Text("Config Backup")
+                .font(.headline)
+
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(messageIsError ? .red : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    backupButtons
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    backupButtons
+                }
+            }
+            .disabled(isWorking || !preferences.snapshot.privacy.allowGitBackupsForSettings)
+        }
+    }
+
+    private var backupButtons: some View {
+        Group {
+            Button("Plan") {
+                run { try planBackup() }
+            }
+            Button("Init Repo") {
+                run { try initRepository() }
+            }
+            Button("Write Settings JSON") {
+                run { try writeSettingsSnapshot() }
+            }
+            Button("Commit Backup") {
+                run { try commitBackup() }
+            }
+            .keyboardShortcut("b", modifiers: [.option, .command])
+        }
+    }
+
+    private func run(_ action: () throws -> String) {
+        isWorking = true
+        messageIsError = false
+        message = "Working..."
+
+        do {
+            message = try action()
+            messageIsError = false
+        } catch {
+            message = error.localizedDescription
+            messageIsError = true
+        }
+        isWorking = false
+    }
+
+    private func planBackup() throws -> String {
+        let plan = try ConfigBackupPlanner().plan(rootURL: rootURL())
+        return "Plan includes \(plan.includePaths.count) files and excludes \(plan.excludedPaths.count) files."
+    }
+
+    private func initRepository() throws -> String {
+        let status = try ConfigGitBackupManager().ensureRepository(rootURL: rootURL())
+        return status.repositoryInitialized
+            ? "Local Git backup repo is initialized with \(status.changedPaths.count) pending files."
+            : "Local Git backup repo is not initialized."
+    }
+
+    private func writeSettingsSnapshot() throws -> String {
+        let url = try writeSettingsFile()
+        return "Wrote \(url.path)."
+    }
+
+    private func commitBackup() throws -> String {
+        _ = try writeSettingsFile()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let result = try ConfigGitBackupManager().commit(
+            rootURL: rootURL(),
+            message: "Backup Digital Meld LessonMeld config \(formatter.string(from: Date()))"
+        )
+        if result.didCommit {
+            return "Committed \(result.committedPaths.count) files as \(result.commitHash ?? "unknown")."
+        }
+        return result.message
+    }
+
+    private func writeSettingsFile() throws -> URL {
+        let fileURL = rootURL().appendingPathComponent("settings/preferences.json")
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try DMLessonJSON.encoder().encode(preferences.snapshot.normalized())
+        try data.write(to: fileURL, options: [.atomic])
+        return fileURL
+    }
+
+    private func rootURL() -> URL {
+        let expanded = NSString(string: preferences.snapshot.privacy.configBackupRootPath).expandingTildeInPath
+        return URL(fileURLWithPath: expanded, isDirectory: true)
+    }
+}
+
+private struct DiagnosticModuleRow: View {
+    let module: DiagnosticModule
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: module.symbolName)
+                .font(.title3)
+                .foregroundStyle(module.state.tint)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(module.name)
+                        .font(.headline)
+                    Text(module.state.label)
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(module.state.tint.opacity(0.15), in: Capsule())
+                        .foregroundStyle(module.state.tint)
+                }
+
+                Text(module.detail)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct CommunityLinkButton: View {
+    var title: String
+    var subtitle: String
+    var systemImage: String
+    var url: URL
+
+    var body: some View {
+        Button {
+            NSWorkspace.shared.open(url)
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.title3)
+                    .frame(width: 28)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.headline)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: "arrow.up.forward.square")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open \(title)")
+        .help(url.absoluteString)
+    }
+}
+
+private enum CommunityLinks {
+    static let sstb = URL(string: "https://www.sstb.ai")!
+    static let podcastPlaylist = URL(string: "https://www.youtube.com/playlist?list=PLw2ImU79nlNNgAbYOkdMpSPaqYgK2CDLR")!
+    static let discord = URL(string: "https://discord.gg/Gmfkm7QVSF")!
+}
+
+private struct SettingsSectionView<Content: View>: View {
+    var title: String
+    var subtitle: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.largeTitle.weight(.semibold))
+                Text(subtitle)
+                    .foregroundStyle(.secondary)
+            }
+
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    content
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+private enum SettingsSection: String, CaseIterable, Identifiable {
+    case general
+    case capture
+    case annotations
+    case export
+    case community
+    case privacy
+    case shortcuts
+    case diagnostics
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .capture: "Capture"
+        case .annotations: "Annotations"
+        case .export: "Export"
+        case .community: "Community"
+        case .privacy: "Privacy"
+        case .shortcuts: "Shortcuts"
+        case .diagnostics: "Diagnostics"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .general: "gearshape"
+        case .capture: "record.circle"
+        case .annotations: "pencil.tip"
+        case .export: "square.and.arrow.up"
+        case .community: "person.2"
+        case .privacy: "lock.shield"
+        case .shortcuts: "keyboard"
+        case .diagnostics: "stethoscope"
+        }
+    }
+}
+
+private extension LessonMeldShortcutAction {
+    var displayName: String {
+        switch self {
+        case .showSettings: "Show Settings"
+        case .showOnboarding: "Show Onboarding"
+        case .openAnnotationOverlay: "Open Annotation Overlay"
+        case .quickRecord: "Quick Record"
+        case .stopRecording: "Stop Recording"
+        case .quickColor1: "Quick Color 1"
+        case .quickColor2: "Quick Color 2"
+        case .quickColor3: "Quick Color 3"
+        case .quickColor4: "Quick Color 4"
+        }
+    }
+}
