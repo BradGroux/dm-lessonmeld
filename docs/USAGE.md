@@ -29,7 +29,7 @@ You can continue without optional permissions and enable them later from **Setti
 ## Record a Lesson
 
 1. Open LessonMeld.
-2. Click **Record** in the sidebar.
+2. Click **Record** in the sidebar to capture immediately, or click **Edit** / **Edit Lesson** to create an editable draft before recording.
 3. Choose the capture target from the floating recorder.
 4. Confirm camera, microphone, annotation, and audio choices.
 5. Press the record button.

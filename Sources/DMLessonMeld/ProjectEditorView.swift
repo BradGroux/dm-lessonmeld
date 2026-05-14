@@ -114,6 +114,13 @@ struct ProjectEditorView: View {
             }
 
             Button {
+                model.startDraftProject(preferences.snapshot)
+            } label: {
+                Label("Edit", systemImage: "square.and.pencil")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button {
                 if annotationOverlay.isPresented {
                     annotationOverlay.close()
                 } else {
@@ -643,7 +650,7 @@ struct ProjectEditorView: View {
     }
 
     private var startLessonPanel: some View {
-        EditorPanel(title: "Start a Lesson", subtitle: "Record into a local lesson project, then review, render, and package it.") {
+        EditorPanel(title: "Start a Lesson", subtitle: "Record into a local lesson project, or start editing a draft before you capture media.") {
             HStack(spacing: 10) {
                 Button {
                     quickRecorder.presentControlBar(preferences: preferences)
@@ -653,15 +660,21 @@ struct ProjectEditorView: View {
                 .buttonStyle(.borderedProminent)
 
                 Button {
+                    model.startDraftProject(preferences.snapshot)
+                } label: {
+                    Label("Edit Lesson", systemImage: "square.and.pencil")
+                }
+
+                Button {
                     model.newProject(preferences.snapshot)
                 } label: {
-                    Label("New Project", systemImage: "doc.badge.plus")
+                    Label("New Project...", systemImage: "doc.badge.plus")
                 }
 
                 Button {
                     model.openProject()
                 } label: {
-                    Label("Open Project", systemImage: "folder")
+                    Label("Open Lesson", systemImage: "folder")
                 }
 
                 if quickRecorder.isRecording {
@@ -697,7 +710,7 @@ struct ProjectEditorView: View {
                         .truncationMode(.middle)
                 }
             } else {
-                Text("The recorder opens as a floating control bar with display, window, area, camera, microphone, annotation, and audio controls.")
+                Text("Edit Lesson creates a local draft bundle immediately. You can fill in lesson details, markers, annotations, and later record into the same project.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -705,7 +718,7 @@ struct ProjectEditorView: View {
     }
 
     private var workflowPanel: some View {
-        EditorPanel(title: "Workflow", subtitle: "The normal path for a curriculum recording.") {
+        EditorPanel(title: "Workflow", subtitle: "The normal path for a curriculum lesson.") {
             VStack(alignment: .leading, spacing: 10) {
                 workflowRow("Set Up", "Permissions and defaults", systemImage: "checklist") {
                     openWindow(id: "onboarding")
@@ -714,7 +727,10 @@ struct ProjectEditorView: View {
                 workflowRow("Record", "Screen, webcam, mic, and optional system audio", systemImage: "record.circle") {
                     quickRecorder.presentControlBar(preferences: preferences)
                 }
-                workflowRow("Review", "Open a lesson bundle to edit metadata, cuts, zooms, and annotations", systemImage: "film.stack") {
+                workflowRow("Edit", "Lesson details, markers, cuts, zooms, and annotations", systemImage: "square.and.pencil") {
+                    model.startDraftProject(preferences.snapshot)
+                }
+                workflowRow("Review", "Preview playback and check the lesson before export", systemImage: "film.stack") {
                     model.openProject()
                 }
                 workflowRow("Render", "Export video or package for LearnHouse", systemImage: "shippingbox") {
@@ -820,6 +836,12 @@ struct ProjectEditorView: View {
         EditorPanel(title: "Create or Open a Lesson Project", subtitle: "The editor works directly against local lesson bundles.") {
             HStack {
                 Button {
+                    model.startDraftProject(preferences.snapshot)
+                } label: {
+                    Label("Edit Lesson", systemImage: "square.and.pencil")
+                }
+
+                Button {
                     model.newProject(preferences.snapshot)
                 } label: {
                     Label("New Project...", systemImage: "doc.badge.plus")
@@ -828,7 +850,7 @@ struct ProjectEditorView: View {
                 Button {
                     model.openProject()
                 } label: {
-                    Label("Choose Project...", systemImage: "folder")
+                    Label("Open Lesson...", systemImage: "folder")
                 }
             }
             Text("New projects use the configured lesson template and stay local from the first manifest.")
@@ -1755,6 +1777,30 @@ private final class ProjectEditorModel: ObservableObject {
 
     var formattedDuration: String {
         previewDurationSeconds > 0 ? Self.formatClock(previewDurationSeconds) : "--:--"
+    }
+
+    func startDraftProject(_ preferences: LessonMeldPreferences) {
+        if projectURL != nil {
+            setMessage("The current lesson is ready to edit.")
+            return
+        }
+
+        do {
+            let defaultDirectory = Self.expandedURL(preferences.general.defaultProjectDirectory)
+            try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+            let projectURL = try Self.makeDraftProjectURL(in: defaultDirectory)
+
+            guard let template = LessonTemplateLibrary.template(id: preferences.general.defaultTemplateID)
+                ?? LessonTemplateLibrary.defaultTemplates.first else {
+                throw ProjectEditorError.templateNotFound(preferences.general.defaultTemplateID)
+            }
+
+            try ProjectBundle.writeManifest(template.seedManifest(lessonTitle: "Untitled Lesson"), to: projectURL)
+            loadProject(projectURL)
+            setMessage("Started an editable lesson draft.")
+        } catch {
+            setError(error.localizedDescription)
+        }
     }
 
     func newProject(_ preferences: LessonMeldPreferences) {
@@ -2821,6 +2867,20 @@ private final class ProjectEditorModel: ObservableObject {
 
     private static func projectURLWithExtension(_ url: URL) -> URL {
         url.pathExtension.lowercased() == "dmlm" ? url : url.appendingPathExtension("dmlm")
+    }
+
+    private static func makeDraftProjectURL(in root: URL) throws -> URL {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss-SSS"
+        let baseName = "lesson-draft-\(formatter.string(from: Date()))"
+        for attempt in 0..<20 {
+            let suffix = attempt == 0 ? "" : "-\(String(UUID().uuidString.prefix(8)).lowercased())"
+            let projectURL = root.appendingPathComponent("\(baseName)\(suffix).dmlm", isDirectory: true)
+            if !FileManager.default.fileExists(atPath: projectURL.path) {
+                return projectURL
+            }
+        }
+        return root.appendingPathComponent("\(baseName)-\(UUID().uuidString.lowercased()).dmlm", isDirectory: true)
     }
 
     private static var lessonProjectContentType: UTType? {
