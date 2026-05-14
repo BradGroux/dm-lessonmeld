@@ -18,12 +18,12 @@ Sources/
     Captions/              Transcript and caption sidecar exporters
     Capture/               Screen, region, webcam, cursor/keystroke metadata
     ConfigSync/            Safe local Git config/template backup planning and commits
-    Editor/                Edit decision lists, trim plans, AVFoundation trim export
+    Editor/                Edit decision lists, canvas settings, trim plans, AVFoundation trim export
     LearnHouseExport/      LearnHouse-ready local package generation
     LessonProject/         Project bundle manifest, validation, JSON helpers
     LessonSettings/        Preferences snapshot, onboarding state, safe defaults
     LessonTemplate/        Lesson templates, brand presets, export presets
-    Render/                AVFoundation render plans/export with webcam PiP, cursor/click/shortcut effects, zoom regions, annotations, and transcript captions
+    Render/                AVFoundation render plans/export with styled canvases, webcam PiP, cursor/click/shortcut effects, zoom regions, annotations, and transcript captions
 
 Tests/
   DMLessonMeldCoreTests/   Core regression suite, organized by the same internal folders
@@ -37,7 +37,7 @@ Tests/
 - The app owns the interactive permission/recording path. The CLI also supports direct local capture for automation, smoke tests, and agent workflows.
 - Settings are persisted locally through `UserDefaults` as a versioned `LessonMeldPreferences` snapshot.
 - Settings backup controls can write the current preferences snapshot to `settings/preferences.json`, initialize the local backup repo, preview the plan, and commit through the core config sync folder.
-- The app editor opens local `.dmlm` bundles, inspects manifests, opens video-backed projects in a preview-first timeline workspace, saves `edit-decision-list.json` cut and zoom sidecars, exports those saved cuts, checks render readiness, exports full renders with cursor/click/shortcut/zoom/annotation/caption burn-in and progress/cancel controls, and creates contiguous trim exports through existing core services.
+- The app editor opens local `.dmlm` bundles, inspects manifests, opens video-backed projects in a preview-first timeline workspace, saves `editor-settings.json` canvas settings and `edit-decision-list.json` cut and zoom sidecars, exports those saved cuts, checks render readiness, exports full renders with canvas styling, cursor/click/shortcut/zoom/annotation/caption burn-in and progress/cancel controls, and creates contiguous trim exports through existing core services.
 - Project media URL resolution is centralized through `ProjectBundle.fileURL(for:in:)` so project-relative and explicitly attached absolute files behave the same across app, CLI, render, validation, and LearnHouse package paths.
 - First-run onboarding covers Screen Recording, Microphone, Camera, Accessibility, Input Monitoring, teaching defaults, local-only posture, Git-safe settings backup, LearnHouse, and agent manifests.
 - Git-friendly settings exports use stable JSON object keys, including shortcut values, so backups diff cleanly.

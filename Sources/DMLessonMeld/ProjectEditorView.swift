@@ -383,10 +383,18 @@ struct ProjectEditorView: View {
             }
 
             ZStack {
-                Color.black
+                canvasPreviewBackground
 
                 if let player = model.player {
                     ProjectVideoPlayer(player: player, controlsStyle: .none)
+                        .aspectRatio(model.canvasPreviewAspectRatio, contentMode: .fit)
+                        .padding(model.canvasPreviewPadding)
+                        .clipShape(RoundedRectangle(cornerRadius: model.canvasPreviewCornerRadius))
+                        .shadow(
+                            color: model.canvasShadowEnabled ? .black.opacity(model.canvasShadowOpacity) : .clear,
+                            radius: model.canvasShadowEnabled ? 18 : 0,
+                            y: model.canvasShadowEnabled ? 8 : 0
+                        )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Text("Preview will load after the project screen video is available.")
@@ -445,6 +453,8 @@ struct ProjectEditorView: View {
                     switch editorInspectorTab {
                     case .edits:
                         editorEditsInspector(manifest: manifest)
+                    case .canvas:
+                        editorCanvasInspector(manifest: manifest)
                     case .cuts:
                         editorCutsInspector(manifest: manifest)
                     case .zooms:
@@ -521,6 +531,90 @@ struct ProjectEditorView: View {
             valueLine("Zooms", "\(model.zoomRows.filter(\.isEnabled).count) enabled / \(model.zoomRows.count)")
             valueLine("Markers", "\(model.markerRows.count)")
             valueLine("Annotations", "\(model.annotationItemCount)")
+        }
+    }
+
+    private func editorCanvasInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            inspectorSectionTitle("Canvas")
+
+            Picker("Aspect", selection: $model.canvasAspectRatio) {
+                ForEach(EditorCanvasAspectRatio.allCases) { aspectRatio in
+                    Text(aspectRatio.title).tag(aspectRatio)
+                }
+            }
+
+            if model.canvasAspectRatio == .custom {
+                HStack {
+                    compactNumberField("Width", text: $model.canvasCustomWidth)
+                    compactNumberField("Height", text: $model.canvasCustomHeight)
+                }
+            }
+
+            Picker("Background", selection: $model.canvasBackgroundStyle) {
+                ForEach(EditorCanvasBackgroundStyle.allCases) { style in
+                    Text(style.rawValue.capitalized).tag(style)
+                }
+            }
+
+            if model.canvasBackgroundStyle == .image {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(model.canvasBackgroundImagePath.isEmpty ? "No background image selected." : model.canvasBackgroundImagePath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Button {
+                        model.chooseCanvasBackgroundImage()
+                    } label: {
+                        Label("Choose Image...", systemImage: "photo")
+                    }
+                }
+            } else if model.canvasBackgroundStyle != .none {
+                colorPickerRow("Primary", selection: $model.canvasPrimaryColor)
+                if model.canvasBackgroundStyle == .gradient {
+                    colorPickerRow("Secondary", selection: $model.canvasSecondaryColor)
+                }
+            }
+
+            labeledSlider("Padding", value: $model.canvasPaddingRatio, range: 0...0.35, format: "%.2f")
+            labeledSlider("Inset", value: $model.canvasInsetRatio, range: 0...0.35, format: "%.2f")
+            labeledSlider("Corners", value: $model.canvasCornerRadiusRatio, range: 0...0.18, format: "%.2f")
+
+            Toggle("Shadow", isOn: $model.canvasShadowEnabled)
+                .toggleStyle(.checkbox)
+            if model.canvasShadowEnabled {
+                labeledSlider("Shadow opacity", value: $model.canvasShadowOpacity, range: 0...1, format: "%.2f")
+            }
+
+            Divider()
+
+            inspectorSectionTitle("Crop")
+            Toggle("Enable crop", isOn: $model.canvasCropEnabled)
+                .toggleStyle(.checkbox)
+            if model.canvasCropEnabled {
+                HStack {
+                    compactNumberField("X", text: $model.canvasCropX)
+                    compactNumberField("Y", text: $model.canvasCropY)
+                }
+                HStack {
+                    compactNumberField("Width", text: $model.canvasCropWidth)
+                    compactNumberField("Height", text: $model.canvasCropHeight)
+                }
+            }
+
+            HStack {
+                Button("Save Canvas") {
+                    model.saveEditorSettings()
+                }
+                Button("Reset") {
+                    model.resetCanvasSettings()
+                }
+            }
+
+            Text("Canvas settings are saved in \(EditorSettingsFile.defaultFileName) and applied during render/export.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -997,6 +1091,69 @@ struct ProjectEditorView: View {
             TextField(title, text: text)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.body, design: .monospaced))
+        }
+    }
+
+    private func labeledSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, format: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: format, value.wrappedValue))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range)
+        }
+    }
+
+    private func colorPickerRow(_ title: String, selection: Binding<RGBAColor>) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            ForEach(canvasColorSwatches, id: \.self) { color in
+                Button {
+                    selection.wrappedValue = color
+                } label: {
+                    Circle()
+                        .fill(Color(rgba: color))
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Circle()
+                                .stroke(selection.wrappedValue == color ? Color.accentColor : Color.primary.opacity(0.18), lineWidth: selection.wrappedValue == color ? 2 : 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var canvasColorSwatches: [RGBAColor] {
+        [.black, .white, .purple, .blue, .cyan, .green, .amber, .pink]
+    }
+
+    @ViewBuilder private var canvasPreviewBackground: some View {
+        switch model.canvasBackgroundStyle {
+        case .none:
+            Color.black
+        case .solid:
+            Color(rgba: model.canvasPrimaryColor)
+        case .gradient:
+            LinearGradient(
+                colors: [Color(rgba: model.canvasPrimaryColor), Color(rgba: model.canvasSecondaryColor)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .image:
+            if let image = model.canvasBackgroundImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.black
+            }
         }
     }
 
@@ -2403,6 +2560,7 @@ struct ProjectEditorView: View {
 
 private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     case edits
+    case canvas
     case cuts
     case zooms
     case export
@@ -2412,6 +2570,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .edits: "Edit"
+        case .canvas: "Canvas"
         case .cuts: "Cuts"
         case .zooms: "Zooms"
         case .export: "Export"
@@ -2486,6 +2645,38 @@ private extension View {
     }
 }
 
+private extension Color {
+    init(rgba: RGBAColor) {
+        self.init(
+            red: min(1, max(0, rgba.red)),
+            green: min(1, max(0, rgba.green)),
+            blue: min(1, max(0, rgba.blue)),
+            opacity: min(1, max(0, rgba.alpha))
+        )
+    }
+}
+
+private extension EditorCanvasAspectRatio {
+    var previewAspectRatio: CGFloat? {
+        switch self {
+        case .source:
+            nil
+        case .custom:
+            nil
+        case .square1x1:
+            1
+        case .portrait4x5:
+            4 / 5
+        case .portrait9x16:
+            9 / 16
+        case .standard4x3:
+            4 / 3
+        case .widescreen16x9:
+            16 / 9
+        }
+    }
+}
+
 private struct EditableCutRow: Identifiable, Equatable {
     var id: String
     var startSeconds: String
@@ -2545,6 +2736,24 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var metadataInstructor = ""
     @Published var metadataSummary = ""
     @Published var metadataTags = ""
+    @Published var canvasAspectRatio: EditorCanvasAspectRatio = .source
+    @Published var canvasCustomWidth = "1920"
+    @Published var canvasCustomHeight = "1080"
+    @Published var canvasBackgroundStyle: EditorCanvasBackgroundStyle = .none
+    @Published var canvasPrimaryColor: RGBAColor = .black
+    @Published var canvasSecondaryColor: RGBAColor = .purple
+    @Published var canvasBackgroundImagePath = ""
+    @Published var canvasBackgroundImage: NSImage?
+    @Published var canvasPaddingRatio = 0.0
+    @Published var canvasInsetRatio = 0.0
+    @Published var canvasCornerRadiusRatio = 0.0
+    @Published var canvasShadowEnabled = false
+    @Published var canvasShadowOpacity = 0.34
+    @Published var canvasCropEnabled = false
+    @Published var canvasCropX = "0"
+    @Published var canvasCropY = "0"
+    @Published var canvasCropWidth = "1"
+    @Published var canvasCropHeight = "1"
     @Published var annotationItemCount = 0
     @Published var annotationSidecarStatus = "Not initialized"
     @Published var annotationDraftText = "Annotation note"
@@ -2578,6 +2787,25 @@ private final class ProjectEditorModel: ObservableObject {
 
     var formattedDuration: String {
         previewDurationSeconds > 0 ? Self.formatClock(previewDurationSeconds) : "--:--"
+    }
+
+    var canvasPreviewAspectRatio: CGFloat? {
+        if canvasAspectRatio == .custom,
+           let width = Double(canvasCustomWidth.trimmingCharacters(in: .whitespacesAndNewlines)),
+           let height = Double(canvasCustomHeight.trimmingCharacters(in: .whitespacesAndNewlines)),
+           width > 0,
+           height > 0 {
+            return CGFloat(width / height)
+        }
+        return canvasAspectRatio.previewAspectRatio
+    }
+
+    var canvasPreviewPadding: CGFloat {
+        CGFloat(canvasPaddingRatio) * 120
+    }
+
+    var canvasPreviewCornerRadius: CGFloat {
+        CGFloat(canvasCornerRadiusRatio) * 360
     }
 
     func importVideoForEditing(_ preferences: LessonMeldPreferences) {
@@ -2984,6 +3212,73 @@ private final class ProjectEditorModel: ObservableObject {
         setMessage("Reloaded edit decisions.")
     }
 
+    func saveEditorSettings() {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            let settings = try currentEditorSettings()
+            try EditorSettingsFile.save(settings, toProject: projectURL)
+            renderInspection = nil
+            setMessage("Saved \(EditorSettingsFile.defaultFileName).")
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    func resetCanvasSettings() {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            let settings = EditorSettings()
+            applyEditorSettings(settings)
+            try EditorSettingsFile.save(settings, toProject: projectURL)
+            renderInspection = nil
+            setMessage("Reset canvas settings.")
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    func chooseCanvasBackgroundImage() {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            let panel = NSOpenPanel()
+            panel.title = "Choose Canvas Background Image"
+            panel.canChooseDirectories = false
+            panel.canChooseFiles = true
+            panel.allowsMultipleSelection = false
+            panel.allowedContentTypes = [.png, .jpeg]
+            panel.prompt = "Choose"
+            guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
+
+            let didAccess = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let destinationURL = try Self.uniqueCanvasBackgroundURL(for: sourceURL, projectURL: projectURL)
+            try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            canvasBackgroundStyle = .image
+            canvasBackgroundImagePath = Self.projectFile(
+                for: destinationURL,
+                role: .attachment,
+                projectURL: projectURL,
+                mimeType: Self.imageMimeType(for: destinationURL.pathExtension)
+            ).relativePath
+            canvasBackgroundImage = NSImage(contentsOf: destinationURL)
+            saveEditorSettings()
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
     func saveMetadata() {
         do {
             guard let projectURL else {
@@ -3259,7 +3554,8 @@ private final class ProjectEditorModel: ObservableObject {
             projectURL: projectURL,
             destinationURL: destinationURL,
             preset: RenderPreset(fileType: renderFileType, quality: renderQuality),
-            editDecisionList: editDecisionList
+            editDecisionList: editDecisionList,
+            editorSettings: try EditorSettingsFile.loadIfPresent(fromProject: projectURL)
         )
         if plan.webcamOverlay != nil, manifest.capture == nil {
             plan.webcamOverlay?.placement = Self.webcamPlacement(from: preferences.capture)
@@ -3418,6 +3714,7 @@ private final class ProjectEditorModel: ObservableObject {
         loadMetadataFields(loadedManifest.metadata)
         loadMarkerRows(loadedManifest.markers)
         loadAnnotationStatus(projectURL: url, manifest: loadedManifest)
+        loadEditorSettings(projectURL: url)
         refreshDefaultDestinations()
         configurePreview(projectURL: url, manifest: loadedManifest)
         loadEditDecisions(projectURL: url, manifest: loadedManifest)
@@ -3478,6 +3775,119 @@ private final class ProjectEditorModel: ObservableObject {
             editValidationIssues = []
             setError("Could not load edit decisions: \(error.localizedDescription)")
         }
+    }
+
+    private func loadEditorSettings(projectURL: URL) {
+        do {
+            let settings = try EditorSettingsFile.loadIfPresent(fromProject: projectURL) ?? EditorSettings()
+            applyEditorSettings(settings)
+        } catch {
+            applyEditorSettings(EditorSettings())
+            setError("Could not load \(EditorSettingsFile.defaultFileName): \(error.localizedDescription)")
+        }
+    }
+
+    private func applyEditorSettings(_ settings: EditorSettings) {
+        let canvas = settings.canvas
+        canvasAspectRatio = canvas.aspectRatio
+        canvasCustomWidth = String(canvas.customSize?.width ?? 1920)
+        canvasCustomHeight = String(canvas.customSize?.height ?? 1080)
+        canvasBackgroundStyle = canvas.background.style
+        canvasPrimaryColor = canvas.background.primaryColor
+        canvasSecondaryColor = canvas.background.secondaryColor
+        canvasBackgroundImagePath = canvas.background.imagePath ?? ""
+        loadCanvasBackgroundImage()
+        canvasPaddingRatio = canvas.paddingRatio
+        canvasInsetRatio = canvas.insetRatio
+        canvasCornerRadiusRatio = canvas.cornerRadiusRatio
+        canvasShadowEnabled = canvas.shadow.isEnabled
+        canvasShadowOpacity = canvas.shadow.opacity
+        if let cropRect = canvas.cropRect {
+            canvasCropEnabled = true
+            canvasCropX = Self.formatNormalized(cropRect.x)
+            canvasCropY = Self.formatNormalized(cropRect.y)
+            canvasCropWidth = Self.formatNormalized(cropRect.width)
+            canvasCropHeight = Self.formatNormalized(cropRect.height)
+        } else {
+            canvasCropEnabled = false
+            canvasCropX = "0"
+            canvasCropY = "0"
+            canvasCropWidth = "1"
+            canvasCropHeight = "1"
+        }
+    }
+
+    private func currentEditorSettings() throws -> EditorSettings {
+        let customSize: EditorCanvasCustomSize?
+        if canvasAspectRatio == .custom {
+            customSize = EditorCanvasCustomSize(
+                width: try parseDimension(canvasCustomWidth, label: "Canvas width"),
+                height: try parseDimension(canvasCustomHeight, label: "Canvas height")
+            )
+        } else {
+            customSize = nil
+        }
+
+        let backgroundImagePath: String?
+        if canvasBackgroundStyle == .image {
+            let imagePath = canvasBackgroundImagePath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !imagePath.isEmpty else {
+                throw ProjectEditorError.invalidMetadata("Choose a canvas background image or select a different background mode.")
+            }
+            backgroundImagePath = imagePath
+        } else {
+            backgroundImagePath = nil
+        }
+
+        let cropRect: NormalizedEditRect?
+        if canvasCropEnabled {
+            let x = try parseUnitInterval(canvasCropX, label: "Crop X")
+            let y = try parseUnitInterval(canvasCropY, label: "Crop Y")
+            let width = try parseUnitInterval(canvasCropWidth, label: "Crop width")
+            let height = try parseUnitInterval(canvasCropHeight, label: "Crop height")
+            guard width > 0, height > 0 else {
+                throw ProjectEditorError.invalidNumber("Crop width and height must be greater than zero.")
+            }
+            guard x + width <= 1, y + height <= 1 else {
+                throw ProjectEditorError.invalidNumber("Crop rectangle must fit inside the source video.")
+            }
+            cropRect = NormalizedEditRect(x: x, y: y, width: width, height: height)
+        } else {
+            cropRect = nil
+        }
+
+        return EditorSettings(
+            canvas: EditorCanvasSettings(
+                aspectRatio: canvasAspectRatio,
+                background: EditorCanvasBackground(
+                    style: canvasBackgroundStyle,
+                    primaryColor: canvasPrimaryColor,
+                    secondaryColor: canvasSecondaryColor,
+                    imagePath: backgroundImagePath
+                ),
+                paddingRatio: canvasPaddingRatio,
+                insetRatio: canvasInsetRatio,
+                cornerRadiusRatio: canvasCornerRadiusRatio,
+                shadow: EditorCanvasShadow(
+                    isEnabled: canvasShadowEnabled,
+                    opacity: canvasShadowOpacity
+                ),
+                cropRect: cropRect,
+                customSize: customSize
+            )
+        )
+    }
+
+    private func loadCanvasBackgroundImage() {
+        guard let projectURL, !canvasBackgroundImagePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            canvasBackgroundImage = nil
+            return
+        }
+        let imageURL = ProjectBundle.fileURL(
+            for: ProjectFile(relativePath: canvasBackgroundImagePath, role: .attachment),
+            in: projectURL
+        )
+        canvasBackgroundImage = NSImage(contentsOf: imageURL)
     }
 
     private func loadMetadataFields(_ metadata: LessonMetadata) {
@@ -3773,6 +4183,27 @@ private final class ProjectEditorModel: ObservableObject {
         }
     }
 
+    private static func imageMimeType(for fileExtension: String) -> String {
+        switch fileExtension.lowercased() {
+        case "jpg", "jpeg": "image/jpeg"
+        default: "image/png"
+        }
+    }
+
+    private static func uniqueCanvasBackgroundURL(for sourceURL: URL, projectURL: URL) throws -> URL {
+        let backgroundDirectory = projectURL.appendingPathComponent("backgrounds", isDirectory: true)
+        let sourceExtension = sourceURL.pathExtension.lowercased()
+        let fileExtension = ["jpg", "jpeg", "png"].contains(sourceExtension) ? sourceExtension : "png"
+        for attempt in 0..<100 {
+            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
+            let destinationURL = backgroundDirectory.appendingPathComponent("canvas-background\(suffix).\(fileExtension)")
+            if !FileManager.default.fileExists(atPath: destinationURL.path) {
+                return destinationURL
+            }
+        }
+        return backgroundDirectory.appendingPathComponent("canvas-background-\(UUID().uuidString.lowercased()).\(fileExtension)")
+    }
+
     private static var lessonProjectContentType: UTType? {
         UTType(filenameExtension: "dmlm")
     }
@@ -3850,6 +4281,13 @@ private final class ProjectEditorModel: ObservableObject {
     private func parseUnitInterval(_ value: String, label: String) throws -> Double {
         guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)), number >= 0, number <= 1 else {
             throw ProjectEditorError.invalidNumber("\(label) must be between 0 and 1.")
+        }
+        return number
+    }
+
+    private func parseDimension(_ value: String, label: String) throws -> Int {
+        guard let number = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)), number >= 16 else {
+            throw ProjectEditorError.invalidNumber("\(label) must be at least 16 pixels.")
         }
         return number
     }

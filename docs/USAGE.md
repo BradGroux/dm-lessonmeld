@@ -48,6 +48,7 @@ LessonMeld copies the source video into a local `.dmlm` bundle as the primary sc
 Open a `.dmlm` lesson bundle from the sidebar or Finder. The project editor lets you:
 
 - Edit lesson title, course, module, instructor, tags, and summary
+- Style the final video canvas with aspect ratio, custom dimensions, crop, background, padding, inset, rounded corners, and shadow controls
 - Review media readiness
 - Add and edit markers
 - Save timeline cuts and zoom regions
@@ -57,6 +58,22 @@ Open a `.dmlm` lesson bundle from the sidebar or Finder. The project editor lets
 - Package course exports
 
 Technical bundle details are kept in advanced sections so normal review work stays readable.
+
+## Style the Video Canvas
+
+Open **Edit Video**, then use the **Canvas** inspector tab to control the rendered frame. Canvas settings are saved in `editor-settings.json` inside the current `.dmlm` bundle, so recorded lessons and imported MP4/MOV projects keep their own styling.
+
+Canvas controls affect the final render:
+
+- **Aspect** keeps the source size, uses common formats such as 1:1, 4:5, 9:16, 4:3, or 16:9, or uses custom pixel dimensions.
+- **Background** can be none, a solid color, a gradient, or a project-local PNG/JPEG image.
+- **Padding** adds space around the source video.
+- **Inset** reserves an outer frame before padding is applied.
+- **Corners** rounds the source video frame.
+- **Shadow** adds depth behind the source video.
+- **Crop** trims the source video with normalized `0...1` fields before it is placed on the canvas.
+
+Use **None** for background when the rendered video should remain raw source pixels. Use a solid, gradient, or image background when exporting square, portrait, or padded lesson videos for publishing.
 
 ## Annotate
 

@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreGraphics
 import Foundation
+import ImageIO
 import QuartzCore
 
 public typealias RenderProgressHandler = @MainActor @Sendable (Double) -> Void
@@ -28,12 +29,14 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     ) throws -> RenderPlan {
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
         let editDecisionList = try loadEditDecisionListIfPresent(projectURL: projectURL)
+        let editorSettings = try EditorSettingsFile.loadIfPresent(fromProject: projectURL)
         return try RenderPlan.make(
             manifest: manifest,
             projectURL: projectURL,
             destinationURL: destinationURL,
             preset: preset,
-            editDecisionList: editDecisionList
+            editDecisionList: editDecisionList,
+            editorSettings: editorSettings
         )
     }
 
@@ -45,6 +48,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     ) throws -> RenderInspection {
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
         let editDecisionList = try loadEditDecisionListIfPresent(projectURL: projectURL)
+        let editorSettings = try EditorSettingsFile.loadIfPresent(fromProject: projectURL)
 
         do {
             let plan = try RenderPlan.make(
@@ -52,7 +56,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 projectURL: projectURL,
                 destinationURL: destinationURL,
                 preset: preset,
-                editDecisionList: editDecisionList
+                editDecisionList: editDecisionList,
+                editorSettings: editorSettings
             )
             return RenderInspection(
                 projectURL: projectURL,
@@ -116,7 +121,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
            plan.cursorSource == nil,
            plan.annotationSource == nil,
            plan.captionSource == nil,
-           plan.zoomRegions.isEmpty {
+           plan.zoomRegions.isEmpty,
+           plan.canvas.isDefault {
             return try await exportSingleAsset(plan, progress: progress)
         }
 
@@ -165,17 +171,24 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
         let screenNaturalSize = try await screenVideoTrack.load(.naturalSize)
         let screenPreferredTransform = try await screenVideoTrack.load(.preferredTransform)
-        let renderSize = displaySize(naturalSize: screenNaturalSize, preferredTransform: screenPreferredTransform)
+        let screenDisplay = displayGeometry(naturalSize: screenNaturalSize, preferredTransform: screenPreferredTransform)
+        let canvasGeometry = plan.canvas.renderGeometry(sourceSize: screenDisplay.size)
+        let renderSize = canvasGeometry.renderSize
 
         let instruction = AVMutableVideoCompositionInstruction()
         instruction.timeRange = CMTimeRange(start: .zero, duration: screenDuration)
 
         let screenInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionScreenTrack)
-        screenInstruction.setTransform(screenPreferredTransform, at: .zero)
+        let screenBaseTransform = canvasScreenTransform(
+            orientedTransform: screenDisplay.transform,
+            canvasGeometry: canvasGeometry
+        )
+        screenInstruction.setTransform(screenBaseTransform, at: .zero)
+        screenInstruction.setCropRectangle(canvasGeometry.videoFrame, at: .zero)
         applyZoomRegions(
             plan.zoomRegions,
             to: screenInstruction,
-            baseTransform: screenPreferredTransform,
+            baseTransform: screenBaseTransform,
             renderSize: renderSize,
             duration: screenDuration
         )
@@ -204,6 +217,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             plan: plan,
             videoComposition: videoComposition,
             renderSize: renderSize,
+            canvasGeometry: canvasGeometry,
             webcamGeometry: webcamGeometry
         )
 
@@ -220,6 +234,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         plan: RenderPlan,
         videoComposition: AVMutableVideoComposition,
         renderSize: CGSize,
+        canvasGeometry: EditorCanvasRenderGeometry,
         webcamGeometry: PictureInPictureRenderGeometry?
     ) throws {
         let overlayLayers = try overlayLayers(
@@ -227,14 +242,32 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             renderSize: renderSize,
             webcamGeometry: webcamGeometry
         )
-        guard !overlayLayers.isEmpty else { return }
+        guard !overlayLayers.isEmpty || !plan.canvas.isDefault else { return }
 
         let parentLayer = CALayer()
         parentLayer.frame = CGRect(origin: .zero, size: renderSize)
         parentLayer.isGeometryFlipped = false
 
+        if let backgroundLayer = canvasBackgroundLayer(plan.canvas.background, projectURL: plan.projectURL, renderSize: renderSize) {
+            parentLayer.addSublayer(backgroundLayer)
+        }
+        if let shadowLayer = canvasShadowLayer(plan.canvas, geometry: canvasGeometry, renderSize: renderSize) {
+            parentLayer.addSublayer(shadowLayer)
+        }
+
         let videoLayer = CALayer()
         videoLayer.frame = parentLayer.bounds
+        if canvasGeometry.cornerRadius > 0 {
+            let mask = CAShapeLayer()
+            mask.frame = parentLayer.bounds
+            mask.path = CGPath(
+                roundedRect: canvasGeometry.videoFrame,
+                cornerWidth: canvasGeometry.cornerRadius,
+                cornerHeight: canvasGeometry.cornerRadius,
+                transform: nil
+            )
+            videoLayer.mask = mask
+        }
         parentLayer.addSublayer(videoLayer)
 
         let overlayLayer = CALayer()
@@ -370,6 +403,93 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             let radius = max(0, min(cornerRadius - inset, min(rect.width, rect.height) / 2))
             return CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
         }
+    }
+
+    private func canvasScreenTransform(
+        orientedTransform: CGAffineTransform,
+        canvasGeometry: EditorCanvasRenderGeometry
+    ) -> CGAffineTransform {
+        let crop = canvasGeometry.sourceCropRect
+        let frame = canvasGeometry.videoFrame
+        let scale = min(frame.width / max(crop.width, 1), frame.height / max(crop.height, 1))
+        return orientedTransform
+            .concatenating(CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: frame.minX, y: frame.minY))
+    }
+
+    private func canvasBackgroundLayer(
+        _ background: EditorCanvasBackground,
+        projectURL: URL,
+        renderSize: CGSize
+    ) -> CALayer? {
+        let frame = CGRect(origin: .zero, size: renderSize)
+        switch background.style {
+        case .none:
+            return nil
+        case .solid:
+            let layer = CALayer()
+            layer.frame = frame
+            layer.backgroundColor = cgColor(background.primaryColor, opacity: background.primaryColor.alpha)
+            return layer
+        case .gradient:
+            let layer = CAGradientLayer()
+            layer.frame = frame
+            layer.colors = [
+                cgColor(background.primaryColor, opacity: background.primaryColor.alpha),
+                cgColor(background.secondaryColor, opacity: background.secondaryColor.alpha)
+            ]
+            layer.startPoint = CGPoint(x: 0.05, y: 0.05)
+            layer.endPoint = CGPoint(x: 0.95, y: 0.95)
+            return layer
+        case .image:
+            guard let imagePath = background.imagePath,
+                  let image = loadCanvasBackgroundImage(projectURL: projectURL, imagePath: imagePath) else {
+                return nil
+            }
+            let layer = CALayer()
+            layer.frame = frame
+            layer.contents = image
+            layer.contentsGravity = .resizeAspectFill
+            layer.masksToBounds = true
+            return layer
+        }
+    }
+
+    private func loadCanvasBackgroundImage(projectURL: URL, imagePath: String) -> CGImage? {
+        guard let imageURL = try? ProjectBundle.projectLocalFileURL(
+            for: ProjectFile(relativePath: imagePath, role: .attachment),
+            in: projectURL
+        ) else {
+            return nil
+        }
+        guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil) else {
+            return nil
+        }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    private func canvasShadowLayer(
+        _ canvas: EditorCanvasSettings,
+        geometry: EditorCanvasRenderGeometry,
+        renderSize: CGSize
+    ) -> CALayer? {
+        guard canvas.shadow.isEnabled else { return nil }
+        let layer = CAShapeLayer()
+        layer.frame = geometry.videoFrame
+        layer.path = CGPath(
+            roundedRect: layer.bounds,
+            cornerWidth: geometry.cornerRadius,
+            cornerHeight: geometry.cornerRadius,
+            transform: nil
+        )
+        layer.fillColor = CGColor(red: 0, green: 0, blue: 0, alpha: 0.001)
+        layer.shadowColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+        layer.shadowOpacity = Float(canvas.shadow.opacity)
+        layer.shadowRadius = max(1, min(renderSize.width, renderSize.height) * CGFloat(canvas.shadow.radiusRatio))
+        layer.shadowOffset = CGSize(width: 0, height: min(renderSize.width, renderSize.height) * CGFloat(canvas.shadow.offsetYRatio))
+        layer.shadowPath = layer.path
+        return layer
     }
 
     private func loadAnnotationStore(from url: URL) throws -> AnnotationStore {
@@ -1100,8 +1220,16 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     }
 
     private func displaySize(naturalSize: CGSize, preferredTransform: CGAffineTransform) -> CGSize {
+        displayGeometry(naturalSize: naturalSize, preferredTransform: preferredTransform).size
+    }
+
+    private func displayGeometry(naturalSize: CGSize, preferredTransform: CGAffineTransform) -> DisplayGeometry {
         let transformed = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
-        return CGSize(width: abs(transformed.width), height: abs(transformed.height))
+        let normalize = CGAffineTransform(translationX: -transformed.minX, y: -transformed.minY)
+        return DisplayGeometry(
+            size: CGSize(width: abs(transformed.width), height: abs(transformed.height)),
+            transform: preferredTransform.concatenating(normalize)
+        )
     }
 
     private func presetName(for quality: RenderQuality) -> String {
@@ -1162,6 +1290,11 @@ private final class ExportSessionBox: @unchecked Sendable {
 private struct WebcamOverlayComposition {
     var instruction: AVMutableVideoCompositionLayerInstruction
     var geometry: PictureInPictureRenderGeometry
+}
+
+private struct DisplayGeometry {
+    var size: CGSize
+    var transform: CGAffineTransform
 }
 
 public enum RenderExportError: Error, Equatable, LocalizedError, Sendable {
