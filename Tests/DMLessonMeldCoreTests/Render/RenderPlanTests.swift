@@ -166,6 +166,35 @@ struct RenderPlanTests {
         #expect(issues.map(\.path).contains("missing-webcam.mp4"))
     }
 
+    @Test("Render preset defaults keep legacy JSON readable and gate unsupported formats")
+    func renderPresetDefaultsAndUnsupportedFormatGates() throws {
+        let legacy = try DMLessonJSON.decoder().decode(
+            RenderPreset.self,
+            from: Data(#"{"fileType":"mp4","quality":"highest"}"#.utf8)
+        )
+        #expect(legacy.resolution == .source)
+        #expect(legacy.frameRate == .source)
+        #expect(legacy.codec == .h264)
+        #expect(legacy.hardwareAccelerationEnabled)
+
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let plan = try RenderPlan.make(
+            manifest: ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Unsupported"),
+                media: ProjectMedia(screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo))
+            ),
+            projectURL: projectURL,
+            destinationURL: temp.url.appendingPathComponent("lesson.mp4"),
+            preset: RenderPreset(codec: .proRes, alphaChannelEnabled: true, animatedGIFEnabled: true)
+        )
+
+        let messages = plan.validate().map(\.message)
+        #expect(messages.contains("ProRes export is not implemented yet."))
+        #expect(messages.contains("Alpha-channel export is not implemented yet."))
+        #expect(messages.contains("Animated GIF export is not implemented yet."))
+    }
+
     @Test("Rejects render plans with media paths outside the project")
     func rejectsRenderPlansWithExternalMediaPaths() throws {
         let manifest = ProjectManifest(

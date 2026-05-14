@@ -4,10 +4,80 @@ import Foundation
 public struct RenderPreset: Codable, Equatable, Sendable {
     public var fileType: RenderFileType
     public var quality: RenderQuality
+    public var resolution: RenderResolution
+    public var frameRate: RenderFrameRate
+    public var codec: RenderCodec
+    public var hardwareAccelerationEnabled: Bool
+    public var maxConcurrentExports: Int
+    public var alphaChannelEnabled: Bool
+    public var animatedGIFEnabled: Bool
+    public var proResEnabled: Bool
 
-    public init(fileType: RenderFileType = .mp4, quality: RenderQuality = .highest) {
+    private enum CodingKeys: String, CodingKey {
+        case fileType
+        case quality
+        case resolution
+        case frameRate
+        case codec
+        case hardwareAccelerationEnabled
+        case maxConcurrentExports
+        case alphaChannelEnabled
+        case animatedGIFEnabled
+        case proResEnabled
+    }
+
+    public init(
+        fileType: RenderFileType = .mp4,
+        quality: RenderQuality = .highest,
+        resolution: RenderResolution = .source,
+        frameRate: RenderFrameRate = .source,
+        codec: RenderCodec = .h264,
+        hardwareAccelerationEnabled: Bool = true,
+        maxConcurrentExports: Int = 1,
+        alphaChannelEnabled: Bool = false,
+        animatedGIFEnabled: Bool = false,
+        proResEnabled: Bool = false
+    ) {
         self.fileType = fileType
         self.quality = quality
+        self.resolution = resolution
+        self.frameRate = frameRate
+        self.codec = codec
+        self.hardwareAccelerationEnabled = hardwareAccelerationEnabled
+        self.maxConcurrentExports = min(max(maxConcurrentExports, 1), 8)
+        self.alphaChannelEnabled = alphaChannelEnabled
+        self.animatedGIFEnabled = animatedGIFEnabled
+        self.proResEnabled = proResEnabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            fileType: try container.decodeIfPresent(RenderFileType.self, forKey: .fileType) ?? .mp4,
+            quality: try container.decodeIfPresent(RenderQuality.self, forKey: .quality) ?? .highest,
+            resolution: try container.decodeIfPresent(RenderResolution.self, forKey: .resolution) ?? .source,
+            frameRate: try container.decodeIfPresent(RenderFrameRate.self, forKey: .frameRate) ?? .source,
+            codec: try container.decodeIfPresent(RenderCodec.self, forKey: .codec) ?? .h264,
+            hardwareAccelerationEnabled: try container.decodeIfPresent(Bool.self, forKey: .hardwareAccelerationEnabled) ?? true,
+            maxConcurrentExports: try container.decodeIfPresent(Int.self, forKey: .maxConcurrentExports) ?? 1,
+            alphaChannelEnabled: try container.decodeIfPresent(Bool.self, forKey: .alphaChannelEnabled) ?? false,
+            animatedGIFEnabled: try container.decodeIfPresent(Bool.self, forKey: .animatedGIFEnabled) ?? false,
+            proResEnabled: try container.decodeIfPresent(Bool.self, forKey: .proResEnabled) ?? false
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fileType, forKey: .fileType)
+        try container.encode(quality, forKey: .quality)
+        try container.encode(resolution, forKey: .resolution)
+        try container.encode(frameRate, forKey: .frameRate)
+        try container.encode(codec, forKey: .codec)
+        try container.encode(hardwareAccelerationEnabled, forKey: .hardwareAccelerationEnabled)
+        try container.encode(maxConcurrentExports, forKey: .maxConcurrentExports)
+        try container.encode(alphaChannelEnabled, forKey: .alphaChannelEnabled)
+        try container.encode(animatedGIFEnabled, forKey: .animatedGIFEnabled)
+        try container.encode(proResEnabled, forKey: .proResEnabled)
     }
 }
 
@@ -23,6 +93,60 @@ public enum RenderFileType: String, Codable, CaseIterable, Sendable {
 public enum RenderQuality: String, Codable, CaseIterable, Sendable {
     case medium
     case highest
+}
+
+public enum RenderResolution: String, Codable, CaseIterable, Identifiable, Sendable {
+    case source
+    case p720 = "720p"
+    case p1080 = "1080p"
+    case p1440 = "1440p"
+    case p2160 = "4K"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .source: "Source"
+        case .p720: "720p"
+        case .p1080: "1080p"
+        case .p1440: "1440p"
+        case .p2160: "4K"
+        }
+    }
+}
+
+public enum RenderFrameRate: String, Codable, CaseIterable, Identifiable, Sendable {
+    case source
+    case fps24 = "24"
+    case fps30 = "30"
+    case fps60 = "60"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .source: "Source"
+        case .fps24: "24 fps"
+        case .fps30: "30 fps"
+        case .fps60: "60 fps"
+        }
+    }
+}
+
+public enum RenderCodec: String, Codable, CaseIterable, Identifiable, Sendable {
+    case h264
+    case hevc
+    case proRes = "prores"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .h264: "H.264"
+        case .hevc: "HEVC"
+        case .proRes: "ProRes"
+        }
+    }
 }
 
 public struct RenderMediaSource: Codable, Equatable, Sendable {
