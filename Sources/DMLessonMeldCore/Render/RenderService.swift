@@ -65,6 +65,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 hasWebcamOverlay: plan.webcamOverlay != nil,
                 hasCursorEffects: plan.cursorSource != nil,
                 hasAnnotations: plan.annotationSource != nil,
+                hasOverlays: plan.overlaySource != nil,
                 hasCaptions: plan.captionSource != nil,
                 hasZoomRegions: !plan.zoomRegions.isEmpty,
                 audioSourceCount: plan.audioSources.count,
@@ -78,6 +79,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 hasWebcamOverlay: manifest.media.webcam != nil,
                 hasCursorEffects: manifest.media.cursorMetadata != nil,
                 hasAnnotations: manifest.media.annotations != nil,
+                hasOverlays: manifest.media.overlays != nil,
                 hasCaptions: !manifest.media.transcripts.isEmpty || !manifest.media.captions.isEmpty,
                 hasZoomRegions: !(editDecisionList?.enabledZoomRegions.isEmpty ?? true),
                 audioSourceCount: [manifest.media.microphoneAudio, manifest.media.systemAudio].compactMap { $0 }.count,
@@ -120,6 +122,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
            plan.audioSources.isEmpty,
            plan.cursorSource == nil,
            plan.annotationSource == nil,
+           plan.overlaySource == nil,
            plan.captionSource == nil,
            plan.zoomRegions.isEmpty,
            plan.canvas.isDefault {
@@ -346,6 +349,16 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             ))
         }
 
+        if let overlaySource = plan.overlaySource {
+            let store = try loadOverlayStore(from: overlaySource.url)
+            if store.isVisible {
+                layers.append(contentsOf: store.overlays
+                    .filter(\.isEnabled)
+                    .sorted { $0.zIndex < $1.zIndex }
+                    .map { overlayLayer(for: $0, projectURL: plan.projectURL, renderSize: renderSize) })
+            }
+        }
+
         if let captionSource = plan.captionSource {
             let transcript = try loadTranscript(from: captionSource.url)
             layers.append(contentsOf: transcript.segments.compactMap {
@@ -517,6 +530,14 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         }
         let data = try Data(contentsOf: url)
         return try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+    }
+
+    private func loadOverlayStore(from url: URL) throws -> OverlayStore {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return OverlayStore()
+        }
+        let data = try Data(contentsOf: url)
+        return try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
     }
 
     private func loadTranscript(from url: URL) throws -> TranscriptDocument {
@@ -1019,6 +1040,219 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         animation.isRemovedOnCompletion = true
         container.add(animation, forKey: "caption-\(segment.id)")
         return container
+    }
+
+    private func overlayLayer(for overlay: OverlayItem, projectURL: URL, renderSize: CGSize) -> CALayer {
+        let rect = overlayFrame(overlay.frame, renderSize: renderSize)
+        let layer: CALayer
+
+        switch overlay.kind {
+        case .text:
+            layer = overlayTextLayer(overlay, frame: rect)
+        case .rectangle:
+            layer = overlayShapeLayer(overlay, frame: rect, path: CGPath(roundedRect: CGRect(origin: .zero, size: rect.size), cornerWidth: overlay.style.cornerRadius, cornerHeight: overlay.style.cornerRadius, transform: nil))
+        case .ellipse:
+            layer = overlayShapeLayer(overlay, frame: rect, path: CGPath(ellipseIn: CGRect(origin: .zero, size: rect.size), transform: nil))
+        case .line:
+            layer = overlayShapeLayer(overlay, frame: rect, path: overlayLinePath(in: rect.size, arrow: false))
+        case .arrow:
+            layer = overlayShapeLayer(overlay, frame: rect, path: overlayLinePath(in: rect.size, arrow: true))
+        case .callout:
+            layer = overlayCalloutLayer(overlay, frame: rect)
+        case .image:
+            layer = overlayImageLayer(overlay, projectURL: projectURL, frame: rect)
+        }
+
+        if overlay.rotationDegrees != 0 {
+            layer.setAffineTransform(CGAffineTransform(rotationAngle: CGFloat(overlay.rotationDegrees * .pi / 180)))
+        }
+        if overlay.style.shadowEnabled {
+            layer.shadowColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+            layer.shadowOpacity = 0.28
+            layer.shadowRadius = 10
+            layer.shadowOffset = CGSize(width: 0, height: -4)
+        }
+        applyTiming(to: layer, overlay: overlay)
+        return layer
+    }
+
+    private func overlayTextLayer(_ overlay: OverlayItem, frame: CGRect) -> CALayer {
+        let container = CALayer()
+        container.frame = frame
+
+        if let backgroundColor = overlay.style.backgroundColor {
+            let background = CALayer()
+            background.frame = container.bounds
+            background.backgroundColor = cgColor(backgroundColor, opacity: overlay.opacity)
+            background.cornerRadius = min(CGFloat(overlay.style.cornerRadius), min(frame.width, frame.height) / 2)
+            container.addSublayer(background)
+        }
+
+        let textLayer = CATextLayer()
+        textLayer.string = overlay.style.text
+        textLayer.font = "Helvetica-Bold" as CFTypeRef
+        textLayer.fontSize = CGFloat(overlay.style.fontSize)
+        textLayer.foregroundColor = cgColor(overlay.style.textColor, opacity: overlay.opacity)
+        textLayer.alignmentMode = .center
+        textLayer.contentsScale = 2
+        textLayer.isWrapped = true
+        textLayer.frame = container.bounds.insetBy(dx: 12, dy: 8)
+        container.addSublayer(textLayer)
+
+        return container
+    }
+
+    private func overlayCalloutLayer(_ overlay: OverlayItem, frame: CGRect) -> CALayer {
+        let container = CALayer()
+        container.frame = frame
+
+        let bubblePath = CGMutablePath()
+        let bubbleRect = CGRect(x: 0, y: frame.height * 0.18, width: frame.width, height: frame.height * 0.82)
+        bubblePath.addRoundedRect(in: bubbleRect, cornerWidth: min(18, bubbleRect.height / 2), cornerHeight: min(18, bubbleRect.height / 2))
+        bubblePath.move(to: CGPoint(x: frame.width * 0.22, y: bubbleRect.minY))
+        bubblePath.addLine(to: CGPoint(x: frame.width * 0.1, y: 0))
+        bubblePath.addLine(to: CGPoint(x: frame.width * 0.34, y: bubbleRect.minY))
+
+        let bubble = CAShapeLayer()
+        bubble.frame = container.bounds
+        bubble.path = bubblePath
+        bubble.fillColor = cgColor(overlay.style.backgroundColor ?? RGBAColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.78), opacity: overlay.opacity)
+        bubble.strokeColor = cgColor(overlay.style.strokeColor, opacity: overlay.opacity)
+        bubble.lineWidth = max(1, CGFloat(overlay.style.lineWidth))
+        container.addSublayer(bubble)
+
+        let text = CATextLayer()
+        text.string = overlay.style.text
+        text.font = "Helvetica-Bold" as CFTypeRef
+        text.fontSize = CGFloat(overlay.style.fontSize)
+        text.foregroundColor = cgColor(overlay.style.textColor, opacity: overlay.opacity)
+        text.alignmentMode = .center
+        text.contentsScale = 2
+        text.isWrapped = true
+        text.frame = bubbleRect.insetBy(dx: 12, dy: 8)
+        container.addSublayer(text)
+        return container
+    }
+
+    private func overlayShapeLayer(_ overlay: OverlayItem, frame: CGRect, path: CGPath) -> CAShapeLayer {
+        let layer = CAShapeLayer()
+        layer.frame = frame
+        layer.path = path
+        layer.fillColor = overlay.style.fillColor.map { cgColor($0, opacity: overlay.opacity) }
+        layer.strokeColor = cgColor(overlay.style.strokeColor, opacity: overlay.opacity)
+        layer.lineWidth = CGFloat(overlay.style.lineWidth)
+        layer.lineCap = .round
+        layer.lineJoin = .round
+        return layer
+    }
+
+    private func overlayImageLayer(_ overlay: OverlayItem, projectURL: URL, frame: CGRect) -> CALayer {
+        let layer = CALayer()
+        layer.frame = frame
+        layer.opacity = Float(overlay.opacity)
+        if let imagePath = overlay.style.imagePath,
+           let image = loadOverlayImage(projectURL: projectURL, imagePath: imagePath) {
+            layer.contents = image
+            layer.contentsGravity = .resizeAspect
+            layer.masksToBounds = true
+            layer.cornerRadius = min(CGFloat(overlay.style.cornerRadius), min(frame.width, frame.height) / 2)
+        }
+        return layer
+    }
+
+    private func overlayLinePath(in size: CGSize, arrow: Bool) -> CGPath {
+        let path = CGMutablePath()
+        let start = CGPoint(x: 0, y: size.height * 0.2)
+        let end = CGPoint(x: size.width, y: size.height * 0.8)
+        path.move(to: start)
+        path.addLine(to: end)
+        if arrow {
+            let angle = atan2(end.y - start.y, end.x - start.x)
+            let length: CGFloat = max(12, min(size.width, size.height) * 0.18)
+            let spread: CGFloat = .pi / 7
+            path.move(to: CGPoint(x: end.x - length * cos(angle - spread), y: end.y - length * sin(angle - spread)))
+            path.addLine(to: end)
+            path.addLine(to: CGPoint(x: end.x - length * cos(angle + spread), y: end.y - length * sin(angle + spread)))
+        }
+        return path
+    }
+
+    private func overlayFrame(_ normalizedFrame: NormalizedEditRect, renderSize: CGSize) -> CGRect {
+        let width = CGFloat(normalizedFrame.width) * renderSize.width
+        let height = CGFloat(normalizedFrame.height) * renderSize.height
+        return CGRect(
+            x: CGFloat(normalizedFrame.x) * renderSize.width,
+            y: renderSize.height - CGFloat(normalizedFrame.y + normalizedFrame.height) * renderSize.height,
+            width: width,
+            height: height
+        )
+    }
+
+    private func applyTiming(to layer: CALayer, overlay: OverlayItem) {
+        let start = overlay.timeRange.startSeconds
+        let duration = max(overlay.timeRange.durationSeconds, 0.05)
+        let fadeIn = min(overlay.animation.fadeInSeconds, duration / 2)
+        let fadeOut = min(overlay.animation.fadeOutSeconds, duration / 2)
+        layer.opacity = 0
+
+        let opacity = CAKeyframeAnimation(keyPath: "opacity")
+        let visibleOpacity = NSNumber(value: overlay.opacity)
+        var values: [NSNumber] = [fadeIn > 0 ? 0 : visibleOpacity]
+        var keyTimes: [NSNumber] = [0]
+        if fadeIn > 0 {
+            values.append(visibleOpacity)
+            keyTimes.append(NSNumber(value: fadeIn / duration))
+        }
+        let fadeOutStart = max(0, (duration - fadeOut) / duration)
+        if fadeOutStart > (keyTimes.last?.doubleValue ?? 0) {
+            values.append(visibleOpacity)
+            keyTimes.append(NSNumber(value: fadeOutStart))
+        }
+        if fadeOut > 0 {
+            values.append(0)
+            keyTimes.append(1)
+        } else if (keyTimes.last?.doubleValue ?? 0) < 1 {
+            values.append(visibleOpacity)
+            keyTimes.append(1)
+        }
+        opacity.values = values
+        opacity.keyTimes = keyTimes
+        opacity.beginTime = AVCoreAnimationBeginTimeAtZero + start
+        opacity.duration = duration
+        opacity.fillMode = .removed
+        opacity.isRemovedOnCompletion = true
+        layer.add(opacity, forKey: "overlay-opacity-\(overlay.id)")
+
+        if overlay.animation.preset == .slideUp, fadeIn > 0 {
+            let animation = CABasicAnimation(keyPath: "position.y")
+            animation.fromValue = layer.position.y - 24
+            animation.toValue = layer.position.y
+            animation.beginTime = AVCoreAnimationBeginTimeAtZero + start
+            animation.duration = fadeIn
+            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(animation, forKey: "overlay-slide-\(overlay.id)")
+        } else if overlay.animation.preset == .scaleIn, fadeIn > 0 {
+            let animation = CABasicAnimation(keyPath: "transform.scale")
+            animation.fromValue = 0.92
+            animation.toValue = 1
+            animation.beginTime = AVCoreAnimationBeginTimeAtZero + start
+            animation.duration = fadeIn
+            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(animation, forKey: "overlay-scale-\(overlay.id)")
+        }
+    }
+
+    private func loadOverlayImage(projectURL: URL, imagePath: String) -> CGImage? {
+        guard let imageURL = try? ProjectBundle.projectLocalFileURL(
+            for: ProjectFile(relativePath: imagePath, role: .attachment),
+            in: projectURL
+        ) else {
+            return nil
+        }
+        guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil) else {
+            return nil
+        }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     private func annotationLayer(for annotation: AnnotationItem, renderSize: CGSize) -> CALayer {

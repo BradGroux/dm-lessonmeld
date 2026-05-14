@@ -20,6 +20,7 @@ struct ProjectEditorView: View {
     @State private var editorInspectorTab: EditorInspectorTab = .edits
     @State private var timelineZoom = 1.0
     @State private var activeTimelineDrag: TimelineDragState?
+    @State private var activeOverlayDrag: OverlayPreviewDragState?
     @State private var selectedTimelineItem: TimelineSelection?
 
     var body: some View {
@@ -403,6 +404,7 @@ struct ProjectEditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 zoomFocusOverlay
+                overlayPreviewOverlay
                 cursorPreviewOverlay
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -463,6 +465,8 @@ struct ProjectEditorView: View {
                         editorCutsInspector(manifest: manifest)
                     case .zooms:
                         editorZoomsInspector(manifest: manifest)
+                    case .overlays:
+                        editorOverlaysInspector(manifest: manifest)
                     case .cursor:
                         editorCursorInspector(manifest: manifest)
                     case .export:
@@ -520,6 +524,10 @@ struct ProjectEditorView: View {
                     model.addZoomAtPlayhead()
                     editorInspectorTab = .zooms
                 }
+                Button("Add Overlay") {
+                    model.addOverlayAtPlayhead(kind: .text)
+                    editorInspectorTab = .overlays
+                }
             }
             HStack {
                 Button("Add Marker") {
@@ -535,6 +543,7 @@ struct ProjectEditorView: View {
             inspectorSectionTitle("Counts")
             valueLine("Cuts", "\(model.cutRows.filter(\.isEnabled).count) enabled / \(model.cutRows.count)")
             valueLine("Zooms", "\(model.zoomRows.filter(\.isEnabled).count) enabled / \(model.zoomRows.count)")
+            valueLine("Overlays", "\(model.overlayRows.filter(\.isEnabled).count) enabled / \(model.overlayRows.count)")
             valueLine("Markers", "\(model.markerRows.count)")
             valueLine("Annotations", "\(model.annotationItemCount)")
         }
@@ -773,6 +782,120 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func editorOverlaysInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                inspectorSectionTitle("Overlays")
+                Spacer()
+                Button {
+                    model.addOverlayAtPlayhead(kind: .text)
+                } label: {
+                    Label("Text", systemImage: "textformat")
+                }
+                Button {
+                    model.addOverlayAtPlayhead(kind: .callout)
+                } label: {
+                    Label("Callout", systemImage: "text.bubble")
+                }
+            }
+            HStack {
+                Button {
+                    model.addOverlayAtPlayhead(kind: .rectangle)
+                } label: {
+                    Label("Shape", systemImage: "rectangle")
+                }
+                Button {
+                    model.chooseOverlayImageAtPlayhead()
+                } label: {
+                    Label("Image", systemImage: "photo")
+                }
+            }
+
+            if model.overlayRows.isEmpty {
+                Text("No overlays yet. Add text, shapes, callouts, or images, then drag them on the preview and timeline.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach($model.overlayRows) { $overlay in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Toggle("Enabled", isOn: $overlay.isEnabled)
+                                .toggleStyle(.checkbox)
+                            Picker("Kind", selection: $overlay.kind) {
+                                ForEach(OverlayKind.allCases) { kind in
+                                    Text(kind.title).tag(kind)
+                                }
+                            }
+                            Spacer()
+                            Button {
+                                model.seek(to: secondsValue(overlay.startSeconds) ?? 0)
+                            } label: {
+                                Image(systemName: "playhead.left")
+                            }
+                            .buttonStyle(.borderless)
+                            Button {
+                                model.removeOverlay(id: overlay.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        HStack {
+                            compactNumberField("Start", text: $overlay.startSeconds)
+                            compactNumberField("End", text: $overlay.endSeconds)
+                        }
+                        TextField("Text", text: $overlay.text)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(overlay.kind == .image || overlay.kind == .rectangle || overlay.kind == .ellipse || overlay.kind == .line || overlay.kind == .arrow)
+                        if overlay.kind == .image {
+                            Text(overlay.imagePath.isEmpty ? "No image selected." : overlay.imagePath)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                            Button {
+                                model.chooseImage(forOverlayID: overlay.id)
+                            } label: {
+                                Label("Choose Image...", systemImage: "photo")
+                            }
+                        }
+                        HStack {
+                            numericStringSlider("X", text: $overlay.x, range: 0...1, format: "%.2f")
+                            numericStringSlider("Y", text: $overlay.y, range: 0...1, format: "%.2f")
+                        }
+                        HStack {
+                            numericStringSlider("Width", text: $overlay.width, range: 0.04...1, format: "%.2f")
+                            numericStringSlider("Height", text: $overlay.height, range: 0.04...1, format: "%.2f")
+                        }
+                        HStack {
+                            numericStringSlider("Opacity", text: $overlay.opacity, range: 0...1, format: "%.2f")
+                            numericStringSlider("Text size", text: $overlay.fontSize, range: 10...120, format: "%.0f")
+                        }
+                        HStack {
+                            numericStringSlider("Fade in", text: $overlay.fadeInSeconds, range: 0...2, format: "%.2f")
+                            numericStringSlider("Fade out", text: $overlay.fadeOutSeconds, range: 0...2, format: "%.2f")
+                        }
+                        Picker("Animation", selection: $overlay.animationPreset) {
+                            ForEach(OverlayAnimationPreset.allCases) { preset in
+                                Text(preset.title).tag(preset)
+                            }
+                        }
+                        Stepper("Layer \(overlay.zIndex)", value: $overlay.zIndex, in: 0...99)
+                        colorPickerRow("Text", selection: $overlay.textColor)
+                        colorPickerRow("Fill", selection: $overlay.fillColor)
+                        colorPickerRow("Stroke", selection: $overlay.strokeColor)
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+
+            HStack {
+                Button("Save Overlays") { model.saveOverlays() }
+                Button("Reload") { model.reloadOverlays() }
+            }
+        }
+    }
+
     private func editorCursorInspector(manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             inspectorSectionTitle("Cursor Effects")
@@ -909,6 +1032,7 @@ struct ProjectEditorView: View {
                 inspectorSectionTitle("Render Plan")
                 valueLine("Webcam PiP", inspection.hasWebcamOverlay ? "Yes" : "No")
                 valueLine("Cursor Effects", inspection.hasCursorEffects ? "Yes" : "No")
+                valueLine("Overlays", inspection.hasOverlays ? "Yes" : "No")
                 valueLine("Annotations", inspection.hasAnnotations ? "Yes" : "No")
                 valueLine("Captions", inspection.hasCaptions ? "Yes" : "No")
                 valueLine("Zoom Regions", inspection.hasZoomRegions ? "Yes" : "No")
@@ -968,6 +1092,13 @@ struct ProjectEditorView: View {
                     Label("Zoom", systemImage: "plus.magnifyingglass")
                 }
                 .keyboardShortcut("z", modifiers: [])
+                Button {
+                    model.addOverlayAtPlayhead(kind: .text)
+                    persistTimelineEditChanges(for: .moveOverlay)
+                    editorInspectorTab = .overlays
+                } label: {
+                    Label("Overlay", systemImage: "textformat")
+                }
                 Button {
                     model.addCursorHiddenRangeAtPlayhead()
                     persistTimelineEditChanges(for: .moveCursorHide)
@@ -1032,6 +1163,15 @@ struct ProjectEditorView: View {
                             height: 30
                         ) {
                             zoomTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                        timelineLane(
+                            title: "Overlays",
+                            tint: .green,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 30
+                        ) {
+                            overlayTimelineContent(width: timelineWidth, duration: duration)
                         }
                         timelineLane(
                             title: "Cursor",
@@ -1270,6 +1410,53 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func overlayTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            ForEach(model.overlayRows) { overlay in
+                if let start = secondsValue(overlay.startSeconds), let end = secondsValue(overlay.endSeconds), end > start {
+                    timelineBlock(
+                        title: overlay.kind.title,
+                        tint: .green,
+                        start: start,
+                        end: end,
+                        width: width,
+                        duration: duration,
+                        height: 22,
+                        isEnabled: overlay.isEnabled,
+                        isSelected: selectedTimelineItem == .overlay(overlay.id)
+                    )
+                    .onTapGesture {
+                        selectedTimelineItem = .overlay(overlay.id)
+                        editorInspectorTab = .overlays
+                    }
+                    .gesture(timelineDragGesture(action: .moveOverlay, id: overlay.id, start: start, end: end, width: width, duration: duration))
+                    .overlay(alignment: .leading) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeOverlayStart, id: overlay.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .overlay(alignment: .trailing) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeOverlayEnd, id: overlay.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .contextMenu {
+                        Button("Jump to Overlay") {
+                            model.seek(to: start)
+                        }
+                        Button(overlay.isEnabled ? "Disable Overlay" : "Enable Overlay") {
+                            model.toggleOverlayEnabled(id: overlay.id)
+                            persistTimelineEditChanges(for: .moveOverlay)
+                        }
+                        Button("Remove Overlay", role: .destructive) {
+                            model.removeOverlay(id: overlay.id)
+                            selectedTimelineItem = nil
+                            persistTimelineEditChanges(for: .moveOverlay)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func cursorTimelineContent(width: CGFloat, duration: Double) -> some View {
         ZStack(alignment: .leading) {
             ForEach(model.cursorHiddenRangeRows) { range in
@@ -1393,7 +1580,7 @@ struct ProjectEditorView: View {
                 .frame(width: 10, height: 10)
             Rectangle()
                 .fill(Color.accentColor)
-                .frame(width: 2, height: 184)
+                .frame(width: 2, height: 224)
         }
         .offset(x: x)
     }
@@ -1477,6 +1664,12 @@ struct ProjectEditorView: View {
             model.resizeZoom(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
         case .resizeZoomEnd:
             model.resizeZoom(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
+        case .moveOverlay:
+            model.moveOverlay(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
+        case .resizeOverlayStart:
+            model.resizeOverlay(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
+        case .resizeOverlayEnd:
+            model.resizeOverlay(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
         case .moveCursorHide:
             model.moveCursorHiddenRange(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
         case .resizeCursorHideStart:
@@ -1492,6 +1685,8 @@ struct ProjectEditorView: View {
         switch action {
         case .moveMarker:
             model.saveMarkers()
+        case .moveOverlay, .resizeOverlayStart, .resizeOverlayEnd:
+            model.saveOverlays()
         case .moveCursorHide, .resizeCursorHideStart, .resizeCursorHideEnd:
             model.saveEditorSettings()
         default:
@@ -1508,6 +1703,9 @@ struct ProjectEditorView: View {
         case .zoom(let id):
             model.removeZoom(id: id)
             persistTimelineEditChanges(for: .moveZoom)
+        case .overlay(let id):
+            model.removeOverlay(id: id)
+            persistTimelineEditChanges(for: .moveOverlay)
         case .cursorHide(let id):
             model.removeCursorHiddenRange(id: id)
             persistTimelineEditChanges(for: .moveCursorHide)
@@ -1683,6 +1881,127 @@ struct ProjectEditorView: View {
             }
             .allowsHitTesting(true)
         }
+    }
+
+    @ViewBuilder private var overlayPreviewOverlay: some View {
+        if !model.overlayRows.isEmpty {
+            GeometryReader { proxy in
+                let contentFrame = previewContentFrame(in: proxy.size)
+                ZStack(alignment: .topLeading) {
+                    ForEach(model.overlayRows(at: model.currentTimeSeconds)) { overlay in
+                        let frame = overlayPreviewFrame(overlay, in: contentFrame)
+                        overlayPreview(overlay)
+                            .frame(width: frame.width, height: frame.height)
+                            .position(x: frame.midX, y: frame.midY)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7)
+                                    .stroke(selectedTimelineItem == .overlay(overlay.id) ? Color.accentColor : Color.clear, lineWidth: 2)
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedTimelineItem = .overlay(overlay.id)
+                                editorInspectorTab = .overlays
+                            }
+                            .gesture(
+                                DragGesture(minimumDistance: 1)
+                                    .onChanged { value in
+                                        if activeOverlayDrag?.id != overlay.id {
+                                            activeOverlayDrag = OverlayPreviewDragState(
+                                                id: overlay.id,
+                                                startX: secondsValue(overlay.x) ?? 0,
+                                                startY: secondsValue(overlay.y) ?? 0
+                                            )
+                                        }
+                                        guard let drag = activeOverlayDrag, drag.id == overlay.id else { return }
+                                        model.updateOverlayFrame(
+                                            id: overlay.id,
+                                            x: drag.startX + Double(value.translation.width / max(contentFrame.width, 1)),
+                                            y: drag.startY + Double(value.translation.height / max(contentFrame.height, 1))
+                                        )
+                                    }
+                                    .onEnded { _ in
+                                        activeOverlayDrag = nil
+                                        model.saveOverlays()
+                                    }
+                            )
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func overlayPreview(_ overlay: EditableOverlayRow) -> some View {
+        switch overlay.kind {
+        case .text:
+            Text(overlay.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Title" : overlay.text)
+                .font(.system(size: CGFloat(secondsValue(overlay.fontSize) ?? 34), weight: .bold))
+                .foregroundStyle(Color(rgba: overlay.textColor))
+                .multilineTextAlignment(.center)
+                .padding(8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(rgba: overlay.fillColor), in: RoundedRectangle(cornerRadius: 8))
+                .opacity(secondsValue(overlay.opacity) ?? 1)
+        case .rectangle:
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(rgba: overlay.fillColor).opacity(0.22))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(rgba: overlay.strokeColor), lineWidth: 3))
+                .opacity(secondsValue(overlay.opacity) ?? 1)
+        case .ellipse:
+            Ellipse()
+                .fill(Color(rgba: overlay.fillColor).opacity(0.22))
+                .overlay(Ellipse().stroke(Color(rgba: overlay.strokeColor), lineWidth: 3))
+                .opacity(secondsValue(overlay.opacity) ?? 1)
+        case .line, .arrow:
+            GeometryReader { proxy in
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: proxy.size.height * 0.2))
+                    path.addLine(to: CGPoint(x: proxy.size.width, y: proxy.size.height * 0.8))
+                }
+                .stroke(Color(rgba: overlay.strokeColor), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                .overlay(alignment: .bottomTrailing) {
+                    if overlay.kind == .arrow {
+                        Image(systemName: "arrow.up.right")
+                            .foregroundStyle(Color(rgba: overlay.strokeColor))
+                            .font(.headline.weight(.bold))
+                    }
+                }
+            }
+            .opacity(secondsValue(overlay.opacity) ?? 1)
+        case .callout:
+            Text(overlay.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Callout" : overlay.text)
+                .font(.system(size: CGFloat(secondsValue(overlay.fontSize) ?? 28), weight: .bold))
+                .foregroundStyle(Color(rgba: overlay.textColor))
+                .multilineTextAlignment(.center)
+                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(rgba: overlay.fillColor), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(rgba: overlay.strokeColor), lineWidth: 2))
+                .opacity(secondsValue(overlay.opacity) ?? 1)
+        case .image:
+            if let image = model.overlayImage(for: overlay) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .opacity(secondsValue(overlay.opacity) ?? 1)
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.primary.opacity(0.1))
+                    .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+            }
+        }
+    }
+
+    private func overlayPreviewFrame(_ overlay: EditableOverlayRow, in contentFrame: CGRect) -> CGRect {
+        let x = CGFloat(secondsValue(overlay.x) ?? 0)
+        let y = CGFloat(secondsValue(overlay.y) ?? 0)
+        let width = CGFloat(secondsValue(overlay.width) ?? 0.2)
+        let height = CGFloat(secondsValue(overlay.height) ?? 0.15)
+        return CGRect(
+            x: contentFrame.minX + x * contentFrame.width,
+            y: contentFrame.minY + y * contentFrame.height,
+            width: max(20, width * contentFrame.width),
+            height: max(20, height * contentFrame.height)
+        )
     }
 
     @ViewBuilder private var cursorPreviewOverlay: some View {
@@ -2974,6 +3293,7 @@ struct ProjectEditorView: View {
                 Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 10) {
                     valueRow("Webcam PiP", inspection.hasWebcamOverlay ? "Yes" : "No")
                     valueRow("Cursor Effects", inspection.hasCursorEffects ? "Yes" : "No")
+                    valueRow("Overlays", inspection.hasOverlays ? "Yes" : "No")
                     valueRow("Annotations", inspection.hasAnnotations ? "Yes" : "No")
                     valueRow("Captions", inspection.hasCaptions ? "Yes" : "No")
                     valueRow("Zoom Regions", inspection.hasZoomRegions ? "Yes" : "No")
@@ -3163,6 +3483,7 @@ struct ProjectEditorView: View {
         case .microphoneAudio, .systemAudio: "waveform"
         case .cursorMetadata: "cursorarrow.motionlines"
         case .annotations: "pencil.tip"
+        case .overlays: "square.on.square"
         case .captions, .transcript: "captions.bubble"
         case .thumbnail: "photo"
         case .manifest: "doc.text"
@@ -3188,6 +3509,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     case canvas
     case cuts
     case zooms
+    case overlays
     case cursor
     case export
 
@@ -3199,6 +3521,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
         case .canvas: "Canvas"
         case .cuts: "Cuts"
         case .zooms: "Zooms"
+        case .overlays: "Overlays"
         case .cursor: "Cursor"
         case .export: "Export"
         }
@@ -3208,6 +3531,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
 private enum TimelineSelection: Equatable {
     case cut(String)
     case zoom(String)
+    case overlay(String)
     case cursorHide(String)
     case marker(String)
 }
@@ -3221,6 +3545,9 @@ private enum TimelineDragAction: Equatable {
     case moveZoom
     case resizeZoomStart
     case resizeZoomEnd
+    case moveOverlay
+    case resizeOverlayStart
+    case resizeOverlayEnd
     case moveCursorHide
     case resizeCursorHideStart
     case resizeCursorHideEnd
@@ -3232,6 +3559,12 @@ private struct TimelineDragState {
     var id: String
     var startSeconds: Double
     var endSeconds: Double
+}
+
+private struct OverlayPreviewDragState {
+    var id: String
+    var startX: Double
+    var startY: Double
 }
 
 private struct ProjectVideoPlayer: NSViewRepresentable {
@@ -3354,6 +3687,29 @@ private struct EditableZoomRow: Identifiable, Equatable {
     var isEnabled: Bool
 }
 
+private struct EditableOverlayRow: Identifiable, Equatable {
+    var id: String
+    var kind: OverlayKind
+    var startSeconds: String
+    var endSeconds: String
+    var text: String
+    var x: String
+    var y: String
+    var width: String
+    var height: String
+    var opacity: String
+    var fontSize: String
+    var fadeInSeconds: String
+    var fadeOutSeconds: String
+    var animationPreset: OverlayAnimationPreset
+    var textColor: RGBAColor
+    var fillColor: RGBAColor
+    var strokeColor: RGBAColor
+    var imagePath: String
+    var zIndex: Int
+    var isEnabled: Bool
+}
+
 private protocol EditableTimelineRangeRow {
     var id: String { get }
     var startSeconds: String { get set }
@@ -3362,6 +3718,7 @@ private protocol EditableTimelineRangeRow {
 
 extension EditableCutRow: EditableTimelineRangeRow {}
 extension EditableZoomRow: EditableTimelineRangeRow {}
+extension EditableOverlayRow: EditableTimelineRangeRow {}
 extension EditableTimeRangeRow: EditableTimelineRangeRow {}
 
 private struct EditableMarkerRow: Identifiable, Equatable {
@@ -3390,6 +3747,7 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var isPlaying = false
     @Published var cutRows: [EditableCutRow] = []
     @Published var zoomRows: [EditableZoomRow] = []
+    @Published var overlayRows: [EditableOverlayRow] = []
     @Published var markerRows: [EditableMarkerRow] = []
     @Published var editValidationIssues: [EditValidationIssue] = []
     @Published var renderQuality: RenderQuality = .highest
@@ -3948,6 +4306,125 @@ private final class ProjectEditorModel: ObservableObject {
         zoomRows.first { $0.id == id }
     }
 
+    func addOverlayAtPlayhead(kind: OverlayKind) {
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 4)
+        let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
+        let end = min(start + 4, max(duration, start + 0.5))
+        overlayRows.append(Self.defaultOverlayRow(kind: kind, start: start, end: end, zIndex: overlayRows.count))
+        clearTimelineValidation()
+    }
+
+    func chooseOverlayImageAtPlayhead() {
+        let id = "overlay-\(UUID().uuidString)"
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 4)
+        let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
+        let end = min(start + 4, max(duration, start + 0.5))
+        overlayRows.append(Self.defaultOverlayRow(id: id, kind: .image, start: start, end: end, zIndex: overlayRows.count))
+        if !chooseImage(forOverlayID: id) {
+            overlayRows.removeAll { $0.id == id && $0.imagePath.isEmpty }
+        }
+    }
+
+    func removeOverlay(id: String) {
+        overlayRows.removeAll { $0.id == id }
+        clearTimelineValidation()
+    }
+
+    func moveOverlay(id: String, start: Double, end: Double, duration: Double) {
+        updateRangeRow(id: id, start: start, end: end, duration: duration, rows: &overlayRows)
+    }
+
+    func resizeOverlay(id: String, start: Double, end: Double, duration: Double) {
+        resizeRangeRow(id: id, start: start, end: end, duration: duration, rows: &overlayRows)
+    }
+
+    func toggleOverlayEnabled(id: String) {
+        guard let index = overlayRows.firstIndex(where: { $0.id == id }) else { return }
+        overlayRows[index].isEnabled.toggle()
+        clearTimelineValidation()
+    }
+
+    func updateOverlayFrame(id: String, x: Double? = nil, y: Double? = nil, width: Double? = nil, height: Double? = nil) {
+        guard let index = overlayRows.firstIndex(where: { $0.id == id }) else { return }
+        if let x {
+            overlayRows[index].x = Self.formatNormalized(min(max(x, 0), 1))
+        }
+        if let y {
+            overlayRows[index].y = Self.formatNormalized(min(max(y, 0), 1))
+        }
+        if let width {
+            overlayRows[index].width = Self.formatNormalized(min(max(width, 0.04), 1))
+        }
+        if let height {
+            overlayRows[index].height = Self.formatNormalized(min(max(height, 0.04), 1))
+        }
+    }
+
+    func overlayRows(at seconds: Double) -> [EditableOverlayRow] {
+        overlayRows
+            .filter { row in
+                guard row.isEnabled,
+                      let start = optionalTimelineSeconds(row.startSeconds),
+                      let end = optionalTimelineSeconds(row.endSeconds) else {
+                    return false
+                }
+                return seconds >= start && seconds <= end
+            }
+            .sorted { $0.zIndex < $1.zIndex }
+    }
+
+    @discardableResult
+    func chooseImage(forOverlayID id: String) -> Bool {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            let panel = NSOpenPanel()
+            panel.title = "Choose Overlay Image"
+            panel.canChooseDirectories = false
+            panel.canChooseFiles = true
+            panel.allowsMultipleSelection = false
+            panel.allowedContentTypes = [.png, .jpeg]
+            panel.prompt = "Choose"
+            guard panel.runModal() == .OK, let sourceURL = panel.url else { return false }
+
+            let didAccess = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let destinationURL = try Self.uniqueOverlayAssetURL(for: sourceURL, projectURL: projectURL)
+            try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            guard let index = overlayRows.firstIndex(where: { $0.id == id }) else { return false }
+            overlayRows[index].kind = .image
+            overlayRows[index].imagePath = Self.projectFile(
+                for: destinationURL,
+                role: .attachment,
+                projectURL: projectURL,
+                mimeType: Self.imageMimeType(for: destinationURL.pathExtension)
+            ).relativePath
+            saveOverlays()
+            return true
+        } catch {
+            setError(error.localizedDescription)
+            return false
+        }
+    }
+
+    func overlayImage(for row: EditableOverlayRow) -> NSImage? {
+        guard let projectURL, !row.imagePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let imageURL = ProjectBundle.fileURL(
+            for: ProjectFile(relativePath: row.imagePath, role: .attachment),
+            in: projectURL
+        )
+        return NSImage(contentsOf: imageURL)
+    }
+
     func generateAutoZoomsFromClicks() {
         do {
             guard zoomAutoGenerationEnabled else {
@@ -4120,6 +4597,29 @@ private final class ProjectEditorModel: ObservableObject {
         } catch {
             setError(error.localizedDescription)
         }
+    }
+
+    func saveOverlays() {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            let store = try makeOverlayStore()
+            try OverlayStoreFile.save(store, toProject: projectURL)
+            let updated = try attachOverlayStore(projectURL: projectURL)
+            manifest = updated
+            summary = try ProjectBundle.inspect(at: projectURL)
+            renderInspection = nil
+            setMessage("Saved \(OverlayStoreFile.defaultFileName).")
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    func reloadOverlays() {
+        guard let projectURL, let manifest else { return }
+        loadOverlays(projectURL: projectURL, manifest: manifest)
+        setMessage("Reloaded overlays.")
     }
 
     func exportEditDecisions() {
@@ -4388,6 +4888,7 @@ private final class ProjectEditorModel: ObservableObject {
                     hasWebcamOverlay: plan.webcamOverlay != nil,
                     hasCursorEffects: plan.cursorSource != nil,
                     hasAnnotations: plan.annotationSource != nil,
+                    hasOverlays: plan.overlaySource != nil,
                     hasCaptions: plan.captionSource != nil,
                     hasZoomRegions: !plan.zoomRegions.isEmpty,
                     audioSourceCount: plan.audioSources.count,
@@ -4401,6 +4902,7 @@ private final class ProjectEditorModel: ObservableObject {
                     hasWebcamOverlay: loadedManifest.media.webcam != nil,
                     hasCursorEffects: loadedManifest.media.cursorMetadata != nil,
                     hasAnnotations: loadedManifest.media.annotations != nil,
+                    hasOverlays: loadedManifest.media.overlays != nil,
                     hasCaptions: !loadedManifest.media.transcripts.isEmpty || !loadedManifest.media.captions.isEmpty,
                     hasZoomRegions: Self.projectHasZoomRegions(projectURL),
                     audioSourceCount: [loadedManifest.media.microphoneAudio, loadedManifest.media.systemAudio].compactMap { $0 }.count,
@@ -4682,6 +5184,7 @@ private final class ProjectEditorModel: ObservableObject {
         loadAnnotationStatus(projectURL: url, manifest: loadedManifest)
         loadEditorSettings(projectURL: url)
         loadCursorPreviewMetadata(projectURL: url, manifest: loadedManifest)
+        loadOverlays(projectURL: url, manifest: loadedManifest)
         refreshDefaultDestinations()
         configurePreview(projectURL: url, manifest: loadedManifest)
         loadEditDecisions(projectURL: url, manifest: loadedManifest)
@@ -4708,6 +5211,25 @@ private final class ProjectEditorModel: ObservableObject {
         } catch {
             cursorPreviewMetadata = nil
             setError("Could not load cursor metadata preview: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadOverlays(projectURL: URL, manifest: ProjectManifest) {
+        do {
+            let store: OverlayStore
+            if let overlays = manifest.media.overlays {
+                let url = ProjectBundle.fileURL(for: overlays, in: projectURL)
+                let data = try Data(contentsOf: url)
+                store = try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
+            } else if let existing = try OverlayStoreFile.loadIfPresent(fromProject: projectURL) {
+                store = existing
+            } else {
+                store = OverlayStore()
+            }
+            overlayRows = store.overlays.map(Self.editableOverlayRow(from:))
+        } catch {
+            overlayRows = []
+            setError("Could not load overlays: \(error.localizedDescription)")
         }
     }
 
@@ -5053,6 +5575,73 @@ private final class ProjectEditorModel: ObservableObject {
         try data.write(to: url, options: [.atomic])
     }
 
+    private func makeOverlayStore() throws -> OverlayStore {
+        let overlays = try overlayRows.map { row in
+            let start = try parseSeconds(row.startSeconds, label: "Overlay start")
+            let end = try parseSeconds(row.endSeconds, label: "Overlay end")
+            guard end > start else {
+                throw ProjectEditorError.invalidNumber("Overlay end must be greater than overlay start.")
+            }
+            let x = try parseUnitInterval(row.x, label: "Overlay X")
+            let y = try parseUnitInterval(row.y, label: "Overlay Y")
+            let width = try parseUnitInterval(row.width, label: "Overlay width")
+            let height = try parseUnitInterval(row.height, label: "Overlay height")
+            guard width > 0, height > 0 else {
+                throw ProjectEditorError.invalidNumber("Overlay width and height must be greater than zero.")
+            }
+            guard x + width <= 1, y + height <= 1 else {
+                throw ProjectEditorError.invalidNumber("Overlay frame must fit inside the preview.")
+            }
+            let imagePath = row.imagePath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if row.kind == .image, imagePath.isEmpty {
+                throw ProjectEditorError.invalidMetadata("Image overlays need a selected image.")
+            }
+            let opacity = try parseUnitInterval(row.opacity, label: "Overlay opacity")
+            let fontSize = try parsePositive(row.fontSize, label: "Overlay text size")
+            let fadeIn = try parseNonNegative(row.fadeInSeconds, label: "Overlay fade in")
+            let fadeOut = try parseNonNegative(row.fadeOutSeconds, label: "Overlay fade out")
+            return OverlayItem(
+                id: row.id,
+                kind: row.kind,
+                timeRange: EditTimeRange(startSeconds: start, endSeconds: end),
+                frame: NormalizedEditRect(x: x, y: y, width: width, height: height),
+                opacity: opacity,
+                zIndex: row.zIndex,
+                style: OverlayStyle(
+                    text: row.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? row.kind.title : row.text,
+                    fontSize: fontSize,
+                    textColor: row.textColor,
+                    fillColor: (row.kind == .rectangle || row.kind == .ellipse) ? row.fillColor : nil,
+                    strokeColor: row.strokeColor,
+                    backgroundColor: (row.kind == .text || row.kind == .callout) ? row.fillColor : nil,
+                    imagePath: imagePath.isEmpty ? nil : imagePath
+                ),
+                animation: OverlayAnimation(
+                    fadeInSeconds: fadeIn,
+                    fadeOutSeconds: fadeOut,
+                    preset: row.animationPreset
+                ),
+                isEnabled: row.isEnabled
+            )
+        }
+        return OverlayStore(overlays: overlays)
+    }
+
+    private func attachOverlayStore(projectURL: URL) throws -> ProjectManifest {
+        try ProjectBundle.updateManifest(at: projectURL) { manifest in
+            let storeURL = OverlayStoreFile.url(inProject: projectURL)
+            manifest.media.overlays = Self.projectFile(
+                for: storeURL,
+                role: .overlays,
+                projectURL: projectURL,
+                mimeType: "application/json"
+            )
+            if !manifest.tracks.contains(where: { $0.id == "overlays" }) {
+                manifest.tracks.append(TimelineTrack(id: "overlays", kind: .overlays, displayName: "Overlays"))
+            }
+        }
+    }
+
     private func attachAnnotationStore(projectURL: URL, storeURL: URL) throws -> ProjectManifest {
         try ProjectBundle.updateManifest(at: projectURL) { manifest in
             manifest.media.annotations = Self.projectFile(for: storeURL, role: .annotations, projectURL: projectURL, mimeType: "application/json")
@@ -5288,6 +5877,21 @@ private final class ProjectEditorModel: ObservableObject {
         return backgroundDirectory.appendingPathComponent("canvas-background-\(UUID().uuidString.lowercased()).\(fileExtension)")
     }
 
+    private static func uniqueOverlayAssetURL(for sourceURL: URL, projectURL: URL) throws -> URL {
+        let assetDirectory = projectURL.appendingPathComponent("overlays/assets", isDirectory: true)
+        let sourceExtension = sourceURL.pathExtension.lowercased()
+        let fileExtension = ["jpg", "jpeg", "png"].contains(sourceExtension) ? sourceExtension : "png"
+        let baseName = fileSlug(sourceURL.deletingPathExtension().lastPathComponent)
+        for attempt in 0..<100 {
+            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
+            let destinationURL = assetDirectory.appendingPathComponent("\(baseName)\(suffix).\(fileExtension)")
+            if !FileManager.default.fileExists(atPath: destinationURL.path) {
+                return destinationURL
+            }
+        }
+        return assetDirectory.appendingPathComponent("\(baseName)-\(UUID().uuidString.lowercased()).\(fileExtension)")
+    }
+
     private static var lessonProjectContentType: UTType? {
         UTType(filenameExtension: "dmlm")
     }
@@ -5362,6 +5966,13 @@ private final class ProjectEditorModel: ObservableObject {
         return number
     }
 
+    private func parseNonNegative(_ value: String, label: String) throws -> Double {
+        guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)), number >= 0 else {
+            throw ProjectEditorError.invalidNumber("\(label) must be a non-negative number.")
+        }
+        return number
+    }
+
     private func parseUnitInterval(_ value: String, label: String) throws -> Double {
         guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)), number >= 0, number <= 1 else {
             throw ProjectEditorError.invalidNumber("\(label) must be between 0 and 1.")
@@ -5405,6 +6016,62 @@ private final class ProjectEditorModel: ObservableObject {
         let minutes = wholeSeconds / 60
         let remainder = seconds - Double(minutes * 60)
         return String(format: "%02d:%05.2f", minutes, remainder)
+    }
+
+    private static func defaultOverlayRow(
+        id: String = "overlay-\(UUID().uuidString)",
+        kind: OverlayKind,
+        start: Double,
+        end: Double,
+        zIndex: Int
+    ) -> EditableOverlayRow {
+        EditableOverlayRow(
+            id: id,
+            kind: kind,
+            startSeconds: formatSecondsForEditing(start),
+            endSeconds: formatSecondsForEditing(end),
+            text: kind == .callout ? "Callout" : "Title",
+            x: kind == .text ? "0.22" : "0.30",
+            y: kind == .text ? "0.12" : "0.30",
+            width: kind == .text ? "0.56" : "0.32",
+            height: kind == .text ? "0.14" : "0.20",
+            opacity: "1",
+            fontSize: kind == .callout ? "28" : "34",
+            fadeInSeconds: "0.18",
+            fadeOutSeconds: "0.18",
+            animationPreset: kind == .text ? .slideUp : .none,
+            textColor: .white,
+            fillColor: kind == .rectangle || kind == .ellipse ? .yellow : RGBAColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.68),
+            strokeColor: .yellow,
+            imagePath: "",
+            zIndex: zIndex,
+            isEnabled: true
+        )
+    }
+
+    private static func editableOverlayRow(from overlay: OverlayItem) -> EditableOverlayRow {
+        EditableOverlayRow(
+            id: overlay.id,
+            kind: overlay.kind,
+            startSeconds: formatSecondsForEditing(overlay.timeRange.startSeconds),
+            endSeconds: formatSecondsForEditing(overlay.timeRange.endSeconds),
+            text: overlay.style.text,
+            x: formatNormalized(overlay.frame.x),
+            y: formatNormalized(overlay.frame.y),
+            width: formatNormalized(overlay.frame.width),
+            height: formatNormalized(overlay.frame.height),
+            opacity: formatNormalized(overlay.opacity),
+            fontSize: formatSecondsForEditing(overlay.style.fontSize),
+            fadeInSeconds: formatSecondsForEditing(overlay.animation.fadeInSeconds),
+            fadeOutSeconds: formatSecondsForEditing(overlay.animation.fadeOutSeconds),
+            animationPreset: overlay.animation.preset,
+            textColor: overlay.style.textColor,
+            fillColor: overlay.style.backgroundColor ?? overlay.style.fillColor ?? .yellow,
+            strokeColor: overlay.style.strokeColor,
+            imagePath: overlay.style.imagePath ?? "",
+            zIndex: overlay.zIndex,
+            isEnabled: overlay.isEnabled
+        )
     }
 
     private static func keyboardLabel(for event: KeyboardMetadataEvent) -> String {

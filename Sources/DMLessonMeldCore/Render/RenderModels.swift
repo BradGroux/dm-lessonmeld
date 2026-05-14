@@ -46,6 +46,7 @@ public enum RenderMediaRole: String, Codable, Sendable {
     case systemAudio
     case cursorMetadata
     case annotations
+    case overlays
     case captions
     case transcript
 }
@@ -234,6 +235,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
     public var audioSources: [RenderMediaSource]
     public var cursorSource: RenderMediaSource?
     public var annotationSource: RenderMediaSource?
+    public var overlaySource: RenderMediaSource?
     public var captionSource: RenderMediaSource?
     public var zoomRegions: [ZoomRegion]
     public var markers: [ProjectTimelineMarker]
@@ -249,6 +251,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         audioSources: [RenderMediaSource] = [],
         cursorSource: RenderMediaSource? = nil,
         annotationSource: RenderMediaSource? = nil,
+        overlaySource: RenderMediaSource? = nil,
         captionSource: RenderMediaSource? = nil,
         zoomRegions: [ZoomRegion] = [],
         markers: [ProjectTimelineMarker] = [],
@@ -263,6 +266,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         self.audioSources = audioSources
         self.cursorSource = cursorSource
         self.annotationSource = annotationSource
+        self.overlaySource = overlaySource
         self.captionSource = captionSource
         self.zoomRegions = zoomRegions
         self.markers = markers
@@ -350,6 +354,18 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             annotationSource = nil
         }
 
+        let overlaySource: RenderMediaSource?
+        if let overlays = manifest.media.overlays {
+            overlaySource = RenderMediaSource(
+                role: .overlays,
+                relativePath: overlays.relativePath,
+                url: try ProjectBundle.projectLocalFileURL(for: overlays, in: projectURL),
+                mimeType: overlays.mimeType
+            )
+        } else {
+            overlaySource = nil
+        }
+
         let captionSource = try transcriptRenderSource(manifest: manifest, projectURL: projectURL)
 
         return RenderPlan(
@@ -361,6 +377,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             audioSources: audioSources,
             cursorSource: cursorSource,
             annotationSource: annotationSource,
+            overlaySource: overlaySource,
             captionSource: captionSource,
             zoomRegions: editDecisionList?.enabledZoomRegions ?? [],
             markers: manifest.markers,
@@ -414,6 +431,7 @@ public struct RenderInspection: Codable, Equatable, Sendable {
     public var hasWebcamOverlay: Bool
     public var hasCursorEffects: Bool
     public var hasAnnotations: Bool
+    public var hasOverlays: Bool
     public var hasCaptions: Bool
     public var hasZoomRegions: Bool
     public var audioSourceCount: Int
@@ -426,6 +444,7 @@ public struct RenderInspection: Codable, Equatable, Sendable {
         hasWebcamOverlay: Bool,
         hasCursorEffects: Bool = false,
         hasAnnotations: Bool = false,
+        hasOverlays: Bool = false,
         hasCaptions: Bool = false,
         hasZoomRegions: Bool = false,
         audioSourceCount: Int,
@@ -437,6 +456,7 @@ public struct RenderInspection: Codable, Equatable, Sendable {
         self.hasWebcamOverlay = hasWebcamOverlay
         self.hasCursorEffects = hasCursorEffects
         self.hasAnnotations = hasAnnotations
+        self.hasOverlays = hasOverlays
         self.hasCaptions = hasCaptions
         self.hasZoomRegions = hasZoomRegions
         self.audioSourceCount = audioSourceCount

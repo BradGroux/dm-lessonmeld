@@ -304,6 +304,9 @@ public enum ProjectBundle {
         if relativePath.contains("annotation") && ext == "json" {
             return .annotations
         }
+        if relativePath.contains("overlay") && ext == "json" {
+            return .overlays
+        }
         if relativePath.contains("caption") && ["json", "vtt", "srt"].contains(ext) {
             return .captions
         }
@@ -325,6 +328,7 @@ public enum ProjectBundle {
             systemAudio: files.first { $0.role == .systemAudio },
             cursorMetadata: files.first { $0.role == .cursorMetadata },
             annotations: files.first { $0.role == .annotations },
+            overlays: files.first { $0.role == .overlays },
             captions: files.filter { $0.role == .captions },
             transcripts: files.filter { $0.role == .transcript },
             thumbnail: files.first { $0.role == .thumbnail },
@@ -348,6 +352,7 @@ public enum ProjectBundle {
         assignIfMissing(\.systemAudio, recovered.systemAudio)
         assignIfMissing(\.cursorMetadata, recovered.cursorMetadata)
         assignIfMissing(\.annotations, recovered.annotations)
+        assignIfMissing(\.overlays, recovered.overlays)
         assignIfMissing(\.thumbnail, recovered.thumbnail)
 
         for caption in recovered.captions where !manifest.media.captions.contains(where: { $0.relativePath == caption.relativePath }) {
@@ -392,6 +397,9 @@ public enum ProjectBundle {
         }
         if media.annotations != nil {
             tracks.append(TimelineTrack(id: "annotations", kind: .annotations, displayName: "Annotations"))
+        }
+        if media.overlays != nil {
+            tracks.append(TimelineTrack(id: "overlays", kind: .overlays, displayName: "Overlays"))
         }
         if !media.captions.isEmpty || !media.transcripts.isEmpty {
             tracks.append(TimelineTrack(id: "captions", kind: .captions, displayName: "Captions"))
