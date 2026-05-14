@@ -221,7 +221,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 webcamOverlay,
                 into: composition,
                 duration: screenDuration,
-                renderSize: renderSize
+                renderSize: renderSize,
+                camera: plan.camera
             )
             layerInstructions.insert(webcamOverlayComposition.instruction, at: 0)
             webcamGeometry = webcamOverlayComposition.geometry
@@ -350,6 +351,10 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             ))
         }
 
+        if plan.webcamOverlay != nil {
+            layers.append(contentsOf: cameraReactionLayers(for: plan.camera.enabledReactions, renderSize: renderSize))
+        }
+
         if let overlaySource = plan.overlaySource {
             let store = try loadOverlayStore(from: overlaySource.url)
             if store.isVisible {
@@ -418,6 +423,37 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         }
 
         return layers
+    }
+
+    private func cameraReactionLayers(for reactions: [CameraReaction], renderSize: CGSize) -> [CALayer] {
+        reactions.map { reaction in
+            let rect = overlayFrame(reaction.frame, renderSize: renderSize)
+            let container = CALayer()
+            container.frame = rect
+
+            let text = CATextLayer()
+            text.string = reaction.text
+            text.font = "Helvetica-Bold" as CFTypeRef
+            text.fontSize = max(18, rect.height * 0.58)
+            text.alignmentMode = .center
+            text.foregroundColor = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+            text.contentsScale = 2
+            text.frame = container.bounds
+            container.addSublayer(text)
+
+            let start = reaction.range.startSeconds
+            let duration = max(reaction.range.durationSeconds, 0.1)
+            container.opacity = 0
+            let animation = CAKeyframeAnimation(keyPath: "opacity")
+            animation.values = [0, 1, 1, 0]
+            animation.keyTimes = [0, 0.18, 0.82, 1]
+            animation.beginTime = AVCoreAnimationBeginTimeAtZero + start
+            animation.duration = duration
+            animation.fillMode = .removed
+            animation.isRemovedOnCompletion = true
+            container.add(animation, forKey: "camera-reaction-\(reaction.id)")
+            return container
+        }
     }
 
     private func pictureInPicturePath(
@@ -1543,7 +1579,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         _ overlay: PictureInPictureOverlay,
         into composition: AVMutableComposition,
         duration: CMTime,
-        renderSize: CGSize
+        renderSize: CGSize,
+        camera: EditorCameraSettings
     ) async throws -> WebcamOverlayComposition {
         let webcamAsset = AVURLAsset(url: overlay.source.url)
         let webcamVideoTracks = try await webcamAsset.loadTracks(withMediaType: .video)
@@ -1568,21 +1605,85 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let naturalSize = try await webcamVideoTrack.load(.naturalSize)
         let preferredTransform = try await webcamVideoTrack.load(.preferredTransform)
         let sourceDisplaySize = displaySize(naturalSize: naturalSize, preferredTransform: preferredTransform)
-        let geometry = overlay.placement.resolvedRenderGeometry(
-            sourceSize: sourceDisplaySize,
+        let defaultState = webcamRenderState(
+            placement: overlay.placement,
+            sourceDisplaySize: sourceDisplaySize,
+            preferredTransform: preferredTransform,
             renderSize: renderSize
         )
 
-        let horizontalScale = overlay.placement.isMirrored ? -geometry.sourceScale : geometry.sourceScale
-        let translationX = overlay.placement.isMirrored ? geometry.videoFrame.maxX : geometry.videoFrame.minX
+        let instruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionWebcamTrack)
+        instruction.setTransform(defaultState.transform, at: .zero)
+        instruction.setCropRectangle(defaultState.geometry.cropRect, at: .zero)
+        instruction.setOpacity(1, at: .zero)
+
+        let durationSeconds = duration.seconds.isFinite ? max(0, duration.seconds) : 0
+        for region in camera.enabledLayoutRegions {
+            let startSeconds = min(max(region.range.startSeconds, 0), durationSeconds)
+            let endSeconds = min(max(region.range.endSeconds, startSeconds), durationSeconds)
+            guard endSeconds > startSeconds else { continue }
+            let start = CMTime(seconds: startSeconds, preferredTimescale: 600)
+            let end = CMTime(seconds: endSeconds, preferredTimescale: 600)
+            let transition = min(region.transitionSeconds, max(0, (endSeconds - startSeconds) / 2))
+
+            if region.preset == .hidden {
+                if region.animation == .fade, transition > 0 {
+                    let inRange = CMTimeRange(start: start, duration: CMTime(seconds: transition, preferredTimescale: 600))
+                    let outRange = CMTimeRange(
+                        start: CMTime(seconds: max(startSeconds, endSeconds - transition), preferredTimescale: 600),
+                        duration: CMTime(seconds: transition, preferredTimescale: 600)
+                    )
+                    instruction.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 0, timeRange: inRange)
+                    instruction.setOpacityRamp(fromStartOpacity: 0, toEndOpacity: 1, timeRange: outRange)
+                } else {
+                    instruction.setOpacity(0, at: start)
+                    instruction.setOpacity(1, at: end)
+                }
+                continue
+            }
+
+            let state = webcamRenderState(
+                placement: region.resolvedPlacement(default: overlay.placement),
+                sourceDisplaySize: sourceDisplaySize,
+                preferredTransform: preferredTransform,
+                renderSize: renderSize
+            )
+            if region.animation == .fade, transition > 0 {
+                let inRange = CMTimeRange(start: start, duration: CMTime(seconds: transition, preferredTimescale: 600))
+                instruction.setTransformRamp(fromStart: defaultState.transform, toEnd: state.transform, timeRange: inRange)
+                let outRange = CMTimeRange(
+                    start: CMTime(seconds: max(startSeconds, endSeconds - transition), preferredTimescale: 600),
+                    duration: CMTime(seconds: transition, preferredTimescale: 600)
+                )
+                instruction.setTransformRamp(fromStart: state.transform, toEnd: defaultState.transform, timeRange: outRange)
+            } else {
+                instruction.setTransform(state.transform, at: start)
+                instruction.setTransform(defaultState.transform, at: end)
+            }
+            instruction.setCropRectangle(state.geometry.cropRect, at: start)
+            instruction.setCropRectangle(defaultState.geometry.cropRect, at: end)
+            instruction.setOpacity(1, at: start)
+        }
+
+        return WebcamOverlayComposition(instruction: instruction, geometry: defaultState.geometry)
+    }
+
+    private func webcamRenderState(
+        placement: PictureInPicturePlacement,
+        sourceDisplaySize: CGSize,
+        preferredTransform: CGAffineTransform,
+        renderSize: CGSize
+    ) -> WebcamRenderState {
+        let geometry = placement.resolvedRenderGeometry(
+            sourceSize: sourceDisplaySize,
+            renderSize: renderSize
+        )
+        let horizontalScale = placement.isMirrored ? -geometry.sourceScale : geometry.sourceScale
+        let translationX = placement.isMirrored ? geometry.videoFrame.maxX : geometry.videoFrame.minX
         let transform = preferredTransform
             .concatenating(CGAffineTransform(scaleX: horizontalScale, y: geometry.sourceScale))
             .concatenating(CGAffineTransform(translationX: translationX, y: geometry.videoFrame.minY))
-
-        let instruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionWebcamTrack)
-        instruction.setTransform(transform, at: .zero)
-        instruction.setCropRectangle(geometry.cropRect, at: .zero)
-        return WebcamOverlayComposition(instruction: instruction, geometry: geometry)
+        return WebcamRenderState(geometry: geometry, transform: transform)
     }
 
     private func insertClickSoundTrack(
@@ -1761,6 +1862,11 @@ private final class ExportSessionBox: @unchecked Sendable {
 private struct WebcamOverlayComposition {
     var instruction: AVMutableVideoCompositionLayerInstruction
     var geometry: PictureInPictureRenderGeometry
+}
+
+private struct WebcamRenderState {
+    var geometry: PictureInPictureRenderGeometry
+    var transform: CGAffineTransform
 }
 
 private struct DisplayGeometry {

@@ -240,6 +240,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
     public var zoomRegions: [ZoomRegion]
     public var markers: [ProjectTimelineMarker]
     public var canvas: EditorCanvasSettings
+    public var camera: EditorCameraSettings
     public var cursor: EditorCursorSettings
 
     public init(
@@ -256,6 +257,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         zoomRegions: [ZoomRegion] = [],
         markers: [ProjectTimelineMarker] = [],
         canvas: EditorCanvasSettings = EditorCanvasSettings(),
+        camera: EditorCameraSettings = EditorCameraSettings(),
         cursor: EditorCursorSettings = EditorCursorSettings()
     ) {
         self.projectURL = projectURL
@@ -271,6 +273,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         self.zoomRegions = zoomRegions
         self.markers = markers
         self.canvas = canvas
+        self.camera = camera
         self.cursor = cursor
     }
 
@@ -293,6 +296,10 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             mimeType: screen.mimeType
         )
 
+        let cameraSettings = editorSettings?.camera ?? EditorCameraSettings(
+            defaultPlacement: manifest.capture?.pictureInPicturePlacement ?? .defaultBottomTrailing
+        )
+
         let webcamOverlay: PictureInPictureOverlay?
         if let webcam = manifest.media.webcam {
             webcamOverlay = PictureInPictureOverlay(
@@ -302,7 +309,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
                     url: try ProjectBundle.projectLocalFileURL(for: webcam, in: projectURL),
                     mimeType: webcam.mimeType
                 ),
-                placement: manifest.capture?.pictureInPicturePlacement ?? .defaultBottomTrailing
+                placement: cameraSettings.defaultPlacement
             )
         } else {
             webcamOverlay = nil
@@ -382,6 +389,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             zoomRegions: editDecisionList?.enabledZoomRegions ?? [],
             markers: manifest.markers,
             canvas: editorSettings?.canvas ?? EditorCanvasSettings(),
+            camera: cameraSettings,
             cursor: editorSettings?.cursor ?? EditorCursorSettings()
         )
     }

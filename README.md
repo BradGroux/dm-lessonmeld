@@ -13,7 +13,7 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - Existing MP4/MOV import that creates a lesson project and opens a preview-first timeline editor immediately
 - Local `.dmlm` lesson bundles with screen media, audio/video sidecars, edit decisions, annotations, markers, transcripts, render settings, and export metadata
 - Live annotation overlay with cursor, pen, highlighter, eraser, line, box, ellipse, arrow, text, laser pointer, whiteboard, blackboard, colors, line weights, text sizes, undo/redo, copy, and clear controls
-- Webcam picture-in-picture settings for aspect ratio, shape, corners, mirroring, border, shadow, resolution, and FPS
+- Webcam picture-in-picture settings for aspect ratio, shape, corners, mirroring, border, shadow, timed layout regions, and reactions
 - Timeline edit-decision sidecars for trims, cuts, markers, zoom regions, timed video overlays, masks, and highlights
 - Render planning/export with webcam PiP, cursor/click/shortcut effects, zooms, masks/highlights, overlays, annotations, and captions
 - Caption and transcript sidecar exporters

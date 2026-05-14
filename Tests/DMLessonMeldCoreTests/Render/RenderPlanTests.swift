@@ -522,6 +522,41 @@ struct RenderPlanTests {
                 smoothMovement: false,
                 hiddenRanges: [EditTimeRange(startSeconds: 0.7, endSeconds: 0.9)],
                 clickEffects: EditorClickEffectSettings(soundEnabled: true, soundVolume: 0.5)
+            ),
+            camera: EditorCameraSettings(
+                defaultPlacement: PictureInPicturePlacement(
+                    corner: .topLeading,
+                    widthRatio: 0.28,
+                    marginRatio: 0.04,
+                    aspectRatio: .square1x1,
+                    frameShape: .circle,
+                    isMirrored: true,
+                    borderEnabled: true,
+                    shadowEnabled: true
+                ),
+                layoutRegions: [
+                    CameraLayoutRegion(
+                        id: "camera-hide",
+                        range: EditTimeRange(startSeconds: 0.25, durationSeconds: 0.2),
+                        preset: .hidden,
+                        animation: .fade,
+                        transitionSeconds: 0.05
+                    ),
+                    CameraLayoutRegion(
+                        id: "camera-full",
+                        range: EditTimeRange(startSeconds: 0.55, durationSeconds: 0.25),
+                        preset: .fullCamera,
+                        animation: .fade,
+                        transitionSeconds: 0.05
+                    )
+                ],
+                reactions: [
+                    CameraReaction(
+                        id: "camera-reaction",
+                        range: EditTimeRange(startSeconds: 0.35, durationSeconds: 0.3),
+                        text: "👍"
+                    )
+                ]
             )
         )
         try EditorSettingsFile.save(canvasSettings, toProject: projectURL)
@@ -559,6 +594,8 @@ struct RenderPlanTests {
         #expect(inspection.plan?.zoomRegions.map(\.id) == ["zoom-1"])
         #expect(inspection.plan?.canvas == canvasSettings.canvas)
         #expect(inspection.plan?.cursor == canvasSettings.cursor)
+        #expect(inspection.plan?.camera == canvasSettings.camera)
+        #expect(inspection.plan?.webcamOverlay?.placement == canvasSettings.camera?.defaultPlacement)
         var plan = try #require(inspection.plan)
         plan.webcamOverlay?.placement = PictureInPicturePlacement(
             corner: .bottomTrailing,
