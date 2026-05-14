@@ -1958,18 +1958,6 @@ private extension View {
     }
 }
 
-private extension Color {
-    init(rgba color: RGBAColor) {
-        self.init(
-            .sRGB,
-            red: color.red,
-            green: color.green,
-            blue: color.blue,
-            opacity: color.alpha
-        )
-    }
-}
-
 private extension NSColor {
     convenience init(rgba color: RGBAColor) {
         self.init(
