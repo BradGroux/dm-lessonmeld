@@ -457,6 +457,24 @@ struct RenderPlanTests {
                     strokeColor: .yellow
                 ),
                 animation: OverlayAnimation(fadeInSeconds: 0.1, fadeOutSeconds: 0.1, preset: .scaleIn)
+            ),
+            OverlayItem(
+                id: "highlight-1",
+                kind: .highlight,
+                timeRange: EditTimeRange(startSeconds: 0.2, durationSeconds: 0.5),
+                frame: NormalizedEditRect(x: 0.24, y: 0.18, width: 0.36, height: 0.3),
+                opacity: 0.65,
+                zIndex: 11,
+                style: OverlayStyle(
+                    fillColor: RGBAColor(red: 0, green: 0, blue: 0, alpha: 0.58),
+                    strokeColor: .yellow,
+                    cornerRadius: 12,
+                    shadowEnabled: false,
+                    highlightMode: .spotlight,
+                    highlightShape: .roundedRectangle,
+                    blurRadius: 10,
+                    featherRadius: 18
+                )
             )
         ])).write(to: overlaysURL, options: [.atomic])
         try DMLessonJSON.encoder().encode(TranscriptDocument(

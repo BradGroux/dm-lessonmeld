@@ -253,6 +253,20 @@ public enum RenderPlanValidator {
                         path: "\(path).frame"
                     ))
                 }
+                if let blurRadius = overlay.style.blurRadius, (!blurRadius.isFinite || blurRadius < 0) {
+                    issues.append(RenderValidationIssue(
+                        severity: .error,
+                        message: "Overlay blur radius must be finite and non-negative.",
+                        path: "\(path).style.blurRadius"
+                    ))
+                }
+                if let featherRadius = overlay.style.featherRadius, (!featherRadius.isFinite || featherRadius < 0) {
+                    issues.append(RenderValidationIssue(
+                        severity: .error,
+                        message: "Overlay feather radius must be finite and non-negative.",
+                        path: "\(path).style.featherRadius"
+                    ))
+                }
                 if overlay.kind == .image {
                     let imagePath = overlay.style.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     if imagePath.isEmpty {

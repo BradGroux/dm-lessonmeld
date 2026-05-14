@@ -92,12 +92,14 @@ Search **Timeline Editing Shortcuts** in the command palette for the active keyb
 
 ## Add Video Overlays
 
-Use the **Overlays** inspector tab or the overlay timeline lane to add project-local text, shapes, callouts, arrows, and image overlays.
+Use the **Overlays** inspector tab or the overlay timeline lane to add project-local text, shapes, callouts, arrows, images, masks, and highlights.
 
 - Add text, callout, shape, or image overlays at the playhead.
 - Drag an overlay on the preview to place it visually.
+- Drag the resize handle on a selected overlay to size focus regions visually.
 - Drag or resize overlay blocks in the **Overlays** timeline lane to control timing.
 - Edit opacity, text size, fill, stroke, fade in/out, animation preset, and z-order.
+- For highlight overlays, choose dim, blur, spotlight, or outline mode, plus rectangle, rounded rectangle, or ellipse focus shape.
 - Imported images are copied under `overlays/assets/` inside the `.dmlm` bundle.
 - Save overlays into `overlays.json` so render/export burns them into the final video.
 

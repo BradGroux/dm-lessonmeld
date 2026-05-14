@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import CoreImage
 import Foundation
 import ImageIO
 import QuartzCore
@@ -1061,12 +1062,14 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             layer = overlayCalloutLayer(overlay, frame: rect)
         case .image:
             layer = overlayImageLayer(overlay, projectURL: projectURL, frame: rect)
+        case .highlight:
+            layer = overlayHighlightLayer(overlay, focusFrame: rect, renderSize: renderSize)
         }
 
         if overlay.rotationDegrees != 0 {
             layer.setAffineTransform(CGAffineTransform(rotationAngle: CGFloat(overlay.rotationDegrees * .pi / 180)))
         }
-        if overlay.style.shadowEnabled {
+        if overlay.style.shadowEnabled, overlay.kind != .highlight {
             layer.shadowColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
             layer.shadowOpacity = 0.28
             layer.shadowRadius = 10
@@ -1074,6 +1077,99 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         }
         applyTiming(to: layer, overlay: overlay)
         return layer
+    }
+
+    private func overlayHighlightLayer(_ overlay: OverlayItem, focusFrame: CGRect, renderSize: CGSize) -> CALayer {
+        let container = CALayer()
+        container.frame = CGRect(origin: .zero, size: renderSize)
+        let fullFrame = CGRect(origin: .zero, size: renderSize)
+        let mode = overlay.style.highlightMode ?? .dim
+        let shape = overlay.style.highlightShape ?? .roundedRectangle
+        let outsidePath = overlayOutsidePath(focusFrame: focusFrame, fullFrame: fullFrame, shape: shape, cornerRadius: overlay.style.cornerRadius)
+        let focusPath = overlayFocusPath(focusFrame, shape: shape, cornerRadius: overlay.style.cornerRadius)
+        let tintColor = overlay.style.fillColor ?? RGBAColor(red: 0, green: 0, blue: 0, alpha: 0.58)
+        let strokeColor = overlay.style.strokeColor
+
+        if mode == .blur {
+            let blurLayer = CALayer()
+            blurLayer.frame = fullFrame
+            blurLayer.backgroundColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.001)
+            if let filter = CIFilter(name: "CIGaussianBlur") {
+                filter.setValue(max(1, overlay.style.blurRadius ?? 12), forKey: kCIInputRadiusKey)
+                blurLayer.backgroundFilters = [filter]
+            }
+            let mask = CAShapeLayer()
+            mask.frame = fullFrame
+            mask.path = outsidePath
+            mask.fillRule = .evenOdd
+            blurLayer.mask = mask
+            container.addSublayer(blurLayer)
+        }
+
+        if mode != .outline {
+            let dimLayer = CAShapeLayer()
+            dimLayer.frame = fullFrame
+            dimLayer.path = outsidePath
+            dimLayer.fillRule = .evenOdd
+            let opacityScale = mode == .blur ? 0.35 : 1
+            dimLayer.fillColor = cgColor(tintColor, opacity: overlay.opacity * opacityScale)
+            container.addSublayer(dimLayer)
+        }
+
+        let feather = CGFloat(overlay.style.featherRadius ?? 0)
+        if feather > 0, mode != .dim {
+            let glow = CAShapeLayer()
+            glow.frame = fullFrame
+            glow.path = focusPath
+            glow.fillColor = CGColor(red: 0, green: 0, blue: 0, alpha: 0)
+            glow.strokeColor = cgColor(strokeColor, opacity: min(overlay.opacity, 1) * 0.28)
+            glow.lineWidth = max(8, feather * 2)
+            glow.lineJoin = .round
+            container.addSublayer(glow)
+        }
+
+        let border = CAShapeLayer()
+        border.frame = fullFrame
+        border.path = focusPath
+        border.fillColor = CGColor(red: 0, green: 0, blue: 0, alpha: 0)
+        border.strokeColor = cgColor(strokeColor, opacity: overlay.opacity)
+        border.lineWidth = max(1, CGFloat(overlay.style.lineWidth))
+        border.lineJoin = .round
+        border.lineDashPattern = mode == .outline ? nil : [8, 5]
+        container.addSublayer(border)
+        return container
+    }
+
+    private func overlayOutsidePath(
+        focusFrame: CGRect,
+        fullFrame: CGRect,
+        shape: OverlayHighlightShape,
+        cornerRadius: Double
+    ) -> CGPath {
+        let path = CGMutablePath()
+        path.addRect(fullFrame)
+        path.addPath(overlayFocusPath(focusFrame, shape: shape, cornerRadius: cornerRadius))
+        return path
+    }
+
+    private func overlayFocusPath(
+        _ frame: CGRect,
+        shape: OverlayHighlightShape,
+        cornerRadius: Double
+    ) -> CGPath {
+        switch shape {
+        case .rectangle:
+            CGPath(rect: frame, transform: nil)
+        case .roundedRectangle:
+            CGPath(
+                roundedRect: frame,
+                cornerWidth: min(CGFloat(cornerRadius), min(frame.width, frame.height) / 2),
+                cornerHeight: min(CGFloat(cornerRadius), min(frame.width, frame.height) / 2),
+                transform: nil
+            )
+        case .ellipse:
+            CGPath(ellipseIn: frame, transform: nil)
+        }
     }
 
     private func overlayTextLayer(_ overlay: OverlayItem, frame: CGRect) -> CALayer {

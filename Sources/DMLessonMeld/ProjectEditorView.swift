@@ -21,6 +21,7 @@ struct ProjectEditorView: View {
     @State private var timelineZoom = 1.0
     @State private var activeTimelineDrag: TimelineDragState?
     @State private var activeOverlayDrag: OverlayPreviewDragState?
+    @State private var activeOverlayResizeDrag: OverlayPreviewResizeDragState?
     @State private var selectedTimelineItem: TimelineSelection?
 
     var body: some View {
@@ -809,6 +810,11 @@ struct ProjectEditorView: View {
                 } label: {
                     Label("Image", systemImage: "photo")
                 }
+                Button {
+                    model.addOverlayAtPlayhead(kind: .highlight)
+                } label: {
+                    Label("Highlight", systemImage: "viewfinder")
+                }
             }
 
             if model.overlayRows.isEmpty {
@@ -846,7 +852,7 @@ struct ProjectEditorView: View {
                         }
                         TextField("Text", text: $overlay.text)
                             .textFieldStyle(.roundedBorder)
-                            .disabled(overlay.kind == .image || overlay.kind == .rectangle || overlay.kind == .ellipse || overlay.kind == .line || overlay.kind == .arrow)
+                            .disabled(overlay.kind == .image || overlay.kind == .rectangle || overlay.kind == .ellipse || overlay.kind == .line || overlay.kind == .arrow || overlay.kind == .highlight)
                         if overlay.kind == .image {
                             Text(overlay.imagePath.isEmpty ? "No image selected." : overlay.imagePath)
                                 .font(.caption)
@@ -856,6 +862,18 @@ struct ProjectEditorView: View {
                                 model.chooseImage(forOverlayID: overlay.id)
                             } label: {
                                 Label("Choose Image...", systemImage: "photo")
+                            }
+                        }
+                        if overlay.kind == .highlight {
+                            Picker("Mode", selection: $overlay.highlightMode) {
+                                ForEach(OverlayHighlightMode.allCases) { mode in
+                                    Text(mode.title).tag(mode)
+                                }
+                            }
+                            Picker("Shape", selection: $overlay.highlightShape) {
+                                ForEach(OverlayHighlightShape.allCases) { shape in
+                                    Text(shape.title).tag(shape)
+                                }
                             }
                         }
                         HStack {
@@ -873,6 +891,15 @@ struct ProjectEditorView: View {
                         HStack {
                             numericStringSlider("Fade in", text: $overlay.fadeInSeconds, range: 0...2, format: "%.2f")
                             numericStringSlider("Fade out", text: $overlay.fadeOutSeconds, range: 0...2, format: "%.2f")
+                        }
+                        HStack {
+                            numericStringSlider("Corners", text: $overlay.cornerRadius, range: 0...96, format: "%.0f")
+                            if overlay.kind == .highlight {
+                                numericStringSlider("Feather", text: $overlay.featherRadius, range: 0...80, format: "%.0f")
+                            }
+                        }
+                        if overlay.kind == .highlight {
+                            numericStringSlider("Blur", text: $overlay.blurRadius, range: 0...80, format: "%.0f")
                         }
                         Picker("Animation", selection: $overlay.animationPreset) {
                             ForEach(OverlayAnimationPreset.allCases) { preset in
@@ -1897,6 +1924,34 @@ struct ProjectEditorView: View {
                                 RoundedRectangle(cornerRadius: 7)
                                     .stroke(selectedTimelineItem == .overlay(overlay.id) ? Color.accentColor : Color.clear, lineWidth: 2)
                             )
+                            .overlay(alignment: .bottomTrailing) {
+                                if selectedTimelineItem == .overlay(overlay.id) {
+                                    overlayResizeHandle()
+                                        .offset(x: 5, y: 5)
+                                        .gesture(
+                                            DragGesture(minimumDistance: 1)
+                                                .onChanged { value in
+                                                    if activeOverlayResizeDrag?.id != overlay.id {
+                                                        activeOverlayResizeDrag = OverlayPreviewResizeDragState(
+                                                            id: overlay.id,
+                                                            startWidth: secondsValue(overlay.width) ?? 0.2,
+                                                            startHeight: secondsValue(overlay.height) ?? 0.15
+                                                        )
+                                                    }
+                                                    guard let drag = activeOverlayResizeDrag, drag.id == overlay.id else { return }
+                                                    model.updateOverlayFrame(
+                                                        id: overlay.id,
+                                                        width: drag.startWidth + Double(value.translation.width / max(contentFrame.width, 1)),
+                                                        height: drag.startHeight + Double(value.translation.height / max(contentFrame.height, 1))
+                                                    )
+                                                }
+                                                .onEnded { _ in
+                                                    activeOverlayResizeDrag = nil
+                                                    model.saveOverlays()
+                                                }
+                                        )
+                                }
+                            }
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectedTimelineItem = .overlay(overlay.id)
@@ -1988,6 +2043,43 @@ struct ProjectEditorView: View {
                     .fill(Color.primary.opacity(0.1))
                     .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
             }
+        case .highlight:
+            highlightPreview(overlay)
+        }
+    }
+
+    private func overlayResizeHandle() -> some View {
+        RoundedRectangle(cornerRadius: 3)
+            .fill(Color.accentColor)
+            .frame(width: 12, height: 12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 3)
+                    .stroke(Color.black.opacity(0.45), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+    }
+
+    @ViewBuilder private func highlightPreview(_ overlay: EditableOverlayRow) -> some View {
+        let opacity = secondsValue(overlay.opacity) ?? 0.6
+        let stroke = Color(rgba: overlay.strokeColor)
+        let fill = Color(rgba: overlay.fillColor)
+        let cornerRadius = CGFloat(secondsValue(overlay.cornerRadius) ?? 12)
+        switch overlay.highlightShape {
+        case .ellipse:
+            Ellipse()
+                .fill(fill.opacity(overlay.highlightMode == .outline ? 0.03 : min(opacity, 0.28)))
+                .overlay(Ellipse().stroke(stroke, style: StrokeStyle(lineWidth: 3, dash: overlay.highlightMode == .outline ? [] : [7, 4])))
+                .shadow(color: stroke.opacity(overlay.highlightMode == .spotlight ? 0.45 : 0), radius: CGFloat(secondsValue(overlay.featherRadius) ?? 0))
+        case .rectangle:
+            Rectangle()
+                .fill(fill.opacity(overlay.highlightMode == .outline ? 0.03 : min(opacity, 0.28)))
+                .overlay(Rectangle().stroke(stroke, style: StrokeStyle(lineWidth: 3, dash: overlay.highlightMode == .outline ? [] : [7, 4])))
+                .shadow(color: stroke.opacity(overlay.highlightMode == .spotlight ? 0.45 : 0), radius: CGFloat(secondsValue(overlay.featherRadius) ?? 0))
+        case .roundedRectangle:
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(fill.opacity(overlay.highlightMode == .outline ? 0.03 : min(opacity, 0.28)))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius).stroke(stroke, style: StrokeStyle(lineWidth: 3, dash: overlay.highlightMode == .outline ? [] : [7, 4])))
+                .shadow(color: stroke.opacity(overlay.highlightMode == .spotlight ? 0.45 : 0), radius: CGFloat(secondsValue(overlay.featherRadius) ?? 0))
         }
     }
 
@@ -3567,6 +3659,12 @@ private struct OverlayPreviewDragState {
     var startY: Double
 }
 
+private struct OverlayPreviewResizeDragState {
+    var id: String
+    var startWidth: Double
+    var startHeight: Double
+}
+
 private struct ProjectVideoPlayer: NSViewRepresentable {
     var player: AVPlayer
     var controlsStyle: AVPlayerViewControlsStyle = .floating
@@ -3702,6 +3800,11 @@ private struct EditableOverlayRow: Identifiable, Equatable {
     var fadeInSeconds: String
     var fadeOutSeconds: String
     var animationPreset: OverlayAnimationPreset
+    var cornerRadius: String
+    var highlightMode: OverlayHighlightMode
+    var highlightShape: OverlayHighlightShape
+    var blurRadius: String
+    var featherRadius: String
     var textColor: RGBAColor
     var fillColor: RGBAColor
     var strokeColor: RGBAColor
@@ -4346,17 +4449,21 @@ private final class ProjectEditorModel: ObservableObject {
 
     func updateOverlayFrame(id: String, x: Double? = nil, y: Double? = nil, width: Double? = nil, height: Double? = nil) {
         guard let index = overlayRows.firstIndex(where: { $0.id == id }) else { return }
+        let currentX = optionalTimelineSeconds(overlayRows[index].x) ?? 0
+        let currentY = optionalTimelineSeconds(overlayRows[index].y) ?? 0
+        let currentWidth = optionalTimelineSeconds(overlayRows[index].width) ?? 0.2
+        let currentHeight = optionalTimelineSeconds(overlayRows[index].height) ?? 0.15
         if let x {
-            overlayRows[index].x = Self.formatNormalized(min(max(x, 0), 1))
+            overlayRows[index].x = Self.formatNormalized(min(max(x, 0), max(0, 1 - currentWidth)))
         }
         if let y {
-            overlayRows[index].y = Self.formatNormalized(min(max(y, 0), 1))
+            overlayRows[index].y = Self.formatNormalized(min(max(y, 0), max(0, 1 - currentHeight)))
         }
         if let width {
-            overlayRows[index].width = Self.formatNormalized(min(max(width, 0.04), 1))
+            overlayRows[index].width = Self.formatNormalized(min(max(width, 0.04), max(0.04, 1 - currentX)))
         }
         if let height {
-            overlayRows[index].height = Self.formatNormalized(min(max(height, 0.04), 1))
+            overlayRows[index].height = Self.formatNormalized(min(max(height, 0.04), max(0.04, 1 - currentY)))
         }
     }
 
@@ -5600,6 +5707,9 @@ private final class ProjectEditorModel: ObservableObject {
             let fontSize = try parsePositive(row.fontSize, label: "Overlay text size")
             let fadeIn = try parseNonNegative(row.fadeInSeconds, label: "Overlay fade in")
             let fadeOut = try parseNonNegative(row.fadeOutSeconds, label: "Overlay fade out")
+            let cornerRadius = try parseNonNegative(row.cornerRadius, label: "Overlay corners")
+            let blurRadius = try parseNonNegative(row.blurRadius, label: "Overlay blur")
+            let featherRadius = try parseNonNegative(row.featherRadius, label: "Overlay feather")
             return OverlayItem(
                 id: row.id,
                 kind: row.kind,
@@ -5614,7 +5724,13 @@ private final class ProjectEditorModel: ObservableObject {
                     fillColor: (row.kind == .rectangle || row.kind == .ellipse) ? row.fillColor : nil,
                     strokeColor: row.strokeColor,
                     backgroundColor: (row.kind == .text || row.kind == .callout) ? row.fillColor : nil,
-                    imagePath: imagePath.isEmpty ? nil : imagePath
+                    cornerRadius: cornerRadius,
+                    shadowEnabled: row.kind != .highlight,
+                    imagePath: imagePath.isEmpty ? nil : imagePath,
+                    highlightMode: row.kind == .highlight ? row.highlightMode : nil,
+                    highlightShape: row.kind == .highlight ? row.highlightShape : nil,
+                    blurRadius: row.kind == .highlight ? blurRadius : nil,
+                    featherRadius: row.kind == .highlight ? featherRadius : nil
                 ),
                 animation: OverlayAnimation(
                     fadeInSeconds: fadeIn,
@@ -6031,17 +6147,22 @@ private final class ProjectEditorModel: ObservableObject {
             startSeconds: formatSecondsForEditing(start),
             endSeconds: formatSecondsForEditing(end),
             text: kind == .callout ? "Callout" : "Title",
-            x: kind == .text ? "0.22" : "0.30",
-            y: kind == .text ? "0.12" : "0.30",
-            width: kind == .text ? "0.56" : "0.32",
-            height: kind == .text ? "0.14" : "0.20",
+            x: kind == .text ? "0.22" : (kind == .highlight ? "0.26" : "0.30"),
+            y: kind == .text ? "0.12" : (kind == .highlight ? "0.28" : "0.30"),
+            width: kind == .text ? "0.56" : (kind == .highlight ? "0.48" : "0.32"),
+            height: kind == .text ? "0.14" : (kind == .highlight ? "0.28" : "0.20"),
             opacity: "1",
             fontSize: kind == .callout ? "28" : "34",
             fadeInSeconds: "0.18",
             fadeOutSeconds: "0.18",
             animationPreset: kind == .text ? .slideUp : .none,
+            cornerRadius: kind == .highlight ? "18" : "12",
+            highlightMode: .dim,
+            highlightShape: .roundedRectangle,
+            blurRadius: "12",
+            featherRadius: "18",
             textColor: .white,
-            fillColor: kind == .rectangle || kind == .ellipse ? .yellow : RGBAColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.68),
+            fillColor: kind == .rectangle || kind == .ellipse ? .yellow : RGBAColor(red: 0.02, green: 0.02, blue: 0.025, alpha: kind == .highlight ? 0.58 : 0.68),
             strokeColor: .yellow,
             imagePath: "",
             zIndex: zIndex,
@@ -6065,6 +6186,11 @@ private final class ProjectEditorModel: ObservableObject {
             fadeInSeconds: formatSecondsForEditing(overlay.animation.fadeInSeconds),
             fadeOutSeconds: formatSecondsForEditing(overlay.animation.fadeOutSeconds),
             animationPreset: overlay.animation.preset,
+            cornerRadius: formatSecondsForEditing(overlay.style.cornerRadius),
+            highlightMode: overlay.style.highlightMode ?? .dim,
+            highlightShape: overlay.style.highlightShape ?? .roundedRectangle,
+            blurRadius: formatSecondsForEditing(overlay.style.blurRadius ?? 12),
+            featherRadius: formatSecondsForEditing(overlay.style.featherRadius ?? 18),
             textColor: overlay.style.textColor,
             fillColor: overlay.style.backgroundColor ?? overlay.style.fillColor ?? .yellow,
             strokeColor: overlay.style.strokeColor,
