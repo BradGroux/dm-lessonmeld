@@ -65,6 +65,8 @@ LessonMeld tracks unsaved metadata, marker, timeline, editor setting, overlay, a
 
 Technical bundle details are kept in advanced sections so normal editing work stays readable.
 
+The video editor has a persistent **Layout** menu. Use it to show or hide the inspector, show or hide the timeline, change inspector width, or reset the editor layout. On narrow windows, LessonMeld automatically hides the inspector or timeline before either can overlap the preview.
+
 ## Style the Video Canvas
 
 Open **Edit Video**, then use the **Canvas** inspector tab to control the rendered frame. Canvas settings are saved in `editor-settings.json` inside the current `.dmlm` bundle, so recorded lessons and imported MP4/MOV projects keep their own styling.

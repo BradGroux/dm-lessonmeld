@@ -23,7 +23,9 @@ struct ProjectEditorView: View {
     @State var activeOverlayDrag: OverlayPreviewDragState?
     @State var activeOverlayResizeDrag: OverlayPreviewResizeDragState?
     @State var selectedTimelineItem: TimelineSelection?
-    let mediaEditorInspectorWidth: CGFloat = 420
+    @AppStorage("LessonMeld.mediaEditor.inspectorVisible") var mediaEditorInspectorVisible = true
+    @AppStorage("LessonMeld.mediaEditor.timelineVisible") var mediaEditorTimelineVisible = true
+    @AppStorage("LessonMeld.mediaEditor.inspectorWidth") var mediaEditorInspectorWidth = 420.0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -384,6 +386,7 @@ struct ProjectEditorView: View {
             }
         case .exportPackage:
             guard model.manifest?.media.screen != nil else { return }
+            mediaEditorInspectorVisible = true
             editorInspectorTab = .export
         }
     }
