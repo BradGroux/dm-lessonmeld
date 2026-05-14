@@ -2499,18 +2499,17 @@ extension ProjectEditorView {
            let centerY = secondsValue(zoom.centerY),
            let size = secondsValue(zoom.size) {
             GeometryReader { proxy in
-                let width = max(proxy.size.width, 1)
-                let height = max(proxy.size.height, 1)
-                let boxWidth = max(40, width * CGFloat(size))
-                let boxHeight = max(40, height * CGFloat(size))
+                let contentFrame = previewContentFrame(in: proxy.size)
+                let boxWidth = max(40, contentFrame.width * CGFloat(size))
+                let boxHeight = max(40, contentFrame.height * CGFloat(size))
+                let focusPoint = EditorNormalizedGeometry.topDownPoint(x: centerX, y: centerY, in: contentFrame)
+                let positionX = min(max(focusPoint.x, contentFrame.minX + boxWidth / 2), contentFrame.maxX - boxWidth / 2)
+                let positionY = min(max(focusPoint.y, contentFrame.minY + boxHeight / 2), contentFrame.maxY - boxHeight / 2)
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
                     .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     .frame(width: boxWidth, height: boxHeight)
-                    .position(
-                        x: min(max(CGFloat(centerX) * width, boxWidth / 2), width - boxWidth / 2),
-                        y: min(max(CGFloat(centerY) * height, boxHeight / 2), height - boxHeight / 2)
-                    )
+                    .position(x: positionX, y: positionY)
                     .overlay(alignment: .topLeading) {
                         Text("\(zoom.scale)x")
                             .font(.caption2.weight(.bold))
@@ -2524,10 +2523,12 @@ extension ProjectEditorView {
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
+                                let x = Double((value.location.x - contentFrame.minX) / max(contentFrame.width, 1))
+                                let y = Double((value.location.y - contentFrame.minY) / max(contentFrame.height, 1))
                                 model.updateZoomFocus(
                                     id: zoomID,
-                                    centerX: Double(value.location.x / width),
-                                    centerY: Double(value.location.y / height)
+                                    centerX: x,
+                                    centerY: y
                                 )
                             }
                             .onEnded { _ in
@@ -2617,33 +2618,37 @@ extension ProjectEditorView {
 
     @ViewBuilder var captionPreviewOverlay: some View {
         if model.captionBurnInEnabled, let caption = model.activeCaption(at: model.currentTimeSeconds) {
-            VStack {
-                if model.captionPlacement == .bottom || model.captionPlacement == .middle {
-                    Spacer()
-                }
-                Text(caption.text)
-                    .font(.system(size: CGFloat(secondsValue(model.captionFontSize) ?? 34), weight: .bold))
-                    .foregroundStyle(Color(rgba: model.captionTextColor))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(model.captionMaxLineCount)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
-                    .background(Color(rgba: model.captionBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-                    .frame(maxWidth: 760)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, max(18, CGFloat((secondsValue(model.captionSafeMargin) ?? 0.07) * 360)))
-                    .onTapGesture {
-                        selectedTimelineItem = .caption(caption.id)
-                        editorInspectorTab = .captions
+            GeometryReader { proxy in
+                let contentFrame = previewContentFrame(in: proxy.size)
+                VStack {
+                    if model.captionPlacement == .bottom || model.captionPlacement == .middle {
+                        Spacer()
                     }
-                if model.captionPlacement == .top {
-                    Spacer()
+                    Text(caption.text)
+                        .font(.system(size: CGFloat(secondsValue(model.captionFontSize) ?? 34), weight: .bold))
+                        .foregroundStyle(Color(rgba: model.captionTextColor))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(model.captionMaxLineCount)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(Color(rgba: model.captionBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                        .frame(maxWidth: min(760, max(contentFrame.width - 64, 1)))
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, max(18, CGFloat((secondsValue(model.captionSafeMargin) ?? 0.07) * Double(contentFrame.height))))
+                        .onTapGesture {
+                            selectedTimelineItem = .caption(caption.id)
+                            editorInspectorTab = .captions
+                        }
+                    if model.captionPlacement == .top {
+                        Spacer()
+                    }
+                    if model.captionPlacement == .middle {
+                        Spacer()
+                    }
                 }
-                if model.captionPlacement == .middle {
-                    Spacer()
-                }
+                .frame(width: contentFrame.width, height: contentFrame.height)
+                .position(x: contentFrame.midX, y: contentFrame.midY)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(true)
         }
     }
@@ -2751,11 +2756,15 @@ extension ProjectEditorView {
         let y = CGFloat(secondsValue(overlay.y) ?? 0)
         let width = CGFloat(secondsValue(overlay.width) ?? 0.2)
         let height = CGFloat(secondsValue(overlay.height) ?? 0.15)
-        return CGRect(
-            x: contentFrame.minX + x * contentFrame.width,
-            y: contentFrame.minY + y * contentFrame.height,
-            width: max(20, width * contentFrame.width),
-            height: max(20, height * contentFrame.height)
+        return EditorNormalizedGeometry.topDownFrame(
+            for: NormalizedEditRect(
+                x: Double(x),
+                y: Double(y),
+                width: Double(width),
+                height: Double(height)
+            ),
+            in: contentFrame,
+            minimumSize: CGSize(width: 20, height: 20)
         )
     }
 
@@ -2821,32 +2830,15 @@ extension ProjectEditorView {
     }
 
     func previewContentFrame(in size: CGSize) -> CGRect {
-        let padding = model.canvasPreviewPadding
-        let availableWidth = max(1, size.width - padding * 2)
-        let availableHeight = max(1, size.height - padding * 2)
-        let aspectRatio = model.canvasPreviewAspectRatio ?? (availableWidth / max(availableHeight, 1))
-        let availableRatio = availableWidth / max(availableHeight, 1)
-        let contentSize: CGSize
-        if availableRatio > aspectRatio {
-            let height = availableHeight
-            contentSize = CGSize(width: height * aspectRatio, height: height)
-        } else {
-            let width = availableWidth
-            contentSize = CGSize(width: width, height: width / max(aspectRatio, 0.01))
-        }
-        return CGRect(
-            x: padding + (availableWidth - contentSize.width) / 2,
-            y: padding + (availableHeight - contentSize.height) / 2,
-            width: contentSize.width,
-            height: contentSize.height
+        EditorNormalizedGeometry.contentFrame(
+            in: size,
+            padding: model.canvasPreviewPadding,
+            aspectRatio: model.canvasPreviewAspectRatio
         )
     }
 
     func previewPoint(_ point: NormalizedCapturePoint, in frame: CGRect) -> CGPoint {
-        CGPoint(
-            x: frame.minX + CGFloat(point.x) * frame.width,
-            y: frame.minY + (1 - CGFloat(point.y)) * frame.height
-        )
+        EditorNormalizedGeometry.flippedTopDownPoint(for: point, in: frame)
     }
 
     var selectedZoomID: String? {

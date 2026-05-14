@@ -676,9 +676,10 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         renderSize: CGSize
     ) -> CGAffineTransform {
         let scale = CGFloat(max(1, region.scale))
-        let focusPoint = CGPoint(
-            x: CGFloat(region.focusRect.centerX) * renderSize.width,
-            y: renderSize.height - CGFloat(region.focusRect.centerY) * renderSize.height
+        let focusPoint = EditorNormalizedGeometry.flippedTopDownPoint(
+            x: region.focusRect.centerX,
+            y: region.focusRect.centerY,
+            in: CGRect(origin: .zero, size: renderSize)
         )
         let renderCenter = CGPoint(x: renderSize.width / 2, y: renderSize.height / 2)
         let translation = CGAffineTransform(
@@ -913,10 +914,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     }
 
     private func renderPoint(_ point: NormalizedCapturePoint, renderSize: CGSize) -> CGPoint {
-        CGPoint(
-            x: CGFloat(point.x) * renderSize.width,
-            y: renderSize.height - CGFloat(point.y) * renderSize.height
-        )
+        EditorNormalizedGeometry.renderPoint(for: point, renderSize: renderSize)
     }
 
     private func keyboardLayers(
@@ -1351,14 +1349,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     }
 
     private func overlayFrame(_ normalizedFrame: NormalizedEditRect, renderSize: CGSize) -> CGRect {
-        let width = CGFloat(normalizedFrame.width) * renderSize.width
-        let height = CGFloat(normalizedFrame.height) * renderSize.height
-        return CGRect(
-            x: CGFloat(normalizedFrame.x) * renderSize.width,
-            y: renderSize.height - CGFloat(normalizedFrame.y + normalizedFrame.height) * renderSize.height,
-            width: width,
-            height: height
-        )
+        EditorNormalizedGeometry.renderFrame(for: normalizedFrame, renderSize: renderSize)
     }
 
     private func applyTiming(to layer: CALayer, overlay: OverlayItem) {
