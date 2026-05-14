@@ -85,6 +85,28 @@ struct LearnHousePackageTests {
         #expect(file["relative_path"] as? String == "assets/screen.mp4")
         #expect(file["byte_count"] as? Int == 5)
     }
+
+    @Test("Rejects project media paths outside the bundle")
+    func rejectsMediaPathsOutsideBundle() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Unsafe.dmlm", isDirectory: true)
+        let outputURL = temp.url.appendingPathComponent("exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        try Data("secret".utf8).write(to: temp.url.appendingPathComponent("secret.mp4"))
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Unsafe"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "../secret.mp4", role: .screenVideo, mimeType: "video/mp4")
+                )
+            ),
+            to: projectURL
+        )
+
+        #expect(throws: ProjectBundleError.self) {
+            try LearnHousePackageBuilder().buildPackage(projectURL: projectURL, outputDirectory: outputURL)
+        }
+    }
 }
 
 private func makeProject(in tempURL: URL) throws -> URL {

@@ -69,6 +69,24 @@ struct RenderPlanTests {
         #expect(issues.map(\.path).contains("missing-webcam.mp4"))
     }
 
+    @Test("Rejects render plans with media paths outside the project")
+    func rejectsRenderPlansWithExternalMediaPaths() throws {
+        let manifest = ProjectManifest(
+            metadata: LessonMetadata(lessonTitle: "Unsafe"),
+            media: ProjectMedia(
+                screen: ProjectFile(relativePath: "/tmp/secret.mp4", role: .screenVideo)
+            )
+        )
+
+        #expect(throws: ProjectBundleError.self) {
+            try RenderPlan.make(
+                manifest: manifest,
+                projectURL: URL(fileURLWithPath: "/tmp/Lesson.dmlm"),
+                destinationURL: URL(fileURLWithPath: "/tmp/lesson.mp4")
+            )
+        }
+    }
+
     @Test("Validation checks annotation timing and normalized coordinates")
     func validationChecksAnnotations() throws {
         let temp = try TemporaryDirectory()

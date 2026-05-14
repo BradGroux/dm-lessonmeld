@@ -59,6 +59,23 @@ struct ConfigBackupPlannerTests {
         #expect(!tracked.contains("profiles/github-token.json"))
     }
 
+    @Test("Excludes symlink escapes from config backups")
+    func excludesSymlinkEscapes() throws {
+        let temp = try TemporaryDirectory()
+        let outside = temp.url.deletingLastPathComponent().appendingPathComponent("outside-\(UUID().uuidString).json")
+        try write("{}", to: outside)
+        let symlinkURL = temp.url.appendingPathComponent("templates/outside.json")
+        try FileManager.default.createDirectory(at: symlinkURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: outside)
+
+        let plan = try ConfigBackupPlanner().plan(rootURL: temp.url)
+
+        #expect(!plan.includePaths.contains("templates/outside.json"))
+        #expect(plan.excludedPaths.contains {
+            $0.path == "templates/outside.json" && $0.reason.contains("Symbolic links")
+        })
+    }
+
     private func write(_ value: String, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try value.write(to: url, atomically: true, encoding: .utf8)

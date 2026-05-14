@@ -48,7 +48,7 @@ struct ProjectBundleTests {
         #expect(issues.first?.severity == .warning)
     }
 
-    @Test("File URL resolution supports project-relative and absolute attachments")
+    @Test("File URL resolution stays inside project bundles")
     func resolvesProjectFileURLs() throws {
         let temp = try TemporaryDirectory()
         let projectURL = temp.url.appendingPathComponent("Sample.dmlm", isDirectory: true)
@@ -59,13 +59,31 @@ struct ProjectBundleTests {
         let absoluteFile = ProjectFile(relativePath: externalURL.path, role: .screenVideo)
 
         #expect(ProjectBundle.fileURL(for: relativeFile, in: projectURL) == projectURL.appendingPathComponent("media/screen.mp4"))
-        #expect(ProjectBundle.fileURL(for: absoluteFile, in: projectURL) == externalURL)
+        #expect(ProjectBundle.fileURL(for: absoluteFile, in: projectURL) != externalURL)
+        #expect(throws: ProjectBundleError.self) {
+            try ProjectBundle.projectLocalFileURL(for: absoluteFile, in: projectURL)
+        }
 
         let manifest = ProjectManifest(
-            metadata: LessonMetadata(lessonTitle: "Absolute Attachment"),
+            metadata: LessonMetadata(lessonTitle: "Unsafe Attachment"),
             media: ProjectMedia(screen: absoluteFile)
         )
-        #expect(ProjectBundle.validate(manifest: manifest, projectURL: projectURL).isEmpty)
+        let issues = ProjectBundle.validate(manifest: manifest, projectURL: projectURL)
+        #expect(issues.contains { $0.severity == .error && $0.path == externalURL.path })
+    }
+
+    @Test("Validation rejects parent traversal media references")
+    func validationRejectsParentTraversalReferences() {
+        let manifest = ProjectManifest(
+            metadata: LessonMetadata(lessonTitle: "Traversal"),
+            media: ProjectMedia(
+                screen: ProjectFile(relativePath: "../screen.mp4", role: .screenVideo)
+            )
+        )
+
+        let issues = ProjectBundle.validate(manifest: manifest, projectURL: URL(fileURLWithPath: "/tmp/Lesson.dmlm"))
+
+        #expect(issues.contains { $0.severity == .error && $0.path == "../screen.mp4" })
     }
 
     @Test("Repairs a bundle manifest from recoverable raw media")

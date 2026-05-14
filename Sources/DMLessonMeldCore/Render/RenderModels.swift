@@ -278,60 +278,72 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         let screenSource = RenderMediaSource(
             role: .screenVideo,
             relativePath: screen.relativePath,
-            url: ProjectBundle.fileURL(for: screen, in: projectURL),
+            url: try ProjectBundle.projectLocalFileURL(for: screen, in: projectURL),
             mimeType: screen.mimeType
         )
 
-        let webcamOverlay = manifest.media.webcam.map { webcam in
-            PictureInPictureOverlay(
+        let webcamOverlay: PictureInPictureOverlay?
+        if let webcam = manifest.media.webcam {
+            webcamOverlay = PictureInPictureOverlay(
                 source: RenderMediaSource(
                     role: .webcamVideo,
                     relativePath: webcam.relativePath,
-                    url: ProjectBundle.fileURL(for: webcam, in: projectURL),
+                    url: try ProjectBundle.projectLocalFileURL(for: webcam, in: projectURL),
                     mimeType: webcam.mimeType
                 ),
                 placement: manifest.capture?.pictureInPicturePlacement ?? .defaultBottomTrailing
             )
+        } else {
+            webcamOverlay = nil
         }
 
-        let audioSources = [
-            manifest.media.microphoneAudio.map {
+        var audioSources: [RenderMediaSource] = []
+        if let microphoneAudio = manifest.media.microphoneAudio {
+            audioSources.append(
                 RenderMediaSource(
                     role: .microphoneAudio,
-                    relativePath: $0.relativePath,
-                    url: ProjectBundle.fileURL(for: $0, in: projectURL),
-                    mimeType: $0.mimeType
+                    relativePath: microphoneAudio.relativePath,
+                    url: try ProjectBundle.projectLocalFileURL(for: microphoneAudio, in: projectURL),
+                    mimeType: microphoneAudio.mimeType
                 )
-            },
-            manifest.media.systemAudio.map {
+            )
+        }
+        if let systemAudio = manifest.media.systemAudio {
+            audioSources.append(
                 RenderMediaSource(
                     role: .systemAudio,
-                    relativePath: $0.relativePath,
-                    url: ProjectBundle.fileURL(for: $0, in: projectURL),
-                    mimeType: $0.mimeType
+                    relativePath: systemAudio.relativePath,
+                    url: try ProjectBundle.projectLocalFileURL(for: systemAudio, in: projectURL),
+                    mimeType: systemAudio.mimeType
                 )
-            }
-        ].compactMap { $0 }
+            )
+        }
 
-        let cursorSource = manifest.media.cursorMetadata.map { cursorMetadata in
-            RenderMediaSource(
+        let cursorSource: RenderMediaSource?
+        if let cursorMetadata = manifest.media.cursorMetadata {
+            cursorSource = RenderMediaSource(
                 role: .cursorMetadata,
                 relativePath: cursorMetadata.relativePath,
-                url: ProjectBundle.fileURL(for: cursorMetadata, in: projectURL),
+                url: try ProjectBundle.projectLocalFileURL(for: cursorMetadata, in: projectURL),
                 mimeType: cursorMetadata.mimeType
             )
+        } else {
+            cursorSource = nil
         }
 
-        let annotationSource = manifest.media.annotations.map { annotations in
-            RenderMediaSource(
+        let annotationSource: RenderMediaSource?
+        if let annotations = manifest.media.annotations {
+            annotationSource = RenderMediaSource(
                 role: .annotations,
                 relativePath: annotations.relativePath,
-                url: ProjectBundle.fileURL(for: annotations, in: projectURL),
+                url: try ProjectBundle.projectLocalFileURL(for: annotations, in: projectURL),
                 mimeType: annotations.mimeType
             )
+        } else {
+            annotationSource = nil
         }
 
-        let captionSource = transcriptRenderSource(manifest: manifest, projectURL: projectURL)
+        let captionSource = try transcriptRenderSource(manifest: manifest, projectURL: projectURL)
 
         return RenderPlan(
             projectURL: projectURL,
@@ -348,12 +360,12 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         )
     }
 
-    private static func transcriptRenderSource(manifest: ProjectManifest, projectURL: URL) -> RenderMediaSource? {
+    private static func transcriptRenderSource(manifest: ProjectManifest, projectURL: URL) throws -> RenderMediaSource? {
         if let transcript = manifest.media.transcripts.first {
             return RenderMediaSource(
                 role: .transcript,
                 relativePath: transcript.relativePath,
-                url: ProjectBundle.fileURL(for: transcript, in: projectURL),
+                url: try ProjectBundle.projectLocalFileURL(for: transcript, in: projectURL),
                 mimeType: transcript.mimeType
             )
         }
@@ -366,7 +378,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         return RenderMediaSource(
             role: .captions,
             relativePath: captions.relativePath,
-            url: ProjectBundle.fileURL(for: captions, in: projectURL),
+            url: try ProjectBundle.projectLocalFileURL(for: captions, in: projectURL),
             mimeType: captions.mimeType
         )
     }
