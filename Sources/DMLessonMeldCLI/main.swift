@@ -48,6 +48,8 @@ struct DMLessonMeldCLI {
             try runPresets(Array(arguments.dropFirst()))
         case "learnhouse":
             try runLearnHouse(Array(arguments.dropFirst()))
+        case "share":
+            try runShare(Array(arguments.dropFirst()))
         case "config":
             try runConfig(Array(arguments.dropFirst()))
         case "agent":
@@ -61,7 +63,7 @@ struct DMLessonMeldCLI {
 
     static func runProject(_ arguments: [String]) throws {
         guard let subcommand = arguments.first else {
-            throw CLIError.usage("Usage: dmlesson project create|inspect|repair|attach <project> [options] [--json]")
+            throw CLIError.usage("Usage: dmlesson project create|inspect|repair|attach|extract-assets <project> [options] [--json]")
         }
 
         switch subcommand {
@@ -129,6 +131,21 @@ struct DMLessonMeldCLI {
                 try printJSON(updated)
             } else {
                 print("Updated project manifest: \(projectURL.path)")
+            }
+        case "extract-assets":
+            guard arguments.count >= 2, let output = optionValue("--output", in: arguments) else {
+                throw CLIError.usage("Usage: dmlesson project extract-assets <project> --output <directory> [--json]")
+            }
+            let projectURL = URL(fileURLWithPath: arguments[1])
+            let result = try RawAssetExtractor().extract(
+                projectURL: projectURL,
+                outputDirectory: URL(fileURLWithPath: output, isDirectory: true)
+            )
+            if arguments.contains("--json") {
+                try printJSON(result)
+            } else {
+                print("Raw assets: \(result.outputDirectoryPath)")
+                print("Files: \(result.files.count)")
             }
         default:
             throw CLIError.invalidCommand(subcommand)
@@ -862,11 +879,11 @@ struct DMLessonMeldCLI {
 
     static func runRender(_ arguments: [String]) async throws {
         guard let subcommand = arguments.first else {
-            throw CLIError.usage("Usage: dmlesson render plan|export <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--json]")
+            throw CLIError.usage("Usage: dmlesson render plan|export <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--json]")
         }
         guard arguments.count >= 2,
               let output = optionValue("--output", in: arguments) else {
-            throw CLIError.usage("Usage: dmlesson render \(subcommand) <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--json]")
+            throw CLIError.usage("Usage: dmlesson render \(subcommand) <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--json]")
         }
 
         let projectURL = URL(fileURLWithPath: arguments[1])
@@ -1096,6 +1113,31 @@ struct DMLessonMeldCLI {
         }
     }
 
+    static func runShare(_ arguments: [String]) throws {
+        guard arguments.count >= 4, arguments[0] == "package" else {
+            throw CLIError.usage("Usage: dmlesson share package <project> --output <directory> [--final-video <video.mp4|video.mov>] [--archive] [--json]")
+        }
+
+        guard let output = optionValue("--output", in: arguments) else {
+            throw CLIError.usage("Usage: dmlesson share package <project> --output <directory> [--final-video <video.mp4|video.mov>] [--archive] [--json]")
+        }
+
+        let result = try LocalSharePackageBuilder().buildPackage(
+            projectURL: URL(fileURLWithPath: arguments[1]),
+            outputDirectory: URL(fileURLWithPath: output, isDirectory: true),
+            finalVideoURL: optionValue("--final-video", in: arguments).map { URL(fileURLWithPath: $0) },
+            archive: arguments.contains("--archive")
+        )
+        if arguments.contains("--json") {
+            try printJSON(result)
+        } else {
+            print("Share package: \(result.packagePath)")
+            if let archivePath = result.archivePath {
+                print("Share archive: \(archivePath)")
+            }
+        }
+    }
+
     static func runConfig(_ arguments: [String]) throws {
         guard let subcommand = arguments.first, arguments.count >= 2 else {
             throw CLIError.usage("Usage: dmlesson config plan|init|status|commit <config-root> [--message <message>] [--json]")
@@ -1216,6 +1258,7 @@ struct DMLessonMeldCLI {
           project inspect <project> [--json]
           project repair <project> [--lesson-title <title>] [--json]
           project attach <project> [--screen <path>] [--webcam <path>] [--microphone-audio <path>] [--system-audio <path>] [--cursor-metadata <path>] [--annotations <path>] [--captions <path>] [--transcript <path>] [--thumbnail <path>] [--json]
+          project extract-assets <project> --output <directory> [--json]
           permissions status|request-screen|request-microphone|request-camera [--json]
           settings defaults [--json]
           settings write-defaults --output <settings.json> [--json]
@@ -1235,7 +1278,7 @@ struct DMLessonMeldCLI {
           annotations add-text <project.dmlm> --text <text> (--x <points> --y <points> | --normalized-x 0...1 --normalized-y 0...1) [--start <seconds>] [--end <seconds>] [--display-id <id>] [--json]
           transcript export <project.dmlm|transcript.json> --format vtt|srt|md|txt --output <path> [--json]
           chapters export <project.dmlm> --format youtube|md|json --output <path> [--json]
-          render plan|export <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--json]
+          render plan|export <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--concurrency 1...8] [--alpha] [--gif] [--prores] [--json]
           export <project> --preset <id> [--json]
           templates list|show <id> [--json]
           templates apply <id> --lesson-title <title> --output <project> [--course-title <title>] [--json]
@@ -1243,6 +1286,7 @@ struct DMLessonMeldCLI {
           presets create-from-project <project> --output <preset.dmlpreset> --name <name> [--summary <text>] [--settings <settings.json>] [--json]
           presets apply <project> --preset <preset.dmlpreset> [--json]
           learnhouse package <project> --output <directory> [--archive] [--json]
+          share package <project> --output <directory> [--final-video <video.mp4|video.mov>] [--archive] [--json]
           config plan|init|status <config-root> [--json]
           config commit <config-root> --message <message> [--json]
           agent manifest <project> [--include-media-paths] [--include-transcript-references]
@@ -1569,7 +1613,18 @@ struct DMLessonMeldCLI {
     static func renderPreset(from arguments: [String], outputURL: URL) -> RenderPreset {
         let quality = optionValue("--quality", in: arguments).flatMap(RenderQuality.init(rawValue:)) ?? .highest
         let fileType: RenderFileType = outputURL.pathExtension.lowercased() == "mov" ? .mov : .mp4
-        return RenderPreset(fileType: fileType, quality: quality)
+        return RenderPreset(
+            fileType: fileType,
+            quality: quality,
+            resolution: optionValue("--resolution", in: arguments).flatMap(RenderResolution.init(rawValue:)) ?? .source,
+            frameRate: optionValue("--fps", in: arguments).flatMap(RenderFrameRate.init(rawValue:)) ?? .source,
+            codec: optionValue("--codec", in: arguments).flatMap(RenderCodec.init(rawValue:)) ?? .h264,
+            hardwareAccelerationEnabled: !arguments.contains("--disable-hardware-acceleration"),
+            maxConcurrentExports: optionValue("--concurrency", in: arguments).flatMap(Int.init) ?? 1,
+            alphaChannelEnabled: arguments.contains("--alpha"),
+            animatedGIFEnabled: arguments.contains("--gif"),
+            proResEnabled: arguments.contains("--prores")
+        )
     }
 
     static func normalizedPresetURL(_ url: URL) -> URL {

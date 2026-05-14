@@ -1464,7 +1464,7 @@ struct ProjectEditorView: View {
 
     private func editorExportInspector(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            inspectorSectionTitle("Export")
+            inspectorSectionTitle("Render Settings")
             Picker("Quality", selection: $model.renderQuality) {
                 ForEach(RenderQuality.allCases, id: \.self) { quality in
                     Text(quality.rawValue.capitalized).tag(quality)
@@ -1475,7 +1475,33 @@ struct ProjectEditorView: View {
                     Text(fileType.rawValue.uppercased()).tag(fileType)
                 }
             }
+            Picker("Resolution", selection: $model.renderResolution) {
+                ForEach(RenderResolution.allCases) { resolution in
+                    Text(resolution.title).tag(resolution)
+                }
+            }
+            Picker("Frame rate", selection: $model.renderFrameRate) {
+                ForEach(RenderFrameRate.allCases) { frameRate in
+                    Text(frameRate.title).tag(frameRate)
+                }
+            }
+            Picker("Codec", selection: $model.renderCodec) {
+                ForEach(RenderCodec.allCases) { codec in
+                    Text(codec.title).tag(codec)
+                }
+            }
+            Toggle("Hardware acceleration", isOn: $model.renderHardwareAccelerationEnabled)
+                .toggleStyle(.checkbox)
+            Stepper("Concurrent exports: \(model.renderMaxConcurrentExports)", value: $model.renderMaxConcurrentExports, in: 1...8)
+            Toggle("Alpha channel", isOn: $model.renderAlphaChannelEnabled)
+                .toggleStyle(.checkbox)
+            Toggle("Animated GIF", isOn: $model.renderAnimatedGIFEnabled)
+                .toggleStyle(.checkbox)
+            Toggle("ProRes", isOn: $model.renderProResEnabled)
+                .toggleStyle(.checkbox)
 
+            Divider()
+            inspectorSectionTitle("Local Render")
             TextField("Destination", text: $model.renderDestinationPath)
                 .font(.system(.caption, design: .monospaced))
                 .textFieldStyle(.roundedBorder)
@@ -1486,10 +1512,45 @@ struct ProjectEditorView: View {
                     .disabled(model.isRendering || model.projectURL == nil)
             }
 
+            Divider()
+            inspectorSectionTitle("Local Share Package")
+            TextField("Package folder", text: $model.sharePackageDestinationPath)
+                .font(.system(.caption, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+            TextField("Final video", text: $model.shareFinalVideoPath)
+                .font(.system(.caption, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Folder...") { model.chooseSharePackageDestination() }
+                Button("Video...") { model.chooseShareFinalVideo() }
+                Button(model.isBuildingSharePackage ? "Packaging..." : "Build Package") { model.buildLocalSharePackage() }
+                    .disabled(model.isBuildingSharePackage || model.projectURL == nil)
+            }
+
+            Divider()
+            inspectorSectionTitle("Raw Assets")
+            TextField("Extract folder", text: $model.rawAssetDestinationPath)
+                .font(.system(.caption, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Folder...") { model.chooseRawAssetDestination() }
+                Button(model.isExtractingRawAssets ? "Extracting..." : "Extract Raw Assets") { model.extractRawAssets() }
+                    .disabled(model.isExtractingRawAssets || model.projectURL == nil)
+            }
+
+            Divider()
+            inspectorSectionTitle("Course Package")
             Button(model.isPackagingLearnHouse ? "Packaging..." : "Package LearnHouse") {
                 model.packageLearnHouse(preferences.snapshot)
             }
             .disabled(model.isPackagingLearnHouse || manifest.media.screen == nil)
+
+            Divider()
+            inspectorSectionTitle("Publishing")
+            Text("Publishing connectors are intentionally gated. Local render, share packages, raw asset extraction, and LearnHouse packages are the only active export actions.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
@@ -4704,8 +4765,19 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var editValidationIssues: [EditValidationIssue] = []
     @Published var renderQuality: RenderQuality = .highest
     @Published var renderFileType: RenderFileType = .mp4
+    @Published var renderResolution: RenderResolution = .source
+    @Published var renderFrameRate: RenderFrameRate = .source
+    @Published var renderCodec: RenderCodec = .h264
+    @Published var renderHardwareAccelerationEnabled = true
+    @Published var renderMaxConcurrentExports = 1
+    @Published var renderAlphaChannelEnabled = false
+    @Published var renderAnimatedGIFEnabled = false
+    @Published var renderProResEnabled = false
     @Published var renderDestinationPath = ""
     @Published var trimDestinationPath = ""
+    @Published var rawAssetDestinationPath = ""
+    @Published var sharePackageDestinationPath = ""
+    @Published var shareFinalVideoPath = ""
     @Published var trimStartSeconds = "0"
     @Published var trimEndSeconds = ""
     @Published var sourceDurationSeconds = ""
@@ -4713,6 +4785,8 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var renderProgress = 0.0
     @Published var isTrimming = false
     @Published var isPackagingLearnHouse = false
+    @Published var isExtractingRawAssets = false
+    @Published var isBuildingSharePackage = false
     @Published var isExportingFrame = false
     @Published var metadataLessonTitle = ""
     @Published var metadataCourseTitle = ""
@@ -6206,6 +6280,30 @@ private final class ProjectEditorModel: ObservableObject {
         }
     }
 
+    func chooseRawAssetDestination() {
+        chooseDirectory(defaultPath: rawAssetDestinationPath, title: "Choose Raw Asset Folder") { [weak self] url in
+            self?.rawAssetDestinationPath = url.path
+        }
+    }
+
+    func chooseSharePackageDestination() {
+        chooseDirectory(defaultPath: sharePackageDestinationPath, title: "Choose Share Package Folder") { [weak self] url in
+            self?.sharePackageDestinationPath = url.path
+        }
+    }
+
+    func chooseShareFinalVideo() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Final Rendered Video"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = Self.editableVideoContentTypes
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        shareFinalVideoPath = url.path
+    }
+
     func inspectRender(_ preferences: LessonMeldPreferences) {
         guard let projectURL else {
             setError("Open a project before inspecting render output.")
@@ -6343,6 +6441,67 @@ private final class ProjectEditorModel: ObservableObject {
         }
     }
 
+    func extractRawAssets() {
+        guard let projectURL else {
+            setError("Open a project before extracting raw assets.")
+            return
+        }
+        guard !isExtractingRawAssets else { return }
+
+        isExtractingRawAssets = true
+        setMessage("Extracting raw assets...")
+        let outputDirectory = directoryURL(path: rawAssetDestinationPath, fallback: projectURL.deletingLastPathComponent())
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                let result = try RawAssetExtractor().extract(projectURL: projectURL, outputDirectory: outputDirectory)
+                await MainActor.run {
+                    self.isExtractingRawAssets = false
+                    self.setMessage("Extracted \(result.files.count) raw asset\(result.files.count == 1 ? "" : "s").")
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.outputDirectoryPath)])
+                }
+            } catch {
+                await MainActor.run {
+                    self.isExtractingRawAssets = false
+                    self.setError(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    func buildLocalSharePackage() {
+        guard let projectURL else {
+            setError("Open a project before building a share package.")
+            return
+        }
+        guard !isBuildingSharePackage else { return }
+
+        isBuildingSharePackage = true
+        setMessage("Building local share package...")
+        let outputDirectory = directoryURL(path: sharePackageDestinationPath, fallback: projectURL.deletingLastPathComponent())
+        let finalVideoURL = optionalFileURL(path: shareFinalVideoPath)
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                let result = try LocalSharePackageBuilder().buildPackage(
+                    projectURL: projectURL,
+                    outputDirectory: outputDirectory,
+                    finalVideoURL: finalVideoURL
+                )
+                await MainActor.run {
+                    self.isBuildingSharePackage = false
+                    self.setMessage("Built local share package.")
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.packagePath)])
+                }
+            } catch {
+                await MainActor.run {
+                    self.isBuildingSharePackage = false
+                    self.setError(error.localizedDescription)
+                }
+            }
+        }
+    }
+
     func cancelRender() {
         renderTask?.cancel()
         setMessage("Cancelling render...")
@@ -6362,7 +6521,7 @@ private final class ProjectEditorModel: ObservableObject {
             manifest: manifest,
             projectURL: projectURL,
             destinationURL: destinationURL,
-            preset: RenderPreset(fileType: renderFileType, quality: renderQuality),
+            preset: renderPresetFromFields(),
             editDecisionList: editDecisionList,
             editorSettings: editorSettings
         )
@@ -6370,6 +6529,21 @@ private final class ProjectEditorModel: ObservableObject {
             plan.webcamOverlay?.placement = Self.webcamPlacement(from: preferences.capture)
         }
         return plan
+    }
+
+    private func renderPresetFromFields() -> RenderPreset {
+        RenderPreset(
+            fileType: renderFileType,
+            quality: renderQuality,
+            resolution: renderResolution,
+            frameRate: renderFrameRate,
+            codec: renderCodec,
+            hardwareAccelerationEnabled: renderHardwareAccelerationEnabled,
+            maxConcurrentExports: renderMaxConcurrentExports,
+            alphaChannelEnabled: renderAlphaChannelEnabled,
+            animatedGIFEnabled: renderAnimatedGIFEnabled,
+            proResEnabled: renderProResEnabled || renderCodec == .proRes
+        )
     }
 
     func exportTrim() {
@@ -7415,6 +7589,22 @@ private final class ProjectEditorModel: ObservableObject {
         onChoose(url)
     }
 
+    private func chooseDirectory(defaultPath: String, title: String, onChoose: (URL) -> Void) {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        let trimmed = defaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: NSString(string: trimmed).expandingTildeInPath, isDirectory: true)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        onChoose(url)
+    }
+
     private func chooseLessonPreset(title: String) throws -> LessonPreset? {
         let panel = NSOpenPanel()
         panel.title = title
@@ -7442,6 +7632,15 @@ private final class ProjectEditorModel: ObservableObject {
         if trimDestinationPath.isEmpty || URL(fileURLWithPath: trimDestinationPath).pathExtension != fileExtension {
             trimDestinationPath = root.appendingPathComponent("\(baseName)-trim.\(fileExtension)").path
         }
+        if rawAssetDestinationPath.isEmpty {
+            rawAssetDestinationPath = root.appendingPathComponent("Raw Assets", isDirectory: true).path
+        }
+        if sharePackageDestinationPath.isEmpty {
+            sharePackageDestinationPath = root.appendingPathComponent("Lesson Shares", isDirectory: true).path
+        }
+        if shareFinalVideoPath.isEmpty {
+            shareFinalVideoPath = renderDestinationPath
+        }
     }
 
     private func destinationURL(path: String) throws -> URL {
@@ -7449,6 +7648,18 @@ private final class ProjectEditorModel: ObservableObject {
         guard !trimmed.isEmpty else {
             throw ProjectEditorError.invalidDestination
         }
+        return URL(fileURLWithPath: NSString(string: trimmed).expandingTildeInPath)
+    }
+
+    private func directoryURL(path: String, fallback: URL) -> URL {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return fallback }
+        return URL(fileURLWithPath: NSString(string: trimmed).expandingTildeInPath, isDirectory: true)
+    }
+
+    private func optionalFileURL(path: String) -> URL? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
         return URL(fileURLWithPath: NSString(string: trimmed).expandingTildeInPath)
     }
 

@@ -76,6 +76,7 @@ public enum RenderPlanValidator {
             ))
         }
 
+        validatePreset(plan.preset, issues: &issues)
         if plan.webcamOverlay != nil {
             validatePictureInPicture(plan.webcamOverlay!.placement, issues: &issues)
         }
@@ -116,6 +117,72 @@ public enum RenderPlanValidator {
         }
 
         return issues
+    }
+
+    private static func validatePreset(_ preset: RenderPreset, issues: inout [RenderValidationIssue]) {
+        if preset.maxConcurrentExports < 1 || preset.maxConcurrentExports > 8 {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Render concurrency must be between 1 and 8.",
+                path: "preset.maxConcurrentExports"
+            ))
+        }
+
+        if preset.resolution != .source {
+            issues.append(RenderValidationIssue(
+                severity: .warning,
+                message: "Resolution override is recorded in the render plan, but the current renderer still uses source or canvas sizing.",
+                path: "preset.resolution"
+            ))
+        }
+
+        if preset.frameRate != .source {
+            issues.append(RenderValidationIssue(
+                severity: .warning,
+                message: "Frame-rate override is recorded in the render plan, but the current renderer still uses source timing.",
+                path: "preset.frameRate"
+            ))
+        }
+
+        if preset.codec == .hevc {
+            issues.append(RenderValidationIssue(
+                severity: .warning,
+                message: "HEVC codec selection is recorded in the render plan, but AVFoundation currently chooses the concrete codec from the export preset.",
+                path: "preset.codec"
+            ))
+        }
+
+        if !preset.hardwareAccelerationEnabled || preset.maxConcurrentExports > 1 {
+            issues.append(RenderValidationIssue(
+                severity: .warning,
+                message: "Performance controls are recorded in the render plan for export queues, but the current single-render path may not use every setting.",
+                path: "preset"
+            ))
+        }
+
+        if preset.codec == .proRes || preset.proResEnabled {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "ProRes export is not implemented yet.",
+                path: "preset.codec"
+            ))
+        }
+
+        if preset.alphaChannelEnabled {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Alpha-channel export is not implemented yet.",
+                path: "preset.alphaChannelEnabled"
+            ))
+        }
+
+        if preset.animatedGIFEnabled {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Animated GIF export is not implemented yet.",
+                path: "preset.animatedGIFEnabled"
+            ))
+        }
     }
 
     private static func validatePictureInPicture(
