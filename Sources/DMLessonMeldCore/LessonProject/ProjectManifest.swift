@@ -78,6 +78,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
     public var systemAudio: ProjectFile?
     public var cursorMetadata: ProjectFile?
     public var annotations: ProjectFile?
+    public var overlays: ProjectFile?
     public var captions: [ProjectFile]
     public var transcripts: [ProjectFile]
     public var thumbnail: ProjectFile?
@@ -90,6 +91,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
         systemAudio: ProjectFile? = nil,
         cursorMetadata: ProjectFile? = nil,
         annotations: ProjectFile? = nil,
+        overlays: ProjectFile? = nil,
         captions: [ProjectFile] = [],
         transcripts: [ProjectFile] = [],
         thumbnail: ProjectFile? = nil,
@@ -101,6 +103,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
         self.systemAudio = systemAudio
         self.cursorMetadata = cursorMetadata
         self.annotations = annotations
+        self.overlays = overlays
         self.captions = captions
         self.transcripts = transcripts
         self.thumbnail = thumbnail
@@ -124,6 +127,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
             systemAudio: systemAudio,
             cursorMetadata: nil,
             annotations: nil,
+            overlays: nil,
             captions: captions,
             transcripts: transcripts,
             thumbnail: thumbnail,
@@ -132,7 +136,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
     }
 
     public var allFiles: [ProjectFile] {
-        [screen, webcam, microphoneAudio, systemAudio, cursorMetadata, annotations, thumbnail].compactMap { $0 }
+        [screen, webcam, microphoneAudio, systemAudio, cursorMetadata, annotations, overlays, thumbnail].compactMap { $0 }
             + captions
             + transcripts
             + attachments
@@ -165,6 +169,7 @@ public enum ProjectFileRole: String, Codable, CaseIterable, Sendable {
     case systemAudio
     case cursorMetadata
     case annotations
+    case overlays
     case captions
     case transcript
     case thumbnail
@@ -329,6 +334,7 @@ public enum TimelineTrackKind: String, Codable, CaseIterable, Sendable {
     case systemAudio
     case cursor
     case annotations
+    case overlays
     case captions
     case effects
 }

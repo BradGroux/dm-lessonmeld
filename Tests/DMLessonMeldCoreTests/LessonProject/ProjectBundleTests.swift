@@ -96,6 +96,13 @@ struct ProjectBundleTests {
         try Data("mic".utf8).write(to: projectURL.appendingPathComponent("microphone.m4a"))
         try Data("{}".utf8).write(to: projectURL.appendingPathComponent("cursor-metadata.json"))
         try Data("{}".utf8).write(to: projectURL.appendingPathComponent("annotations.json"))
+        try DMLessonJSON.encoder().encode(OverlayStore(overlays: [
+            OverlayItem(
+                id: "title",
+                kind: .text,
+                timeRange: EditTimeRange(startSeconds: 0, durationSeconds: 3)
+            )
+        ])).write(to: projectURL.appendingPathComponent("overlays.json"))
 
         let result = try ProjectBundle.repair(at: projectURL)
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
@@ -108,8 +115,10 @@ struct ProjectBundleTests {
         #expect(manifest.media.microphoneAudio?.relativePath == "microphone.m4a")
         #expect(manifest.media.cursorMetadata?.relativePath == "cursor-metadata.json")
         #expect(manifest.media.annotations?.relativePath == "annotations.json")
+        #expect(manifest.media.overlays?.relativePath == "overlays.json")
         #expect(manifest.tracks.map(\.kind).contains(.screen))
         #expect(manifest.tracks.map(\.kind).contains(.cursor))
+        #expect(manifest.tracks.map(\.kind).contains(.overlays))
         #expect(result.issues.isEmpty)
     }
 

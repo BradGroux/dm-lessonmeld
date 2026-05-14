@@ -41,7 +41,7 @@ When you press **Stop**, LessonMeld opens the saved lesson in the editor. The `.
 
 Use **Edit Video** in the sidebar, **File > Create Project from Video...**, the command palette, or the menu bar extra to import an existing MP4 or MOV.
 
-LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the timeline editor immediately. Imported videos use the full editing workspace: a large preview canvas, custom playback controls, trim in/out points, cut blocks, zoom blocks, markers, annotation controls, export controls, and a bottom timeline. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle.
+LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the timeline editor immediately. Imported videos use the full editing workspace: a large preview canvas, custom playback controls, trim in/out points, cut blocks, zoom blocks, overlays, markers, annotation controls, export controls, and a bottom timeline. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle.
 
 ## Review a Project
 
@@ -51,8 +51,8 @@ Open a `.dmlm` lesson bundle from the sidebar or Finder. The project editor lets
 - Style the final video canvas with aspect ratio, custom dimensions, crop, background, padding, inset, rounded corners, and shadow controls
 - Review media readiness
 - Add and edit markers
-- Save timeline cuts and zoom regions
-- Scrub through a bottom timeline with clip, cut, zoom, and marker lanes
+- Save timeline cuts, zoom regions, and timed video overlays
+- Scrub through a bottom timeline with clip, cut, zoom, overlay, cursor, and marker lanes
 - Open annotation tools
 - Render local video files
 - Package course exports
@@ -89,6 +89,17 @@ The bottom timeline writes to the same project-local sidecars used by render/exp
 - Use the left and right arrow keys to nudge the playhead by one second.
 
 Search **Timeline Editing Shortcuts** in the command palette for the active keyboard controls.
+
+## Add Video Overlays
+
+Use the **Overlays** inspector tab or the overlay timeline lane to add project-local text, shapes, callouts, arrows, and image overlays.
+
+- Add text, callout, shape, or image overlays at the playhead.
+- Drag an overlay on the preview to place it visually.
+- Drag or resize overlay blocks in the **Overlays** timeline lane to control timing.
+- Edit opacity, text size, fill, stroke, fade in/out, animation preset, and z-order.
+- Imported images are copied under `overlays/assets/` inside the `.dmlm` bundle.
+- Save overlays into `overlays.json` so render/export burns them into the final video.
 
 ## Add Zooms
 

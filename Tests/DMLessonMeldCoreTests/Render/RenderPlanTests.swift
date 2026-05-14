@@ -124,12 +124,13 @@ struct RenderPlanTests {
         }
     }
 
-    @Test("Validation checks annotation timing and normalized coordinates")
-    func validationChecksAnnotations() throws {
+    @Test("Validation checks annotation and overlay timing and normalized coordinates")
+    func validationChecksAnnotationsAndOverlays() throws {
         let temp = try TemporaryDirectory()
         let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
         try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
         let annotationsURL = projectURL.appendingPathComponent("annotations.json")
+        let overlaysURL = projectURL.appendingPathComponent("overlays.json")
         try DMLessonJSON.encoder().encode(AnnotationStore(annotations: [
             AnnotationItem(
                 displayID: 0,
@@ -148,12 +149,28 @@ struct RenderPlanTests {
                 text: "Legacy"
             )
         ])).write(to: annotationsURL, options: [.atomic])
+        try DMLessonJSON.encoder().encode(OverlayStore(overlays: [
+            OverlayItem(
+                id: "bad-range",
+                kind: .text,
+                timeRange: EditTimeRange(startSeconds: 3, durationSeconds: -1),
+                frame: NormalizedEditRect(x: 0.2, y: 0.2, width: 0.4, height: 0.2)
+            ),
+            OverlayItem(
+                id: "missing-image",
+                kind: .image,
+                timeRange: EditTimeRange(startSeconds: 0, durationSeconds: 2),
+                frame: NormalizedEditRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2),
+                style: OverlayStyle(imagePath: "overlays/assets/missing.png")
+            )
+        ])).write(to: overlaysURL, options: [.atomic])
         let plan = try RenderPlan.make(
             manifest: ProjectManifest(
                 metadata: LessonMetadata(lessonTitle: "Lesson"),
                 media: ProjectMedia(
                     screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo),
-                    annotations: ProjectFile(relativePath: "annotations.json", role: .annotations, mimeType: "application/json")
+                    annotations: ProjectFile(relativePath: "annotations.json", role: .annotations, mimeType: "application/json"),
+                    overlays: ProjectFile(relativePath: "overlays.json", role: .overlays, mimeType: "application/json")
                 )
             ),
             projectURL: projectURL,
@@ -170,6 +187,12 @@ struct RenderPlanTests {
         })
         #expect(issues.contains {
             $0.severity == .warning && $0.path == "annotations[1].points"
+        })
+        #expect(issues.contains {
+            $0.severity == .error && $0.path == "overlays[0].timeRange"
+        })
+        #expect(issues.contains {
+            $0.severity == .error && $0.path == "overlays/assets/missing.png"
         })
     }
 
@@ -362,6 +385,7 @@ struct RenderPlanTests {
         let backgroundURL = projectURL.appendingPathComponent("backgrounds/canvas-background.png")
         let cursorURL = projectURL.appendingPathComponent("cursor-metadata.json")
         let annotationsURL = projectURL.appendingPathComponent("annotations.json")
+        let overlaysURL = projectURL.appendingPathComponent("overlays.json")
         let transcriptURL = projectURL.appendingPathComponent("transcript.json")
         let outputURL = temp.url.appendingPathComponent("exports/lesson.mp4")
 
@@ -417,6 +441,24 @@ struct RenderPlanTests {
                 textStyle: AnnotationTextStyle(fontSize: 18, weight: .bold)
             )
         ])).write(to: annotationsURL, options: [.atomic])
+        try DMLessonJSON.encoder().encode(OverlayStore(overlays: [
+            OverlayItem(
+                id: "overlay-title",
+                kind: .text,
+                timeRange: EditTimeRange(startSeconds: 0.1, durationSeconds: 0.6),
+                frame: NormalizedEditRect(x: 0.12, y: 0.1, width: 0.48, height: 0.16),
+                opacity: 0.92,
+                zIndex: 10,
+                style: OverlayStyle(
+                    text: "Key idea",
+                    fontSize: 18,
+                    textColor: .white,
+                    fillColor: RGBAColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.75),
+                    strokeColor: .yellow
+                ),
+                animation: OverlayAnimation(fadeInSeconds: 0.1, fadeOutSeconds: 0.1, preset: .scaleIn)
+            )
+        ])).write(to: overlaysURL, options: [.atomic])
         try DMLessonJSON.encoder().encode(TranscriptDocument(
             language: "en",
             title: "Synthetic Lesson",
@@ -474,6 +516,7 @@ struct RenderPlanTests {
                     webcam: ProjectFile(relativePath: "media/webcam.mp4", role: .webcamVideo, mimeType: "video/mp4"),
                     cursorMetadata: ProjectFile(relativePath: "cursor-metadata.json", role: .cursorMetadata, mimeType: "application/json"),
                     annotations: ProjectFile(relativePath: "annotations.json", role: .annotations, mimeType: "application/json"),
+                    overlays: ProjectFile(relativePath: "overlays.json", role: .overlays, mimeType: "application/json"),
                     transcripts: [
                         ProjectFile(relativePath: "transcript.json", role: .transcript, mimeType: "application/json")
                     ]
@@ -488,10 +531,12 @@ struct RenderPlanTests {
         )
         #expect(inspection.hasCursorEffects)
         #expect(inspection.hasAnnotations)
+        #expect(inspection.hasOverlays)
         #expect(inspection.hasCaptions)
         #expect(inspection.hasZoomRegions)
         #expect(inspection.plan?.cursorSource?.url == cursorURL)
         #expect(inspection.plan?.annotationSource?.url == annotationsURL)
+        #expect(inspection.plan?.overlaySource?.url == overlaysURL)
         #expect(inspection.plan?.captionSource?.url == transcriptURL)
         #expect(inspection.plan?.zoomRegions.map(\.id) == ["zoom-1"])
         #expect(inspection.plan?.canvas == canvasSettings.canvas)

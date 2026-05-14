@@ -84,6 +84,9 @@ public enum RenderPlanValidator {
         if let annotationSource = plan.annotationSource {
             validateAnnotations(annotationSource, issues: &issues, fileManager: fileManager)
         }
+        if let overlaySource = plan.overlaySource {
+            validateOverlays(overlaySource, projectURL: plan.projectURL, issues: &issues, fileManager: fileManager)
+        }
 
         if options.checkFileExistence {
             for source in plan.requiredMediaSources {
@@ -217,6 +220,78 @@ public enum RenderPlanValidator {
             ))
         }
     }
+
+    private static func validateOverlays(
+        _ source: RenderMediaSource,
+        projectURL: URL,
+        issues: inout [RenderValidationIssue],
+        fileManager: FileManager
+    ) {
+        guard fileManager.fileExists(atPath: source.url.path) else { return }
+        do {
+            let data = try Data(contentsOf: source.url)
+            let store = try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
+            for (index, overlay) in store.overlays.enumerated() {
+                let path = "overlays[\(index)]"
+                if !overlay.timeRange.startSeconds.isFinite ||
+                    !overlay.timeRange.durationSeconds.isFinite ||
+                    overlay.timeRange.startSeconds < 0 ||
+                    overlay.timeRange.durationSeconds <= 0 {
+                    issues.append(RenderValidationIssue(
+                        severity: .error,
+                        message: "Overlay time range must be finite, non-negative, and positive.",
+                        path: "\(path).timeRange"
+                    ))
+                }
+                if overlay.frame.width <= 0 ||
+                    overlay.frame.height <= 0 ||
+                    overlay.frame.x + overlay.frame.width > 1 ||
+                    overlay.frame.y + overlay.frame.height > 1 {
+                    issues.append(RenderValidationIssue(
+                        severity: .error,
+                        message: "Overlay frame must have positive size and stay inside the normalized frame.",
+                        path: "\(path).frame"
+                    ))
+                }
+                if overlay.kind == .image {
+                    let imagePath = overlay.style.imagePath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if imagePath.isEmpty {
+                        issues.append(RenderValidationIssue(
+                            severity: .error,
+                            message: "Image overlays require a project-local image path.",
+                            path: "\(path).style.imagePath"
+                        ))
+                    } else {
+                        let imageFile = ProjectFile(relativePath: imagePath, role: .attachment)
+                        let imageURL: URL
+                        do {
+                            imageURL = try ProjectBundle.projectLocalFileURL(for: imageFile, in: projectURL)
+                        } catch {
+                            issues.append(RenderValidationIssue(
+                                severity: .error,
+                                message: "Image overlay asset must be a project-local relative path.",
+                                path: imagePath
+                            ))
+                            continue
+                        }
+                        if !fileManager.fileExists(atPath: imageURL.path) {
+                            issues.append(RenderValidationIssue(
+                                severity: .error,
+                                message: "Image overlay asset is missing.",
+                                path: imagePath
+                            ))
+                        }
+                    }
+                }
+            }
+        } catch {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Overlay sidecar could not be decoded.",
+                path: source.relativePath
+            ))
+        }
+    }
 }
 
 extension RenderPlan {
@@ -231,6 +306,9 @@ extension RenderPlan {
         }
         if let annotationSource {
             sources.append(annotationSource)
+        }
+        if let overlaySource {
+            sources.append(overlaySource)
         }
         if let captionSource {
             sources.append(captionSource)
