@@ -23,6 +23,7 @@ struct ProjectEditorView: View {
     @State private var activeOverlayDrag: OverlayPreviewDragState?
     @State private var activeOverlayResizeDrag: OverlayPreviewResizeDragState?
     @State private var selectedTimelineItem: TimelineSelection?
+    private let mediaEditorInspectorWidth: CGFloat = 420
 
     var body: some View {
         HStack(spacing: 0) {
@@ -57,7 +58,7 @@ struct ProjectEditorView: View {
             quickRecorder.openProjectHandler = nil
             quickRecorder.annotationOverlayHandler = fallbackAnnotationOverlayHandler
             ProjectOpenRouter.shared.unregisterConsumer()
-            model.teardown()
+            model.closeProject()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             quickRecorder.refreshPermissions(updateMessage: false)
@@ -93,7 +94,7 @@ struct ProjectEditorView: View {
         if model.projectURL != nil, let manifest = model.manifest, let summary = model.summary {
             if manifest.media.screen != nil {
                 mediaEditorWorkspace(summary: summary, manifest: manifest)
-                    .padding(.top, 44)
+                    .padding(.top, 20)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -273,11 +274,14 @@ struct ProjectEditorView: View {
                 mediaEditorStage(manifest: manifest)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .layoutPriority(1)
+                    .clipped()
 
                 Divider()
 
                 mediaEditorInspector(summary: summary, manifest: manifest)
-                    .frame(width: 360)
+                    .frame(width: mediaEditorInspectorWidth)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .clipped()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -448,13 +452,7 @@ struct ProjectEditorView: View {
 
     private func mediaEditorInspector(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Picker("Inspector", selection: $editorInspectorTab) {
-                ForEach(EditorInspectorTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            inspectorPanelHeader
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -486,9 +484,59 @@ struct ProjectEditorView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 12)
             }
+            .scrollIndicators(.visible)
         }
         .padding(.leading, 16)
+        .padding(.trailing, 12)
         .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipped()
+    }
+
+    private var inspectorPanelHeader: some View {
+        HStack(spacing: 10) {
+            Label(editorInspectorTab.title, systemImage: editorInspectorTab.systemImage)
+                .font(.headline)
+                .lineLimit(1)
+
+            Spacer()
+
+            Menu {
+                ForEach(EditorInspectorTab.allCases) { tab in
+                    Button {
+                        editorInspectorTab = tab
+                    } label: {
+                        Label(tab.title, systemImage: tab.systemImage)
+                    }
+                }
+            } label: {
+                Label("Panel", systemImage: "sidebar.right")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .padding(.bottom, 2)
+    }
+
+    private func inspectorActionGrid(_ actions: [EditorInspectorAction]) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 112, maximum: 128), spacing: 8)],
+            alignment: .leading,
+            spacing: 8
+        ) {
+            ForEach(actions) { action in
+                Button {
+                    action.handler()
+                } label: {
+                    Label(action.title, systemImage: action.systemImage)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .frame(maxWidth: .infinity, minHeight: 28)
+                }
+            }
+        }
     }
 
     private func editorEditsInspector(manifest: ProjectManifest) -> some View {
@@ -797,37 +845,24 @@ struct ProjectEditorView: View {
 
     private func editorOverlaysInspector(manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                inspectorSectionTitle("Overlays")
-                Spacer()
-                Button {
+            inspectorSectionTitle("Overlays")
+            inspectorActionGrid([
+                EditorInspectorAction("Text", systemImage: "textformat") {
                     model.addOverlayAtPlayhead(kind: .text)
-                } label: {
-                    Label("Text", systemImage: "textformat")
-                }
-                Button {
+                },
+                EditorInspectorAction("Callout", systemImage: "text.bubble") {
                     model.addOverlayAtPlayhead(kind: .callout)
-                } label: {
-                    Label("Callout", systemImage: "text.bubble")
-                }
-            }
-            HStack {
-                Button {
+                },
+                EditorInspectorAction("Shape", systemImage: "rectangle") {
                     model.addOverlayAtPlayhead(kind: .rectangle)
-                } label: {
-                    Label("Shape", systemImage: "rectangle")
-                }
-                Button {
+                },
+                EditorInspectorAction("Image", systemImage: "photo") {
                     model.chooseOverlayImageAtPlayhead()
-                } label: {
-                    Label("Image", systemImage: "photo")
-                }
-                Button {
+                },
+                EditorInspectorAction("Highlight", systemImage: "viewfinder") {
                     model.addOverlayAtPlayhead(kind: .highlight)
-                } label: {
-                    Label("Highlight", systemImage: "viewfinder")
                 }
-            }
+            ])
 
             if model.overlayRows.isEmpty {
                 Text("No overlays yet. Add text, shapes, callouts, or images, then drag them on the preview and timeline.")
@@ -839,11 +874,6 @@ struct ProjectEditorView: View {
                         HStack {
                             Toggle("Enabled", isOn: $overlay.isEnabled)
                                 .toggleStyle(.checkbox)
-                            Picker("Kind", selection: $overlay.kind) {
-                                ForEach(OverlayKind.allCases) { kind in
-                                    Text(kind.title).tag(kind)
-                                }
-                            }
                             Spacer()
                             Button {
                                 model.seek(to: secondsValue(overlay.startSeconds) ?? 0)
@@ -858,6 +888,12 @@ struct ProjectEditorView: View {
                             }
                             .buttonStyle(.borderless)
                         }
+                        Picker("Kind", selection: $overlay.kind) {
+                            ForEach(OverlayKind.allCases) { kind in
+                                Text(kind.title).tag(kind)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         HStack {
                             compactNumberField("Start", text: $overlay.startSeconds)
                             compactNumberField("End", text: $overlay.endSeconds)
@@ -888,27 +924,17 @@ struct ProjectEditorView: View {
                                 }
                             }
                         }
-                        HStack {
-                            numericStringSlider("X", text: $overlay.x, range: 0...1, format: "%.2f")
-                            numericStringSlider("Y", text: $overlay.y, range: 0...1, format: "%.2f")
-                        }
-                        HStack {
-                            numericStringSlider("Width", text: $overlay.width, range: 0.04...1, format: "%.2f")
-                            numericStringSlider("Height", text: $overlay.height, range: 0.04...1, format: "%.2f")
-                        }
-                        HStack {
-                            numericStringSlider("Opacity", text: $overlay.opacity, range: 0...1, format: "%.2f")
-                            numericStringSlider("Text size", text: $overlay.fontSize, range: 10...120, format: "%.0f")
-                        }
-                        HStack {
-                            numericStringSlider("Fade in", text: $overlay.fadeInSeconds, range: 0...2, format: "%.2f")
-                            numericStringSlider("Fade out", text: $overlay.fadeOutSeconds, range: 0...2, format: "%.2f")
-                        }
-                        HStack {
-                            numericStringSlider("Corners", text: $overlay.cornerRadius, range: 0...96, format: "%.0f")
-                            if overlay.kind == .highlight {
-                                numericStringSlider("Feather", text: $overlay.featherRadius, range: 0...80, format: "%.0f")
-                            }
+                        numericStringSlider("X", text: $overlay.x, range: 0...1, format: "%.2f")
+                        numericStringSlider("Y", text: $overlay.y, range: 0...1, format: "%.2f")
+                        numericStringSlider("Width", text: $overlay.width, range: 0.04...1, format: "%.2f")
+                        numericStringSlider("Height", text: $overlay.height, range: 0.04...1, format: "%.2f")
+                        numericStringSlider("Opacity", text: $overlay.opacity, range: 0...1, format: "%.2f")
+                        numericStringSlider("Text size", text: $overlay.fontSize, range: 10...120, format: "%.0f")
+                        numericStringSlider("Fade in", text: $overlay.fadeInSeconds, range: 0...2, format: "%.2f")
+                        numericStringSlider("Fade out", text: $overlay.fadeOutSeconds, range: 0...2, format: "%.2f")
+                        numericStringSlider("Corners", text: $overlay.cornerRadius, range: 0...96, format: "%.0f")
+                        if overlay.kind == .highlight {
+                            numericStringSlider("Feather", text: $overlay.featherRadius, range: 0...80, format: "%.0f")
                         }
                         if overlay.kind == .highlight {
                             numericStringSlider("Blur", text: $overlay.blurRadius, range: 0...80, format: "%.0f")
@@ -928,10 +954,14 @@ struct ProjectEditorView: View {
                 }
             }
 
-            HStack {
-                Button("Save Overlays") { model.saveOverlays() }
-                Button("Reload") { model.reloadOverlays() }
-            }
+            inspectorActionGrid([
+                EditorInspectorAction("Save Overlays", systemImage: "checkmark.circle") {
+                    model.saveOverlays()
+                },
+                EditorInspectorAction("Reload", systemImage: "arrow.clockwise") {
+                    model.reloadOverlays()
+                }
+            ])
         }
     }
 
@@ -1235,20 +1265,15 @@ struct ProjectEditorView: View {
 
     private func editorCaptionsInspector(manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                inspectorSectionTitle("Captions")
-                Spacer()
-                Button {
+            inspectorSectionTitle("Captions")
+            inspectorActionGrid([
+                EditorInspectorAction("Add", systemImage: "plus") {
                     model.addCaptionAtPlayhead()
-                } label: {
-                    Label("Add", systemImage: "plus")
-                }
-                Button {
+                },
+                EditorInspectorAction("Import", systemImage: "square.and.arrow.down") {
                     model.importCaptions()
-                } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
                 }
-            }
+            ])
 
             if model.captionRows.isEmpty {
                 Text("No captions yet. Import VTT, SRT, JSON, or text, or add a caption manually at the playhead.")
@@ -1257,9 +1282,10 @@ struct ProjectEditorView: View {
             } else {
                 ForEach($model.captionRows) { $caption in
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
+                        HStack(alignment: .bottom) {
                             compactNumberField("Start", text: $caption.startSeconds)
                             compactNumberField("End", text: $caption.endSeconds)
+                            Spacer(minLength: 4)
                             Button {
                                 model.seek(to: secondsValue(caption.startSeconds) ?? 0)
                             } label: {
@@ -1299,11 +1325,17 @@ struct ProjectEditorView: View {
             colorPickerRow("Text", selection: $model.captionTextColor)
             colorPickerRow("Background", selection: $model.captionBackgroundColor)
 
-            HStack {
-                Button("Save Captions") { model.saveCaptions() }
-                Button("Export Sidecars") { model.exportCaptionSidecars() }
-                Button("Save Style") { model.saveEditorSettings() }
-            }
+            inspectorActionGrid([
+                EditorInspectorAction("Save Captions", systemImage: "checkmark.circle") {
+                    model.saveCaptions()
+                },
+                EditorInspectorAction("Export Sidecars", systemImage: "square.and.arrow.up") {
+                    model.exportCaptionSidecars()
+                },
+                EditorInspectorAction("Save Style", systemImage: "paintbrush") {
+                    model.saveEditorSettings()
+                }
+            ])
             Text("Captions are stored as project-local JSON and exported as VTT, SRT, and text sidecars for packages.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -2584,6 +2616,7 @@ struct ProjectEditorView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.body, design: .monospaced))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func labeledSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, format: String) -> some View {
@@ -2598,6 +2631,7 @@ struct ProjectEditorView: View {
             }
             Slider(value: value, in: range)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func numericStringSlider(
@@ -4464,6 +4498,36 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
         case .export: "Export"
         }
     }
+
+    var systemImage: String {
+        switch self {
+        case .edits: "slider.horizontal.3"
+        case .canvas: "rectangle.inset.filled"
+        case .cuts: "scissors"
+        case .zooms: "plus.magnifyingglass"
+        case .overlays: "text.bubble"
+        case .camera: "video"
+        case .audio: "waveform"
+        case .captions: "captions.bubble"
+        case .presets: "wand.and.stars"
+        case .cursor: "cursorarrow.click"
+        case .export: "square.and.arrow.up"
+        }
+    }
+}
+
+private struct EditorInspectorAction: Identifiable {
+    let id: String
+    let title: String
+    let systemImage: String
+    let handler: () -> Void
+
+    init(_ title: String, systemImage: String, handler: @escaping () -> Void) {
+        self.id = title
+        self.title = title
+        self.systemImage = systemImage
+        self.handler = handler
+    }
 }
 
 private enum TimelineSelection: Equatable {
@@ -4899,6 +4963,21 @@ private final class ProjectEditorModel: ObservableObject {
         player = nil
         renderTask?.cancel()
         renderTask = nil
+    }
+
+    func closeProject() {
+        teardown()
+        projectURL = nil
+        manifest = nil
+        summary = nil
+        renderInspection = nil
+        editValidationIssues = []
+        lastEditDecisionList = nil
+        currentTimeSeconds = 0
+        previewDurationSeconds = 0
+        isPlaying = false
+        message = ""
+        messageIsError = false
     }
 
     var formattedCurrentTime: String {
