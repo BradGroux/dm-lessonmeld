@@ -81,7 +81,9 @@ public enum RenderPlanValidator {
         }
 
         validateZoomRegions(plan.zoomRegions, issues: &issues)
+        validateSpeedRegions(plan.speedRegions, issues: &issues)
         validateCameraSettings(plan.camera, issues: &issues)
+        validateAudioSettings(plan.audio, projectURL: plan.projectURL, issues: &issues, fileManager: fileManager, checkFileExistence: options.checkFileExistence)
         if let annotationSource = plan.annotationSource {
             validateAnnotations(annotationSource, issues: &issues, fileManager: fileManager)
         }
@@ -169,6 +171,39 @@ public enum RenderPlanValidator {
         }
     }
 
+    private static func validateSpeedRegions(
+        _ speedRegions: [SpeedRegion],
+        issues: inout [RenderValidationIssue]
+    ) {
+        for (index, region) in speedRegions.enumerated() {
+            let path = "speedRegions[\(index)]"
+            if !region.range.startSeconds.isFinite ||
+                !region.range.durationSeconds.isFinite ||
+                region.range.startSeconds < 0 ||
+                region.range.durationSeconds <= 0 {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "Speed region range must be finite, non-negative, and positive.",
+                    path: "\(path).range"
+                ))
+            }
+
+            if !region.playbackRate.isFinite || region.playbackRate <= 0 || region.playbackRate > 8 {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "Speed region rate must be finite, greater than 0, and no more than 8x.",
+                    path: "\(path).playbackRate"
+                ))
+            }
+
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Speed regions are saved in the editor, but full render retiming is not supported yet. Remove speed regions before export.",
+                path: path
+            ))
+        }
+    }
+
     private static func validateCameraSettings(
         _ camera: EditorCameraSettings,
         issues: inout [RenderValidationIssue]
@@ -216,6 +251,121 @@ public enum RenderPlanValidator {
                     path: "\(path).text"
                 ))
             }
+        }
+    }
+
+    private static func validateAudioSettings(
+        _ audio: EditorAudioSettings,
+        projectURL: URL,
+        issues: inout [RenderValidationIssue],
+        fileManager: FileManager,
+        checkFileExistence: Bool
+    ) {
+        let trackSettings: [(String, EditorAudioTrackSettings)] = [
+            ("audio.screenAudio", audio.screenAudio),
+            ("audio.microphoneAudio", audio.microphoneAudio),
+            ("audio.systemAudio", audio.systemAudio)
+        ]
+        for (path, settings) in trackSettings {
+            validateGain(settings.gain, path: "\(path).gain", issues: &issues)
+        }
+
+        for (index, region) in audio.volumeRegions.enumerated() {
+            let path = "audio.volumeRegions[\(index)]"
+            validateRange(region.range, path: "\(path).range", issues: &issues, messagePrefix: "Audio volume region")
+            validateGain(region.gain, path: "\(path).gain", issues: &issues)
+            validateFiniteNonNegative(region.fadeInSeconds, path: "\(path).fadeInSeconds", issues: &issues)
+            validateFiniteNonNegative(region.fadeOutSeconds, path: "\(path).fadeOutSeconds", issues: &issues)
+        }
+
+        guard let backgroundMusic = audio.backgroundMusic else { return }
+        let musicPath = backgroundMusic.relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if musicPath.isEmpty {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Background music path is required.",
+                path: "audio.backgroundMusic.relativePath"
+            ))
+        } else {
+            do {
+                let musicURL = try ProjectBundle.projectLocalFileURL(
+                    for: ProjectFile(relativePath: musicPath, role: .attachment),
+                    in: projectURL
+                )
+                if checkFileExistence, !fileManager.fileExists(atPath: musicURL.path) {
+                    issues.append(RenderValidationIssue(
+                        severity: .error,
+                        message: "Background music file is missing.",
+                        path: musicPath
+                    ))
+                }
+            } catch {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "Background music must be a project-local relative path.",
+                    path: musicPath
+                ))
+            }
+        }
+        validateGain(backgroundMusic.gain, path: "audio.backgroundMusic.gain", issues: &issues)
+        validateGain(backgroundMusic.duckedGain, path: "audio.backgroundMusic.duckedGain", issues: &issues)
+        validateFiniteNonNegative(backgroundMusic.startSeconds, path: "audio.backgroundMusic.startSeconds", issues: &issues)
+        validateFiniteNonNegative(backgroundMusic.sourceStartSeconds, path: "audio.backgroundMusic.sourceStartSeconds", issues: &issues)
+        if let durationSeconds = backgroundMusic.durationSeconds,
+           (!durationSeconds.isFinite || durationSeconds <= 0) {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Background music duration must be finite and positive.",
+                path: "audio.backgroundMusic.durationSeconds"
+            ))
+        }
+        validateFiniteNonNegative(backgroundMusic.fadeInSeconds, path: "audio.backgroundMusic.fadeInSeconds", issues: &issues)
+        validateFiniteNonNegative(backgroundMusic.fadeOutSeconds, path: "audio.backgroundMusic.fadeOutSeconds", issues: &issues)
+    }
+
+    private static func validateRange(
+        _ range: EditTimeRange,
+        path: String,
+        issues: inout [RenderValidationIssue],
+        messagePrefix: String
+    ) {
+        if !range.startSeconds.isFinite ||
+            !range.durationSeconds.isFinite ||
+            range.startSeconds < 0 ||
+            range.durationSeconds <= 0 {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "\(messagePrefix) range must be finite, non-negative, and positive.",
+                path: path
+            ))
+        }
+    }
+
+    private static func validateGain(
+        _ gain: Double,
+        path: String,
+        issues: inout [RenderValidationIssue]
+    ) {
+        if !gain.isFinite || gain < 0 || gain > 2 {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Audio gain must be finite and between 0 and 2.",
+                path: path
+            ))
+        }
+    }
+
+    private static func validateFiniteNonNegative(
+        _ value: Double,
+        path: String,
+        issues: inout [RenderValidationIssue]
+    ) {
+        if !value.isFinite || value < 0 {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Audio timing values must be finite and non-negative.",
+                path: path
+            ))
         }
     }
 

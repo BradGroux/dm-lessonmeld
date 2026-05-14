@@ -238,9 +238,11 @@ public struct RenderPlan: Codable, Equatable, Sendable {
     public var overlaySource: RenderMediaSource?
     public var captionSource: RenderMediaSource?
     public var zoomRegions: [ZoomRegion]
+    public var speedRegions: [SpeedRegion]
     public var markers: [ProjectTimelineMarker]
     public var canvas: EditorCanvasSettings
     public var camera: EditorCameraSettings
+    public var audio: EditorAudioSettings
     public var cursor: EditorCursorSettings
 
     public init(
@@ -255,9 +257,11 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         overlaySource: RenderMediaSource? = nil,
         captionSource: RenderMediaSource? = nil,
         zoomRegions: [ZoomRegion] = [],
+        speedRegions: [SpeedRegion] = [],
         markers: [ProjectTimelineMarker] = [],
         canvas: EditorCanvasSettings = EditorCanvasSettings(),
         camera: EditorCameraSettings = EditorCameraSettings(),
+        audio: EditorAudioSettings = EditorAudioSettings(),
         cursor: EditorCursorSettings = EditorCursorSettings()
     ) {
         self.projectURL = projectURL
@@ -271,9 +275,11 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         self.overlaySource = overlaySource
         self.captionSource = captionSource
         self.zoomRegions = zoomRegions
+        self.speedRegions = speedRegions
         self.markers = markers
         self.canvas = canvas
         self.camera = camera
+        self.audio = audio
         self.cursor = cursor
     }
 
@@ -387,9 +393,11 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             overlaySource: overlaySource,
             captionSource: captionSource,
             zoomRegions: editDecisionList?.enabledZoomRegions ?? [],
+            speedRegions: editDecisionList?.speedRegions ?? [],
             markers: manifest.markers,
             canvas: editorSettings?.canvas ?? EditorCanvasSettings(),
             camera: cameraSettings,
+            audio: editorSettings?.audio ?? EditorAudioSettings(),
             cursor: editorSettings?.cursor ?? EditorCursorSettings()
         )
     }

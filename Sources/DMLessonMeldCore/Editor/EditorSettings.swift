@@ -9,19 +9,22 @@ public struct EditorSettings: Codable, Equatable, Sendable {
     public var zoom: EditorZoomSettings?
     public var cursor: EditorCursorSettings?
     public var camera: EditorCameraSettings?
+    public var audio: EditorAudioSettings?
 
     public init(
         schemaVersion: Int = Self.currentSchemaVersion,
         canvas: EditorCanvasSettings = EditorCanvasSettings(),
         zoom: EditorZoomSettings? = EditorZoomSettings(),
         cursor: EditorCursorSettings? = EditorCursorSettings(),
-        camera: EditorCameraSettings? = EditorCameraSettings()
+        camera: EditorCameraSettings? = EditorCameraSettings(),
+        audio: EditorAudioSettings? = EditorAudioSettings()
     ) {
         self.schemaVersion = schemaVersion
         self.canvas = canvas
         self.zoom = zoom
         self.cursor = cursor
         self.camera = camera
+        self.audio = audio
     }
 }
 
@@ -281,6 +284,167 @@ public struct EditorZoomSettings: Codable, Equatable, Sendable {
 
     public init(automaticClickZoomsEnabled: Bool = true) {
         self.automaticClickZoomsEnabled = automaticClickZoomsEnabled
+    }
+}
+
+public struct EditorAudioSettings: Codable, Equatable, Sendable {
+    public var screenAudio: EditorAudioTrackSettings
+    public var microphoneAudio: EditorAudioTrackSettings
+    public var systemAudio: EditorAudioTrackSettings
+    public var backgroundMusic: EditorBackgroundMusicSettings?
+    public var volumeRegions: [EditorAudioVolumeRegion]
+
+    public init(
+        screenAudio: EditorAudioTrackSettings = EditorAudioTrackSettings(),
+        microphoneAudio: EditorAudioTrackSettings = EditorAudioTrackSettings(),
+        systemAudio: EditorAudioTrackSettings = EditorAudioTrackSettings(),
+        backgroundMusic: EditorBackgroundMusicSettings? = nil,
+        volumeRegions: [EditorAudioVolumeRegion] = []
+    ) {
+        self.screenAudio = screenAudio
+        self.microphoneAudio = microphoneAudio
+        self.systemAudio = systemAudio
+        self.backgroundMusic = backgroundMusic
+        self.volumeRegions = volumeRegions
+    }
+
+    public var isDefault: Bool {
+        self == EditorAudioSettings()
+    }
+
+    public var enabledVolumeRegions: [EditorAudioVolumeRegion] {
+        volumeRegions.filter(\.isEnabled).sorted { $0.range.startSeconds < $1.range.startSeconds }
+    }
+
+    public func trackSettings(for role: EditorAudioTrackRole) -> EditorAudioTrackSettings {
+        switch role {
+        case .screen:
+            screenAudio
+        case .microphone:
+            microphoneAudio
+        case .system:
+            systemAudio
+        case .backgroundMusic:
+            EditorAudioTrackSettings(gain: backgroundMusic?.gain ?? 1)
+        case .all:
+            EditorAudioTrackSettings()
+        }
+    }
+
+    public func isSoloMuted(role: EditorAudioTrackRole) -> Bool {
+        let soloed = [
+            (EditorAudioTrackRole.screen, screenAudio),
+            (.microphone, microphoneAudio),
+            (.system, systemAudio)
+        ].filter { $0.1.isSoloed }
+        guard !soloed.isEmpty else { return false }
+        return !soloed.contains { $0.0 == role }
+    }
+}
+
+public struct EditorAudioTrackSettings: Codable, Equatable, Sendable {
+    public var gain: Double
+    public var isMuted: Bool
+    public var isSoloed: Bool
+
+    public init(gain: Double = 1, isMuted: Bool = false, isSoloed: Bool = false) {
+        self.gain = min(2, max(0, gain.isFinite ? gain : 1))
+        self.isMuted = isMuted
+        self.isSoloed = isSoloed
+    }
+}
+
+public enum EditorAudioTrackRole: String, Codable, CaseIterable, Identifiable, Sendable {
+    case all
+    case screen
+    case microphone
+    case system
+    case backgroundMusic
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .all:
+            "All Tracks"
+        case .screen:
+            "Screen"
+        case .microphone:
+            "Microphone"
+        case .system:
+            "System"
+        case .backgroundMusic:
+            "Music"
+        }
+    }
+}
+
+public struct EditorAudioVolumeRegion: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var track: EditorAudioTrackRole
+    public var range: EditTimeRange
+    public var gain: Double
+    public var fadeInSeconds: Double
+    public var fadeOutSeconds: Double
+    public var isEnabled: Bool
+
+    public init(
+        id: String,
+        track: EditorAudioTrackRole = .all,
+        range: EditTimeRange,
+        gain: Double = 0.6,
+        fadeInSeconds: Double = 0.12,
+        fadeOutSeconds: Double = 0.12,
+        isEnabled: Bool = true
+    ) {
+        self.id = id
+        self.track = track
+        self.range = range
+        self.gain = min(2, max(0, gain.isFinite ? gain : 0.6))
+        self.fadeInSeconds = min(10, max(0, fadeInSeconds.isFinite ? fadeInSeconds : 0.12))
+        self.fadeOutSeconds = min(10, max(0, fadeOutSeconds.isFinite ? fadeOutSeconds : 0.12))
+        self.isEnabled = isEnabled
+    }
+}
+
+public struct EditorBackgroundMusicSettings: Codable, Equatable, Sendable {
+    public var relativePath: String
+    public var startSeconds: Double
+    public var sourceStartSeconds: Double
+    public var durationSeconds: Double?
+    public var gain: Double
+    public var loop: Bool
+    public var duckUnderVoice: Bool
+    public var duckedGain: Double
+    public var fadeInSeconds: Double
+    public var fadeOutSeconds: Double
+
+    public init(
+        relativePath: String,
+        startSeconds: Double = 0,
+        sourceStartSeconds: Double = 0,
+        durationSeconds: Double? = nil,
+        gain: Double = 0.28,
+        loop: Bool = true,
+        duckUnderVoice: Bool = true,
+        duckedGain: Double = 0.12,
+        fadeInSeconds: Double = 0.5,
+        fadeOutSeconds: Double = 0.5
+    ) {
+        self.relativePath = relativePath
+        self.startSeconds = max(0, startSeconds.isFinite ? startSeconds : 0)
+        self.sourceStartSeconds = max(0, sourceStartSeconds.isFinite ? sourceStartSeconds : 0)
+        if let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 {
+            self.durationSeconds = durationSeconds
+        } else {
+            self.durationSeconds = nil
+        }
+        self.gain = min(2, max(0, gain.isFinite ? gain : 0.28))
+        self.loop = loop
+        self.duckUnderVoice = duckUnderVoice
+        self.duckedGain = min(2, max(0, duckedGain.isFinite ? duckedGain : 0.12))
+        self.fadeInSeconds = min(10, max(0, fadeInSeconds.isFinite ? fadeInSeconds : 0.5))
+        self.fadeOutSeconds = min(10, max(0, fadeOutSeconds.isFinite ? fadeOutSeconds : 0.5))
     }
 }
 

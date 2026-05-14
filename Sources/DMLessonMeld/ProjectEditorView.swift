@@ -470,6 +470,8 @@ struct ProjectEditorView: View {
                         editorOverlaysInspector(manifest: manifest)
                     case .camera:
                         editorCameraInspector(manifest: manifest)
+                    case .audio:
+                        editorAudioInspector(manifest: manifest)
                     case .cursor:
                         editorCursorInspector(manifest: manifest)
                     case .export:
@@ -547,6 +549,8 @@ struct ProjectEditorView: View {
             valueLine("Cuts", "\(model.cutRows.filter(\.isEnabled).count) enabled / \(model.cutRows.count)")
             valueLine("Zooms", "\(model.zoomRows.filter(\.isEnabled).count) enabled / \(model.zoomRows.count)")
             valueLine("Overlays", "\(model.overlayRows.filter(\.isEnabled).count) enabled / \(model.overlayRows.count)")
+            valueLine("Speed", "\(model.speedRows.count)")
+            valueLine("Audio", "\(model.audioVolumeRows.count) regions")
             valueLine("Markers", "\(model.markerRows.count)")
             valueLine("Annotations", "\(model.annotationItemCount)")
         }
@@ -1041,6 +1045,188 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func editorAudioInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            inspectorSectionTitle("Tracks")
+            audioTrackControls(
+                title: "Screen",
+                detail: "Audio embedded in the screen recording when present.",
+                gain: $model.screenAudioGain,
+                muted: $model.screenAudioMuted,
+                soloed: $model.screenAudioSoloed,
+                isAvailable: manifest.media.screen != nil
+            )
+            audioTrackControls(
+                title: "Microphone",
+                detail: manifest.media.microphoneAudio?.relativePath ?? "No microphone sidecar in this project.",
+                gain: $model.microphoneAudioGain,
+                muted: $model.microphoneAudioMuted,
+                soloed: $model.microphoneAudioSoloed,
+                isAvailable: manifest.media.microphoneAudio != nil
+            )
+            audioTrackControls(
+                title: "System",
+                detail: manifest.media.systemAudio?.relativePath ?? "No system audio sidecar in this project.",
+                gain: $model.systemAudioGain,
+                muted: $model.systemAudioMuted,
+                soloed: $model.systemAudioSoloed,
+                isAvailable: manifest.media.systemAudio != nil
+            )
+
+            Divider()
+            HStack {
+                inspectorSectionTitle("Background Music")
+                Spacer()
+                Button {
+                    model.chooseBackgroundMusic()
+                } label: {
+                    Label("Choose", systemImage: "music.note")
+                }
+                Button {
+                    model.clearBackgroundMusic()
+                } label: {
+                    Label("Clear", systemImage: "xmark.circle")
+                }
+                .disabled(model.backgroundMusicPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Text(model.backgroundMusicPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No background music selected." : model.backgroundMusicPath)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            HStack {
+                compactNumberField("Start", text: $model.backgroundMusicStart)
+                compactNumberField("Source", text: $model.backgroundMusicSourceStart)
+                compactNumberField("Duration", text: $model.backgroundMusicDuration)
+            }
+            HStack {
+                Toggle("Loop", isOn: $model.backgroundMusicLoop)
+                    .toggleStyle(.checkbox)
+                Toggle("Duck voice", isOn: $model.backgroundMusicDuckUnderVoice)
+                    .toggleStyle(.checkbox)
+            }
+            numericStringSlider("Music gain", text: $model.backgroundMusicGain, range: 0...1.5, format: "%.2f")
+            numericStringSlider("Ducked gain", text: $model.backgroundMusicDuckedGain, range: 0...1, format: "%.2f")
+            HStack {
+                numericStringSlider("Fade in", text: $model.backgroundMusicFadeIn, range: 0...10, format: "%.2f")
+                numericStringSlider("Fade out", text: $model.backgroundMusicFadeOut, range: 0...10, format: "%.2f")
+            }
+
+            Divider()
+            HStack {
+                inspectorSectionTitle("Volume Regions")
+                Spacer()
+                Button {
+                    model.addAudioVolumeRegionAtPlayhead()
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+            }
+            if model.audioVolumeRows.isEmpty {
+                Text("No volume regions yet. Add one to lower, boost, fade, or duck a selected timeline range.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach($model.audioVolumeRows) { $region in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Toggle("Enabled", isOn: $region.isEnabled)
+                                .toggleStyle(.checkbox)
+                            Picker("Track", selection: $region.track) {
+                                ForEach(EditorAudioTrackRole.allCases) { role in
+                                    Text(role.title).tag(role)
+                                }
+                            }
+                            Spacer()
+                            Button {
+                                model.removeAudioVolumeRegion(id: region.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        HStack {
+                            compactNumberField("Start", text: $region.startSeconds)
+                            compactNumberField("End", text: $region.endSeconds)
+                        }
+                        numericStringSlider("Gain", text: $region.gain, range: 0...2, format: "%.2f")
+                        HStack {
+                            numericStringSlider("Fade in", text: $region.fadeInSeconds, range: 0...10, format: "%.2f")
+                            numericStringSlider("Fade out", text: $region.fadeOutSeconds, range: 0...10, format: "%.2f")
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+
+            Divider()
+            HStack {
+                inspectorSectionTitle("Speed Regions")
+                Spacer()
+                Button("0.5x") { model.addSpeedRegionAtPlayhead(rate: 0.5) }
+                Button("1.5x") { model.addSpeedRegionAtPlayhead(rate: 1.5) }
+                Button("2x") { model.addSpeedRegionAtPlayhead(rate: 2) }
+            }
+            if model.speedRows.isEmpty {
+                Text("No speed regions yet. Speed regions are saved and shown on the timeline. Full render retiming is blocked until the exporter supports AV retiming.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach($model.speedRows) { $speed in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            compactNumberField("Start", text: $speed.startSeconds)
+                            compactNumberField("End", text: $speed.endSeconds)
+                            Button {
+                                model.removeSpeedRegion(id: speed.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        numericStringSlider("Rate", text: $speed.playbackRate, range: 0.25...8, format: "%.2f")
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+
+            HStack {
+                Button("Save Audio") { model.saveEditorSettings() }
+                Button("Save Speed") { model.saveEditDecisions() }
+            }
+            validationIssuesList
+        }
+    }
+
+    private func audioTrackControls(
+        title: String,
+        detail: String,
+        gain: Binding<String>,
+        muted: Binding<Bool>,
+        soloed: Binding<Bool>,
+        isAvailable: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Toggle("Mute", isOn: muted)
+                    .toggleStyle(.checkbox)
+                Toggle("Solo", isOn: soloed)
+                    .toggleStyle(.checkbox)
+            }
+            numericStringSlider("Gain", text: gain, range: 0...2, format: "%.2f")
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(isAvailable ? Color.secondary : Color.orange)
+                .lineLimit(2)
+        }
+        .padding(10)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+    }
+
     private func editorCursorInspector(manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             inspectorSectionTitle("Cursor Effects")
@@ -1238,6 +1424,20 @@ struct ProjectEditorView: View {
                 }
                 .keyboardShortcut("z", modifiers: [])
                 Button {
+                    model.addAudioVolumeRegionAtPlayhead()
+                    persistTimelineEditChanges(for: .moveAudioVolume)
+                    editorInspectorTab = .audio
+                } label: {
+                    Label("Volume", systemImage: "speaker.wave.2")
+                }
+                Button {
+                    model.addSpeedRegionAtPlayhead(rate: 2)
+                    persistTimelineEditChanges(for: .moveSpeed)
+                    editorInspectorTab = .audio
+                } label: {
+                    Label("Speed", systemImage: "speedometer")
+                }
+                Button {
                     model.addOverlayAtPlayhead(kind: .text)
                     persistTimelineEditChanges(for: .moveOverlay)
                     editorInspectorTab = .overlays
@@ -1290,6 +1490,24 @@ struct ProjectEditorView: View {
                             height: 38
                         ) {
                             clipTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                        timelineLane(
+                            title: "Audio",
+                            tint: .teal,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 30
+                        ) {
+                            audioTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                        timelineLane(
+                            title: "Speed",
+                            tint: .indigo,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 30
+                        ) {
+                            speedTimelineContent(width: timelineWidth, duration: duration)
                         }
                         timelineLane(
                             title: "Cuts",
@@ -1506,6 +1724,114 @@ struct ProjectEditorView: View {
                             model.removeCut(id: cut.id)
                             selectedTimelineItem = nil
                             persistTimelineEditChanges(for: .moveCut)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func audioTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            if let start = secondsValue(model.backgroundMusicStart) {
+                let musicDuration = secondsValue(model.backgroundMusicDuration) ?? max(0, duration - start)
+                let end = min(duration, start + max(0.1, musicDuration))
+                if !model.backgroundMusicPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, end > start {
+                    timelineBlock(
+                        title: "Music",
+                        tint: .teal,
+                        start: start,
+                        end: end,
+                        width: width,
+                        duration: duration,
+                        height: 22,
+                        isEnabled: true,
+                        isSelected: false
+                    )
+                    .opacity(0.72)
+                }
+            }
+            ForEach(model.audioVolumeRows) { region in
+                if let start = secondsValue(region.startSeconds), let end = secondsValue(region.endSeconds), end > start {
+                    timelineBlock(
+                        title: "\(region.track.title) \(region.gain)x",
+                        tint: .teal,
+                        start: start,
+                        end: end,
+                        width: width,
+                        duration: duration,
+                        height: 22,
+                        isEnabled: region.isEnabled,
+                        isSelected: selectedTimelineItem == .audioVolume(region.id)
+                    )
+                    .onTapGesture {
+                        selectedTimelineItem = .audioVolume(region.id)
+                        editorInspectorTab = .audio
+                    }
+                    .gesture(timelineDragGesture(action: .moveAudioVolume, id: region.id, start: start, end: end, width: width, duration: duration))
+                    .overlay(alignment: .leading) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeAudioVolumeStart, id: region.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .overlay(alignment: .trailing) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeAudioVolumeEnd, id: region.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .contextMenu {
+                        Button("Jump to Volume Region") {
+                            model.seek(to: start)
+                        }
+                        Button(region.isEnabled ? "Disable Region" : "Enable Region") {
+                            model.toggleAudioVolumeRegionEnabled(id: region.id)
+                            persistTimelineEditChanges(for: .moveAudioVolume)
+                        }
+                        Button("Remove Region", role: .destructive) {
+                            model.removeAudioVolumeRegion(id: region.id)
+                            selectedTimelineItem = nil
+                            persistTimelineEditChanges(for: .moveAudioVolume)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func speedTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            ForEach(model.speedRows) { speed in
+                if let start = secondsValue(speed.startSeconds), let end = secondsValue(speed.endSeconds), end > start {
+                    timelineBlock(
+                        title: "\(speed.playbackRate)x",
+                        tint: .indigo,
+                        start: start,
+                        end: end,
+                        width: width,
+                        duration: duration,
+                        height: 22,
+                        isEnabled: true,
+                        isSelected: selectedTimelineItem == .speed(speed.id)
+                    )
+                    .onTapGesture {
+                        selectedTimelineItem = .speed(speed.id)
+                        editorInspectorTab = .audio
+                    }
+                    .gesture(timelineDragGesture(action: .moveSpeed, id: speed.id, start: start, end: end, width: width, duration: duration))
+                    .overlay(alignment: .leading) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeSpeedStart, id: speed.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .overlay(alignment: .trailing) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeSpeedEnd, id: speed.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .contextMenu {
+                        Button("Jump to Speed Region") {
+                            model.seek(to: start)
+                        }
+                        Button("Remove Region", role: .destructive) {
+                            model.removeSpeedRegion(id: speed.id)
+                            selectedTimelineItem = nil
+                            persistTimelineEditChanges(for: .moveSpeed)
                         }
                     }
                 }
@@ -1781,7 +2107,7 @@ struct ProjectEditorView: View {
                 .frame(width: 10, height: 10)
             Rectangle()
                 .fill(Color.accentColor)
-                .frame(width: 2, height: 224)
+                .frame(width: 2, height: 292)
         }
         .offset(x: x)
     }
@@ -1859,6 +2185,18 @@ struct ProjectEditorView: View {
             model.resizeCut(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
         case .resizeCutEnd:
             model.resizeCut(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
+        case .moveSpeed:
+            model.moveSpeedRegion(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
+        case .resizeSpeedStart:
+            model.resizeSpeedRegion(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
+        case .resizeSpeedEnd:
+            model.resizeSpeedRegion(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
+        case .moveAudioVolume:
+            model.moveAudioVolumeRegion(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
+        case .resizeAudioVolumeStart:
+            model.resizeAudioVolumeRegion(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
+        case .resizeAudioVolumeEnd:
+            model.resizeAudioVolumeRegion(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
         case .moveZoom:
             model.moveZoom(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
         case .resizeZoomStart:
@@ -1894,10 +2232,14 @@ struct ProjectEditorView: View {
             model.saveMarkers()
         case .moveOverlay, .resizeOverlayStart, .resizeOverlayEnd:
             model.saveOverlays()
+        case .moveAudioVolume, .resizeAudioVolumeStart, .resizeAudioVolumeEnd:
+            model.saveEditorSettings()
         case .moveCameraRegion, .resizeCameraRegionStart, .resizeCameraRegionEnd:
             model.saveEditorSettings()
         case .moveCursorHide, .resizeCursorHideStart, .resizeCursorHideEnd:
             model.saveEditorSettings()
+        case .moveSpeed, .resizeSpeedStart, .resizeSpeedEnd:
+            model.saveEditDecisions()
         default:
             model.saveEditDecisions()
         }
@@ -1909,6 +2251,12 @@ struct ProjectEditorView: View {
         case .cut(let id):
             model.removeCut(id: id)
             persistTimelineEditChanges(for: .moveCut)
+        case .speed(let id):
+            model.removeSpeedRegion(id: id)
+            persistTimelineEditChanges(for: .moveSpeed)
+        case .audioVolume(let id):
+            model.removeAudioVolumeRegion(id: id)
+            persistTimelineEditChanges(for: .moveAudioVolume)
         case .zoom(let id):
             model.removeZoom(id: id)
             persistTimelineEditChanges(for: .moveZoom)
@@ -3788,6 +4136,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     case zooms
     case overlays
     case camera
+    case audio
     case cursor
     case export
 
@@ -3801,6 +4150,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
         case .zooms: "Zooms"
         case .overlays: "Overlays"
         case .camera: "Camera"
+        case .audio: "Audio"
         case .cursor: "Cursor"
         case .export: "Export"
         }
@@ -3809,6 +4159,8 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
 
 private enum TimelineSelection: Equatable {
     case cut(String)
+    case speed(String)
+    case audioVolume(String)
     case zoom(String)
     case overlay(String)
     case cameraRegion(String)
@@ -3822,6 +4174,12 @@ private enum TimelineDragAction: Equatable {
     case moveCut
     case resizeCutStart
     case resizeCutEnd
+    case moveSpeed
+    case resizeSpeedStart
+    case resizeSpeedEnd
+    case moveAudioVolume
+    case resizeAudioVolumeStart
+    case resizeAudioVolumeEnd
     case moveZoom
     case resizeZoomStart
     case resizeZoomEnd
@@ -3963,6 +4321,24 @@ private struct EditableCutRow: Identifiable, Equatable {
     var isEnabled: Bool
 }
 
+private struct EditableSpeedRow: Identifiable, Equatable {
+    var id: String
+    var startSeconds: String
+    var endSeconds: String
+    var playbackRate: String
+}
+
+private struct EditableAudioVolumeRegionRow: Identifiable, Equatable {
+    var id: String
+    var track: EditorAudioTrackRole
+    var startSeconds: String
+    var endSeconds: String
+    var gain: String
+    var fadeInSeconds: String
+    var fadeOutSeconds: String
+    var isEnabled: Bool
+}
+
 private struct EditableZoomRow: Identifiable, Equatable {
     var id: String
     var startSeconds: String
@@ -4029,6 +4405,8 @@ private protocol EditableTimelineRangeRow {
 }
 
 extension EditableCutRow: EditableTimelineRangeRow {}
+extension EditableSpeedRow: EditableTimelineRangeRow {}
+extension EditableAudioVolumeRegionRow: EditableTimelineRangeRow {}
 extension EditableZoomRow: EditableTimelineRangeRow {}
 extension EditableOverlayRow: EditableTimelineRangeRow {}
 extension EditableCameraRegionRow: EditableTimelineRangeRow {}
@@ -4059,6 +4437,7 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var previewDurationSeconds: Double = 0
     @Published var isPlaying = false
     @Published var cutRows: [EditableCutRow] = []
+    @Published var speedRows: [EditableSpeedRow] = []
     @Published var zoomRows: [EditableZoomRow] = []
     @Published var overlayRows: [EditableOverlayRow] = []
     @Published var markerRows: [EditableMarkerRow] = []
@@ -4128,6 +4507,26 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var cameraShadowEnabled = true
     @Published var cameraRegionRows: [EditableCameraRegionRow] = []
     @Published var cameraReactionRows: [EditableCameraReactionRow] = []
+    @Published var screenAudioGain = "1"
+    @Published var screenAudioMuted = false
+    @Published var screenAudioSoloed = false
+    @Published var microphoneAudioGain = "1"
+    @Published var microphoneAudioMuted = false
+    @Published var microphoneAudioSoloed = false
+    @Published var systemAudioGain = "1"
+    @Published var systemAudioMuted = false
+    @Published var systemAudioSoloed = false
+    @Published var backgroundMusicPath = ""
+    @Published var backgroundMusicStart = "0"
+    @Published var backgroundMusicSourceStart = "0"
+    @Published var backgroundMusicDuration = ""
+    @Published var backgroundMusicGain = "0.28"
+    @Published var backgroundMusicLoop = true
+    @Published var backgroundMusicDuckUnderVoice = true
+    @Published var backgroundMusicDuckedGain = "0.12"
+    @Published var backgroundMusicFadeIn = "0.5"
+    @Published var backgroundMusicFadeOut = "0.5"
+    @Published var audioVolumeRows: [EditableAudioVolumeRegionRow] = []
     @Published var annotationItemCount = 0
     @Published var annotationSidecarStatus = "Not initialized"
     @Published var annotationDraftText = "Annotation note"
@@ -4537,6 +4936,34 @@ private final class ProjectEditorModel: ObservableObject {
         clearTimelineValidation()
     }
 
+    func addSpeedRegionAtPlayhead(rate: Double) {
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 4)
+        let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
+        let end = min(start + 4, max(duration, start + 0.5))
+        speedRows.append(
+            EditableSpeedRow(
+                id: "speed-\(UUID().uuidString)",
+                startSeconds: Self.formatSecondsForEditing(start),
+                endSeconds: Self.formatSecondsForEditing(end),
+                playbackRate: Self.formatSecondsForEditing(rate)
+            )
+        )
+        clearTimelineValidation()
+    }
+
+    func removeSpeedRegion(id: String) {
+        speedRows.removeAll { $0.id == id }
+        clearTimelineValidation()
+    }
+
+    func moveSpeedRegion(id: String, start: Double, end: Double, duration: Double) {
+        updateRangeRow(id: id, start: start, end: end, duration: duration, rows: &speedRows)
+    }
+
+    func resizeSpeedRegion(id: String, start: Double, end: Double, duration: Double) {
+        resizeRangeRow(id: id, start: start, end: end, duration: duration, rows: &speedRows)
+    }
+
     func addZoomAtPlayhead() {
         let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 3)
         let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
@@ -4751,6 +5178,90 @@ private final class ProjectEditorModel: ObservableObject {
             in: projectURL
         )
         return NSImage(contentsOf: imageURL)
+    }
+
+    func chooseBackgroundMusic() {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            let panel = NSOpenPanel()
+            panel.title = "Choose Background Music"
+            panel.canChooseDirectories = false
+            panel.canChooseFiles = true
+            panel.allowsMultipleSelection = false
+            panel.allowedContentTypes = [.audio]
+            panel.prompt = "Choose"
+            guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
+
+            let didAccess = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let destinationURL = try Self.uniqueAudioAssetURL(for: sourceURL, projectURL: projectURL)
+            try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            backgroundMusicPath = Self.projectFile(
+                for: destinationURL,
+                role: .attachment,
+                projectURL: projectURL,
+                mimeType: Self.audioMimeType(for: destinationURL.pathExtension)
+            ).relativePath
+            if backgroundMusicDuration.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let remaining = max(0.5, (previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? 0)) - (Double(backgroundMusicStart) ?? 0))
+                backgroundMusicDuration = Self.formatSecondsForEditing(remaining)
+            }
+            saveEditorSettings()
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    func clearBackgroundMusic() {
+        backgroundMusicPath = ""
+        backgroundMusicDuration = ""
+        saveEditorSettings()
+    }
+
+    func addAudioVolumeRegionAtPlayhead() {
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 4)
+        let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
+        let end = min(start + 4, max(duration, start + 0.5))
+        audioVolumeRows.append(
+            EditableAudioVolumeRegionRow(
+                id: "audio-volume-\(UUID().uuidString)",
+                track: .all,
+                startSeconds: Self.formatSecondsForEditing(start),
+                endSeconds: Self.formatSecondsForEditing(end),
+                gain: "0.6",
+                fadeInSeconds: "0.12",
+                fadeOutSeconds: "0.12",
+                isEnabled: true
+            )
+        )
+        clearTimelineValidation()
+    }
+
+    func removeAudioVolumeRegion(id: String) {
+        audioVolumeRows.removeAll { $0.id == id }
+        clearTimelineValidation()
+    }
+
+    func moveAudioVolumeRegion(id: String, start: Double, end: Double, duration: Double) {
+        updateRangeRow(id: id, start: start, end: end, duration: duration, rows: &audioVolumeRows)
+    }
+
+    func resizeAudioVolumeRegion(id: String, start: Double, end: Double, duration: Double) {
+        resizeRangeRow(id: id, start: start, end: end, duration: duration, rows: &audioVolumeRows)
+    }
+
+    func toggleAudioVolumeRegionEnabled(id: String) {
+        guard let index = audioVolumeRows.firstIndex(where: { $0.id == id }) else { return }
+        audioVolumeRows[index].isEnabled.toggle()
+        clearTimelineValidation()
     }
 
     func addCameraRegionAtPlayhead(preset: CameraLayoutPreset) {
@@ -5635,6 +6146,7 @@ private final class ProjectEditorModel: ObservableObject {
                     isEnabled: cut.isEnabled
                 )
             }
+            speedRows = editDecisionList.speedRegions.map(Self.editableSpeedRow(from:))
             zoomRows = editDecisionList.zoomRegions.map { zoom in
                 let size = min(zoom.focusRect.width, zoom.focusRect.height)
                 return EditableZoomRow(
@@ -5661,6 +6173,7 @@ private final class ProjectEditorModel: ObservableObject {
             editValidationIssues = editDecisionList.validate()
         } catch {
             cutRows = []
+            speedRows = []
             zoomRows = []
             editValidationIssues = []
             setError("Could not load edit decisions: \(error.localizedDescription)")
@@ -5782,6 +6295,40 @@ private final class ProjectEditorModel: ObservableObject {
         cameraShadowEnabled = camera.defaultPlacement.shadowEnabled
         cameraRegionRows = camera.layoutRegions.map(Self.editableCameraRegionRow(from:))
         cameraReactionRows = camera.reactions.map(Self.editableCameraReactionRow(from:))
+        let audio = settings.audio ?? EditorAudioSettings()
+        screenAudioGain = Self.formatSecondsForEditing(audio.screenAudio.gain)
+        screenAudioMuted = audio.screenAudio.isMuted
+        screenAudioSoloed = audio.screenAudio.isSoloed
+        microphoneAudioGain = Self.formatSecondsForEditing(audio.microphoneAudio.gain)
+        microphoneAudioMuted = audio.microphoneAudio.isMuted
+        microphoneAudioSoloed = audio.microphoneAudio.isSoloed
+        systemAudioGain = Self.formatSecondsForEditing(audio.systemAudio.gain)
+        systemAudioMuted = audio.systemAudio.isMuted
+        systemAudioSoloed = audio.systemAudio.isSoloed
+        if let music = audio.backgroundMusic {
+            backgroundMusicPath = music.relativePath
+            backgroundMusicStart = Self.formatSecondsForEditing(music.startSeconds)
+            backgroundMusicSourceStart = Self.formatSecondsForEditing(music.sourceStartSeconds)
+            backgroundMusicDuration = music.durationSeconds.map(Self.formatSecondsForEditing) ?? ""
+            backgroundMusicGain = Self.formatSecondsForEditing(music.gain)
+            backgroundMusicLoop = music.loop
+            backgroundMusicDuckUnderVoice = music.duckUnderVoice
+            backgroundMusicDuckedGain = Self.formatSecondsForEditing(music.duckedGain)
+            backgroundMusicFadeIn = Self.formatSecondsForEditing(music.fadeInSeconds)
+            backgroundMusicFadeOut = Self.formatSecondsForEditing(music.fadeOutSeconds)
+        } else {
+            backgroundMusicPath = ""
+            backgroundMusicStart = "0"
+            backgroundMusicSourceStart = "0"
+            backgroundMusicDuration = ""
+            backgroundMusicGain = "0.28"
+            backgroundMusicLoop = true
+            backgroundMusicDuckUnderVoice = true
+            backgroundMusicDuckedGain = "0.12"
+            backgroundMusicFadeIn = "0.5"
+            backgroundMusicFadeOut = "0.5"
+        }
+        audioVolumeRows = audio.volumeRegions.map(Self.editableAudioVolumeRegionRow(from:))
     }
 
     private func currentEditorSettings() throws -> EditorSettings {
@@ -5862,6 +6409,42 @@ private final class ProjectEditorModel: ObservableObject {
             )
         }
 
+        let backgroundMusic: EditorBackgroundMusicSettings?
+        let musicPath = backgroundMusicPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if musicPath.isEmpty {
+            backgroundMusic = nil
+        } else {
+            backgroundMusic = EditorBackgroundMusicSettings(
+                relativePath: musicPath,
+                startSeconds: try parseSeconds(backgroundMusicStart, label: "Music start"),
+                sourceStartSeconds: try parseSeconds(backgroundMusicSourceStart, label: "Music source start"),
+                durationSeconds: try optionalSeconds(backgroundMusicDuration, label: "Music duration"),
+                gain: try parseNonNegative(backgroundMusicGain, label: "Music gain"),
+                loop: backgroundMusicLoop,
+                duckUnderVoice: backgroundMusicDuckUnderVoice,
+                duckedGain: try parseNonNegative(backgroundMusicDuckedGain, label: "Ducked music gain"),
+                fadeInSeconds: try parseNonNegative(backgroundMusicFadeIn, label: "Music fade in"),
+                fadeOutSeconds: try parseNonNegative(backgroundMusicFadeOut, label: "Music fade out")
+            )
+        }
+
+        let audioVolumeRegions = try audioVolumeRows.map { row in
+            let start = try parseSeconds(row.startSeconds, label: "Volume region start")
+            let end = try parseSeconds(row.endSeconds, label: "Volume region end")
+            guard end > start else {
+                throw ProjectEditorError.invalidNumber("Volume region end must be greater than volume region start.")
+            }
+            return EditorAudioVolumeRegion(
+                id: row.id,
+                track: row.track,
+                range: EditTimeRange(startSeconds: start, endSeconds: end),
+                gain: try parseNonNegative(row.gain, label: "Volume region gain"),
+                fadeInSeconds: try parseNonNegative(row.fadeInSeconds, label: "Volume region fade in"),
+                fadeOutSeconds: try parseNonNegative(row.fadeOutSeconds, label: "Volume region fade out"),
+                isEnabled: row.isEnabled
+            )
+        }
+
         return EditorSettings(
             canvas: EditorCanvasSettings(
                 aspectRatio: canvasAspectRatio,
@@ -5908,6 +6491,25 @@ private final class ProjectEditorModel: ObservableObject {
                 defaultPlacement: try cameraPlacementFromFields(),
                 layoutRegions: cameraRegions,
                 reactions: cameraReactions
+            ),
+            audio: EditorAudioSettings(
+                screenAudio: EditorAudioTrackSettings(
+                    gain: try parseNonNegative(screenAudioGain, label: "Screen audio gain"),
+                    isMuted: screenAudioMuted,
+                    isSoloed: screenAudioSoloed
+                ),
+                microphoneAudio: EditorAudioTrackSettings(
+                    gain: try parseNonNegative(microphoneAudioGain, label: "Microphone audio gain"),
+                    isMuted: microphoneAudioMuted,
+                    isSoloed: microphoneAudioSoloed
+                ),
+                systemAudio: EditorAudioTrackSettings(
+                    gain: try parseNonNegative(systemAudioGain, label: "System audio gain"),
+                    isMuted: systemAudioMuted,
+                    isSoloed: systemAudioSoloed
+                ),
+                backgroundMusic: backgroundMusic,
+                volumeRegions: audioVolumeRegions
             )
         )
     }
@@ -6168,6 +6770,19 @@ private final class ProjectEditorModel: ObservableObject {
             )
         }
 
+        let speedRegions = try speedRows.map { row in
+            let start = try parseSeconds(row.startSeconds, label: "Speed start")
+            let end = try parseSeconds(row.endSeconds, label: "Speed end")
+            guard end > start else {
+                throw ProjectEditorError.invalidNumber("Speed end must be greater than speed start.")
+            }
+            return SpeedRegion(
+                id: row.id,
+                range: EditTimeRange(startSeconds: start, endSeconds: end),
+                playbackRate: try parsePositive(row.playbackRate, label: "Speed rate")
+            )
+        }
+
         let zoomRegions = try zoomRows.map { row in
             let start = try parseSeconds(row.startSeconds, label: "Zoom start")
             let end = try parseSeconds(row.endSeconds, label: "Zoom end")
@@ -6207,7 +6822,7 @@ private final class ProjectEditorModel: ObservableObject {
             sourceDurationSeconds: duration,
             trimRange: trimRange,
             cuts: cuts,
-            speedRegions: existing.speedRegions,
+            speedRegions: speedRegions,
             zoomRegions: zoomRegions,
             markers: existing.markers
         )
@@ -6316,6 +6931,16 @@ private final class ProjectEditorModel: ObservableObject {
         }
     }
 
+    private static func audioMimeType(for fileExtension: String) -> String {
+        switch fileExtension.lowercased() {
+        case "m4a": "audio/mp4"
+        case "mp3": "audio/mpeg"
+        case "wav": "audio/wav"
+        case "caf": "audio/x-caf"
+        default: "audio/*"
+        }
+    }
+
     private static func uniqueCanvasBackgroundURL(for sourceURL: URL, projectURL: URL) throws -> URL {
         let backgroundDirectory = projectURL.appendingPathComponent("backgrounds", isDirectory: true)
         let sourceExtension = sourceURL.pathExtension.lowercased()
@@ -6334,6 +6959,21 @@ private final class ProjectEditorModel: ObservableObject {
         let assetDirectory = projectURL.appendingPathComponent("overlays/assets", isDirectory: true)
         let sourceExtension = sourceURL.pathExtension.lowercased()
         let fileExtension = ["jpg", "jpeg", "png"].contains(sourceExtension) ? sourceExtension : "png"
+        let baseName = fileSlug(sourceURL.deletingPathExtension().lastPathComponent)
+        for attempt in 0..<100 {
+            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
+            let destinationURL = assetDirectory.appendingPathComponent("\(baseName)\(suffix).\(fileExtension)")
+            if !FileManager.default.fileExists(atPath: destinationURL.path) {
+                return destinationURL
+            }
+        }
+        return assetDirectory.appendingPathComponent("\(baseName)-\(UUID().uuidString.lowercased()).\(fileExtension)")
+    }
+
+    private static func uniqueAudioAssetURL(for sourceURL: URL, projectURL: URL) throws -> URL {
+        let assetDirectory = projectURL.appendingPathComponent("audio/assets", isDirectory: true)
+        let sourceExtension = sourceURL.pathExtension.lowercased()
+        let fileExtension = ["m4a", "mp3", "wav", "caf", "aiff", "aif"].contains(sourceExtension) ? sourceExtension : "m4a"
         let baseName = fileSlug(sourceURL.deletingPathExtension().lastPathComponent)
         for attempt in 0..<100 {
             let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
@@ -6534,6 +7174,28 @@ private final class ProjectEditorModel: ObservableObject {
             imagePath: overlay.style.imagePath ?? "",
             zIndex: overlay.zIndex,
             isEnabled: overlay.isEnabled
+        )
+    }
+
+    private static func editableSpeedRow(from speed: SpeedRegion) -> EditableSpeedRow {
+        EditableSpeedRow(
+            id: speed.id,
+            startSeconds: formatSecondsForEditing(speed.range.startSeconds),
+            endSeconds: formatSecondsForEditing(speed.range.endSeconds),
+            playbackRate: formatSecondsForEditing(speed.playbackRate)
+        )
+    }
+
+    private static func editableAudioVolumeRegionRow(from region: EditorAudioVolumeRegion) -> EditableAudioVolumeRegionRow {
+        EditableAudioVolumeRegionRow(
+            id: region.id,
+            track: region.track,
+            startSeconds: formatSecondsForEditing(region.range.startSeconds),
+            endSeconds: formatSecondsForEditing(region.range.endSeconds),
+            gain: formatSecondsForEditing(region.gain),
+            fadeInSeconds: formatSecondsForEditing(region.fadeInSeconds),
+            fadeOutSeconds: formatSecondsForEditing(region.fadeOutSeconds),
+            isEnabled: region.isEnabled
         )
     }
 

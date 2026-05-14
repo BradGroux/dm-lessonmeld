@@ -126,6 +126,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
            plan.overlaySource == nil,
            plan.captionSource == nil,
            plan.zoomRegions.isEmpty,
+           plan.speedRegions.isEmpty,
+           plan.audio.isDefault,
            plan.canvas.isDefault {
             return try await exportSingleAsset(plan, progress: progress)
         }
@@ -173,11 +175,30 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             at: .zero
         )
 
-        try await insertAudioTracks(from: screenAsset, into: composition, duration: screenDuration)
+        var audioTracks: [InsertedAudioTrack] = []
+        audioTracks += try await insertAudioTracks(
+            from: screenAsset,
+            role: .screen,
+            into: composition,
+            duration: screenDuration
+        )
 
         for source in plan.audioSources {
             let audioAsset = AVURLAsset(url: source.url)
-            try await insertAudioTracks(from: audioAsset, into: composition, duration: screenDuration)
+            audioTracks += try await insertAudioTracks(
+                from: audioAsset,
+                role: audioTrackRole(for: source.role),
+                into: composition,
+                duration: screenDuration
+            )
+        }
+        if let backgroundMusic = plan.audio.backgroundMusic {
+            audioTracks += try await insertBackgroundMusicTrack(
+                backgroundMusic,
+                projectURL: plan.projectURL,
+                into: composition,
+                duration: screenDuration
+            )
         }
         if let interactionMetadata {
             try await insertClickSoundTrack(
@@ -247,6 +268,12 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             throw RenderExportError.unableToCreateExportSession
         }
         session.videoComposition = videoComposition
+        session.audioMix = audioMix(
+            for: audioTracks,
+            settings: plan.audio,
+            duration: screenDuration,
+            hasVoiceAudio: plan.audioSources.contains { $0.role == .microphoneAudio || $0.role == .systemAudio }
+        )
 
         try await export(session: session, to: plan.destinationURL, as: plan.preset.fileType, progress: progress)
         return plan.destinationURL
@@ -1705,7 +1732,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let soundURL = try writeClickSoundTrack(clicks: visibleClicks, settings: settings, durationSeconds: durationSeconds)
         temporaryRenderFiles.append(soundURL)
         let asset = AVURLAsset(url: soundURL)
-        try await insertAudioTracks(from: asset, into: composition, duration: duration)
+        _ = try await insertAudioTracks(from: asset, role: .all, into: composition, duration: duration)
     }
 
     private func writeClickSoundTrack(
@@ -1770,10 +1797,12 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
     private func insertAudioTracks(
         from asset: AVAsset,
+        role: EditorAudioTrackRole,
         into composition: AVMutableComposition,
         duration: CMTime
-    ) async throws {
+    ) async throws -> [InsertedAudioTrack] {
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        var insertedTracks: [InsertedAudioTrack] = []
         for audioTrack in audioTracks {
             guard let compositionAudioTrack = composition.addMutableTrack(
                 withMediaType: .audio,
@@ -1788,7 +1817,183 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 of: audioTrack,
                 at: .zero
             )
+            insertedTracks.append(InsertedAudioTrack(track: compositionAudioTrack, role: role))
         }
+        return insertedTracks
+    }
+
+    private func insertBackgroundMusicTrack(
+        _ settings: EditorBackgroundMusicSettings,
+        projectURL: URL,
+        into composition: AVMutableComposition,
+        duration: CMTime
+    ) async throws -> [InsertedAudioTrack] {
+        let relativePath = settings.relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !relativePath.isEmpty else { return [] }
+        let musicURL = try ProjectBundle.projectLocalFileURL(
+            for: ProjectFile(relativePath: relativePath, role: .attachment),
+            in: projectURL
+        )
+        let asset = AVURLAsset(url: musicURL)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        guard let audioTrack = audioTracks.first else { return [] }
+        guard let compositionTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw RenderExportError.unableToCreateCompositionTrack
+        }
+
+        let sourceDuration = try await asset.load(.duration)
+        let sourceDurationSeconds = max(0, sourceDuration.seconds.isFinite ? sourceDuration.seconds : 0)
+        let renderDurationSeconds = max(0, duration.seconds.isFinite ? duration.seconds : 0)
+        let startSeconds = min(max(0, settings.startSeconds), renderDurationSeconds)
+        let desiredDurationSeconds = min(
+            max(0, settings.durationSeconds ?? (renderDurationSeconds - startSeconds)),
+            max(0, renderDurationSeconds - startSeconds)
+        )
+        guard sourceDurationSeconds > 0, desiredDurationSeconds > 0 else {
+            return [InsertedAudioTrack(track: compositionTrack, role: .backgroundMusic)]
+        }
+
+        let sourceStartSeconds = min(settings.sourceStartSeconds, max(0, sourceDurationSeconds - 0.01))
+        var outputCursorSeconds = startSeconds
+        let outputEndSeconds = startSeconds + desiredDurationSeconds
+
+        repeat {
+            let sourceAvailableSeconds = max(0, sourceDurationSeconds - sourceStartSeconds)
+            let segmentDurationSeconds = min(outputEndSeconds - outputCursorSeconds, sourceAvailableSeconds)
+            guard segmentDurationSeconds > 0 else { break }
+
+            try compositionTrack.insertTimeRange(
+                CMTimeRange(
+                    start: CMTime(seconds: sourceStartSeconds, preferredTimescale: 600),
+                    duration: CMTime(seconds: segmentDurationSeconds, preferredTimescale: 600)
+                ),
+                of: audioTrack,
+                at: CMTime(seconds: outputCursorSeconds, preferredTimescale: 600)
+            )
+            outputCursorSeconds += segmentDurationSeconds
+        } while settings.loop && outputCursorSeconds < outputEndSeconds
+
+        return [InsertedAudioTrack(track: compositionTrack, role: .backgroundMusic)]
+    }
+
+    private func audioTrackRole(for role: RenderMediaRole) -> EditorAudioTrackRole {
+        switch role {
+        case .microphoneAudio:
+            .microphone
+        case .systemAudio:
+            .system
+        default:
+            .screen
+        }
+    }
+
+    private func audioMix(
+        for audioTracks: [InsertedAudioTrack],
+        settings: EditorAudioSettings,
+        duration: CMTime,
+        hasVoiceAudio: Bool
+    ) -> AVAudioMix? {
+        guard !audioTracks.isEmpty else { return nil }
+
+        let parameters = audioTracks.map { insertedTrack in
+            let params = AVMutableAudioMixInputParameters(track: insertedTrack.track)
+            let baseGain = baseGain(for: insertedTrack.role, settings: settings)
+            params.setVolume(Float(baseGain), at: .zero)
+
+            if insertedTrack.role == .backgroundMusic,
+               let backgroundMusic = settings.backgroundMusic,
+               backgroundMusic.duckUnderVoice,
+               hasVoiceAudio {
+                applyVolumeRamp(
+                    to: params,
+                    range: EditTimeRange(startSeconds: 0, durationSeconds: max(0, duration.seconds)),
+                    baseGain: backgroundMusic.gain,
+                    targetGain: backgroundMusic.duckedGain,
+                    fadeInSeconds: min(backgroundMusic.fadeInSeconds, 1),
+                    fadeOutSeconds: min(backgroundMusic.fadeOutSeconds, 1)
+                )
+            }
+
+            for region in settings.enabledVolumeRegions where regionMatches(region.track, insertedTrack.role) {
+                applyVolumeRamp(
+                    to: params,
+                    range: region.range,
+                    baseGain: baseGain,
+                    targetGain: region.gain,
+                    fadeInSeconds: region.fadeInSeconds,
+                    fadeOutSeconds: region.fadeOutSeconds
+                )
+            }
+            return params
+        }
+
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = parameters
+        return mix
+    }
+
+    private func baseGain(for role: EditorAudioTrackRole, settings: EditorAudioSettings) -> Double {
+        if role == .backgroundMusic {
+            return settings.backgroundMusic?.gain ?? 1
+        }
+        let trackSettings = settings.trackSettings(for: role)
+        if trackSettings.isMuted || settings.isSoloMuted(role: role) {
+            return 0
+        }
+        return trackSettings.gain
+    }
+
+    private func regionMatches(_ regionRole: EditorAudioTrackRole, _ trackRole: EditorAudioTrackRole) -> Bool {
+        regionRole == .all || regionRole == trackRole
+    }
+
+    private func applyVolumeRamp(
+        to params: AVMutableAudioMixInputParameters,
+        range: EditTimeRange,
+        baseGain: Double,
+        targetGain: Double,
+        fadeInSeconds: Double,
+        fadeOutSeconds: Double
+    ) {
+        let startSeconds = max(0, range.startSeconds)
+        let endSeconds = max(startSeconds, range.endSeconds)
+        let durationSeconds = max(0, endSeconds - startSeconds)
+        guard durationSeconds > 0 else { return }
+
+        let clampedFadeIn = min(max(0, fadeInSeconds), durationSeconds)
+        let clampedFadeOut = min(max(0, fadeOutSeconds), max(0, durationSeconds - clampedFadeIn))
+        let start = CMTime(seconds: startSeconds, preferredTimescale: 600)
+        let fadeInEnd = CMTime(seconds: startSeconds + clampedFadeIn, preferredTimescale: 600)
+        let fadeOutStart = CMTime(seconds: endSeconds - clampedFadeOut, preferredTimescale: 600)
+        let end = CMTime(seconds: endSeconds, preferredTimescale: 600)
+        let base = Float(baseGain)
+        let target = Float(targetGain)
+
+        if clampedFadeIn > 0 {
+            params.setVolumeRamp(
+                fromStartVolume: base,
+                toEndVolume: target,
+                timeRange: CMTimeRange(start: start, end: fadeInEnd)
+            )
+        } else {
+            params.setVolume(target, at: start)
+        }
+
+        if fadeOutStart > fadeInEnd {
+            params.setVolume(target, at: fadeInEnd)
+        }
+
+        if clampedFadeOut > 0 {
+            params.setVolumeRamp(
+                fromStartVolume: target,
+                toEndVolume: base,
+                timeRange: CMTimeRange(start: fadeOutStart, end: end)
+            )
+        }
+        params.setVolume(base, at: end)
     }
 
     private func displaySize(naturalSize: CGSize, preferredTransform: CGAffineTransform) -> CGSize {
@@ -1867,6 +2072,11 @@ private struct WebcamOverlayComposition {
 private struct WebcamRenderState {
     var geometry: PictureInPictureRenderGeometry
     var transform: CGAffineTransform
+}
+
+private struct InsertedAudioTrack {
+    var track: AVMutableCompositionTrack
+    var role: EditorAudioTrackRole
 }
 
 private struct DisplayGeometry {

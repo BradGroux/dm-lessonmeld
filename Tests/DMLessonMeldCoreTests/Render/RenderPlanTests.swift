@@ -80,6 +80,66 @@ struct RenderPlanTests {
         #expect(!plan.canvas.isDefault)
     }
 
+    @Test("Render inspection loads audio settings and blocks unsupported speed regions")
+    func renderInspectionLoadsAudioSettingsAndBlocksSpeedRegions() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let destinationURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Audio Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo, mimeType: "video/mp4"),
+                    microphoneAudio: ProjectFile(relativePath: "media/mic.m4a", role: .microphoneAudio, mimeType: "audio/mp4"),
+                    systemAudio: ProjectFile(relativePath: "media/system.m4a", role: .systemAudio, mimeType: "audio/mp4")
+                )
+            ),
+            to: projectURL
+        )
+        let audioSettings = EditorAudioSettings(
+            screenAudio: EditorAudioTrackSettings(gain: 0.8),
+            microphoneAudio: EditorAudioTrackSettings(gain: 1.1, isSoloed: true),
+            systemAudio: EditorAudioTrackSettings(gain: 0.2, isMuted: true),
+            backgroundMusic: EditorBackgroundMusicSettings(relativePath: "audio/assets/intro.m4a", startSeconds: 1, durationSeconds: 5),
+            volumeRegions: [
+                EditorAudioVolumeRegion(
+                    id: "duck",
+                    track: .backgroundMusic,
+                    range: EditTimeRange(startSeconds: 2, endSeconds: 4),
+                    gain: 0.12
+                )
+            ]
+        )
+        try EditorSettingsFile.save(EditorSettings(audio: audioSettings), toProject: projectURL)
+        try EditDecisionListFile.save(
+            EditDecisionList(
+                id: "lesson-edit",
+                sourceDurationSeconds: 10,
+                speedRegions: [
+                    SpeedRegion(
+                        id: "speed-typing",
+                        range: EditTimeRange(startSeconds: 4, endSeconds: 7),
+                        playbackRate: 2
+                    )
+                ]
+            ),
+            toProject: projectURL
+        )
+
+        let inspection = try AVFoundationRenderService().inspect(
+            projectURL: projectURL,
+            destinationURL: destinationURL
+        )
+
+        let plan = try #require(inspection.plan)
+        #expect(plan.audio == audioSettings)
+        #expect(plan.audioSources.map(\.role) == [.microphoneAudio, .systemAudio])
+        #expect(plan.speedRegions.map(\.id) == ["speed-typing"])
+        #expect(inspection.issues.contains {
+            $0.severity == .error && $0.path == "speedRegions[0]"
+        })
+    }
+
     @Test("Validation can check missing media only when requested")
     func validationCanSkipFileExistence() throws {
         let temp = try TemporaryDirectory()
