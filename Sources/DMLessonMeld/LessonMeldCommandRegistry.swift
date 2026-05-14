@@ -124,19 +124,19 @@ enum LessonMeldCommandRegistry {
     private static func definition(for id: LessonMeldAppCommandID) -> LessonMeldCommandDefinition {
         switch id {
         case .showMainWindow:
-            LessonMeldCommandDefinition(id: id, title: "Show Main Window", subtitle: "Open the recorder and project editor workspace.", systemImage: "rectangle.stack.badge.play", shortcut: "⌘0", keywords: ["home", "record", "editor", "project"])
+            LessonMeldCommandDefinition(id: id, title: "Show Main Window", subtitle: "Open the record, edit, export workspace.", systemImage: "rectangle.stack.badge.play", shortcut: "⌘0", keywords: ["home", "record", "edit", "export", "project"])
         case .newProject:
-            LessonMeldCommandDefinition(id: id, title: "New Project", subtitle: "Create an empty editable lesson project.", systemImage: "doc.badge.plus", shortcut: "⌘N", keywords: ["project", "lesson", "new"])
+            LessonMeldCommandDefinition(id: id, title: "New Project", subtitle: "Create an empty lesson project for recording or import.", systemImage: "doc.badge.plus", shortcut: "⌘N", keywords: ["project", "lesson", "new", "record", "edit"])
         case .openProject:
-            LessonMeldCommandDefinition(id: id, title: "Open Project", subtitle: "Open an existing .dmlm lesson project.", systemImage: "folder", shortcut: "⌘O", keywords: ["project", "lesson", "open", "bundle"])
+            LessonMeldCommandDefinition(id: id, title: "Open Project", subtitle: "Open an existing .dmlm lesson project for editing or export.", systemImage: "folder", shortcut: "⌘O", keywords: ["project", "lesson", "open", "bundle", "edit", "export"])
         case .importVideo:
-            LessonMeldCommandDefinition(id: id, title: "Import Video", subtitle: "Create a lesson project from an MP4 or MOV.", systemImage: "film.badge.plus", shortcut: "⌘I", keywords: ["import", "video", "edit", "project", "mp4", "mov"])
+            LessonMeldCommandDefinition(id: id, title: "Import Video", subtitle: "Create a lesson project from an MP4 or MOV and open Edit Video.", systemImage: "film.badge.plus", shortcut: "⌘I", keywords: ["import", "video", "edit", "project", "mp4", "mov"])
         case .revealProject:
             LessonMeldCommandDefinition(id: id, title: "Reveal Project in Finder", subtitle: "Show the editable .dmlm project package.", systemImage: "arrow.up.forward.app", shortcut: "⇧⌘R", keywords: ["finder", "reveal", "project", "bundle"])
         case .saveEdits:
-            LessonMeldCommandDefinition(id: id, title: "Save Edits", subtitle: "Save timeline, marker, overlay, caption, and editor sidecars.", systemImage: "checkmark.circle", shortcut: "⌘S", keywords: ["save", "edits", "sidecar", "timeline"])
+            LessonMeldCommandDefinition(id: id, title: "Save Changes", subtitle: "Save timeline, marker, overlay, caption, and editor sidecars.", systemImage: "checkmark.circle", shortcut: "⌘S", keywords: ["save", "edits", "changes", "sidecar", "timeline"])
         case .exportVideo:
-            LessonMeldCommandDefinition(id: id, title: "Export Video", subtitle: "Render the current lesson video.", systemImage: "square.and.arrow.up", shortcut: "⇧⌘E", keywords: ["export", "render", "video", "package"])
+            LessonMeldCommandDefinition(id: id, title: "Export Video", subtitle: "Render the current lesson video or package it for LearnHouse.", systemImage: "square.and.arrow.up", shortcut: "⇧⌘E", keywords: ["export", "render", "video", "package"])
         case .newRecording:
             LessonMeldCommandDefinition(id: id, title: "New Recording", subtitle: "Open the floating recorder for a new take.", systemImage: "record.circle", shortcut: "⌥⌘↩", keywords: ["record", "capture", "take"])
         case .recordingControls:

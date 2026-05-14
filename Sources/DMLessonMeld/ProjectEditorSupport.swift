@@ -56,6 +56,41 @@ enum EditorInspectorTab: String, CaseIterable, Identifiable {
     }
 }
 
+enum LessonWorkflowStage: String, CaseIterable, Identifiable {
+    case record
+    case editVideo
+    case exportPackage
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .record: "Record"
+        case .editVideo: "Edit Video"
+        case .exportPackage: "Export/Package"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .record:
+            "Capture a screen, window, area, camera, microphone, and optional system audio."
+        case .editVideo:
+            "Open a recorded or imported source video for preview, trim, cuts, zooms, overlays, captions, and annotations."
+        case .exportPackage:
+            "Render the final video or package the lesson for LearnHouse."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .record: "record.circle"
+        case .editVideo: "film"
+        case .exportPackage: "square.and.arrow.up"
+        }
+    }
+}
+
 struct EditorInspectorAction: Identifiable {
     let id: String
     let title: String

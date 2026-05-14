@@ -26,6 +26,8 @@ Onboarding checks the permissions LessonMeld needs for recording:
 
 You can continue without optional permissions and enable them later from **Settings** or **Onboarding**.
 
+The main workspace is organized around three primary steps: **Record**, **Edit Video**, and **Export/Package**. Importing an MP4 or MOV is an entry point into **Edit Video**; it creates a local `.dmlm` project and opens the same editor used after recording.
+
 ## Record a Lesson
 
 1. Open LessonMeld.
@@ -35,7 +37,7 @@ You can continue without optional permissions and enable them later from **Setti
 5. Press the record button.
 6. Use the floating controls to pause, stop, mark moments, or open settings.
 
-When you press **Stop**, LessonMeld opens the saved lesson in the editor. The `.dmlm` item is a macOS package directory: it is the lesson project, not the final video file. It contains `screen.mp4`, optional webcam/audio tracks, and the local sidecars used for review, cuts, zooms, annotations, rendering, and course packaging.
+When you press **Stop**, LessonMeld opens the saved lesson in the editor. The `.dmlm` item is a macOS package directory: it is the lesson project, not the final video file. It contains `screen.mp4`, optional webcam/audio tracks, and the local sidecars used for editing, cuts, zooms, annotations, rendering, and course packaging.
 
 ## Edit an Existing Video
 
@@ -43,13 +45,13 @@ Use **Import Video** in the sidebar, **File > Import Video**, the command palett
 
 LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the timeline editor immediately. Imported videos use the full editing workspace: a large preview canvas, custom playback controls, trim in/out points, cut blocks, zoom blocks, overlays, markers, annotation controls, export controls, and a bottom timeline. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle.
 
-## Review a Project
+## Edit a Project
 
 Open a `.dmlm` lesson bundle from the sidebar or Finder. The project editor lets you:
 
 - Edit lesson title, course, module, instructor, tags, and summary
 - Style the final video canvas with aspect ratio, custom dimensions, crop, background, padding, inset, rounded corners, and shadow controls
-- Review media readiness and project assets
+- Check media readiness and project assets
 - Add and edit markers
 - Save timeline cuts, zoom regions, and timed video overlays
 - Scrub through a bottom timeline with clip, cut, zoom, overlay, cursor, and marker lanes
@@ -61,7 +63,7 @@ Use **Assets** in the editor inspector, or **Project Assets** on the project das
 
 LessonMeld tracks unsaved metadata, marker, timeline, editor setting, overlay, and caption edits at the project level. The dashboard and video editor show **Save Changes** and **Revert** when local edits differ from the saved bundle. Opening another project, importing a video, or closing the window prompts before unsaved editor work is discarded.
 
-Technical bundle details are kept in advanced sections so normal review work stays readable.
+Technical bundle details are kept in advanced sections so normal editing work stays readable.
 
 ## Style the Video Canvas
 

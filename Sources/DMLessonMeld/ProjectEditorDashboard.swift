@@ -175,7 +175,7 @@ extension ProjectEditorView {
                             Button {
                                 model.inspectRender(preferences.snapshot)
                             } label: {
-                                Label("Check Render", systemImage: "checkmark.seal")
+                                Label("Check Export", systemImage: "checkmark.seal")
                             }
 
                             Button {
@@ -218,14 +218,14 @@ extension ProjectEditorView {
                     tint: manifest.media.webcam == nil ? .secondary : .green
                 )
                 readinessLine(
-                    "Review",
+                    "Edit Video",
                     status: reviewStatus(manifest),
                     detail: reviewDetail(manifest),
-                    systemImage: "film.stack",
+                    systemImage: "film",
                     tint: manifest.media.screen == nil ? .secondary : .blue
                 )
                 readinessLine(
-                    "Export",
+                    "Export/Package",
                     status: exportStatus(summary, manifest: manifest),
                     detail: exportDetail(summary, manifest: manifest),
                     systemImage: "square.and.arrow.up",
@@ -271,8 +271,8 @@ extension ProjectEditorView {
     ) -> (title: String, detail: String, systemImage: String, tint: Color) {
         if manifest.media.screen == nil {
             return (
-                "Add video",
-                "This bundle has lesson structure, but no screen video yet. Record a take or import an existing video to start editing.",
+                "Record or import video",
+                "This bundle has lesson structure, but no source video yet. Record a take or import an existing video to start editing.",
                 "record.circle",
                 .orange
             )
@@ -281,7 +281,7 @@ extension ProjectEditorView {
         if hasBlockingIssues(summary) {
             return (
                 "Fix project issues",
-                "The recording exists, but the bundle has a blocking issue before it can render cleanly.",
+                "The video exists, but the bundle has a blocking issue before it can export cleanly.",
                 "xmark.octagon",
                 .red
             )
@@ -290,7 +290,7 @@ extension ProjectEditorView {
         if !summary.issues.isEmpty {
             return (
                 "Check warnings",
-                "The recording can be reviewed, but there are warnings worth checking before export.",
+                "The video can be edited, but there are warnings worth checking before export.",
                 "exclamationmark.triangle",
                 .orange
             )
@@ -298,16 +298,16 @@ extension ProjectEditorView {
 
         if model.cutRows.isEmpty && model.zoomRows.isEmpty && model.annotationItemCount == 0 {
             return (
-                "Review the recording",
-                "Preview the take, trim dead air, add zooms where focus matters, and open annotations when you need callouts.",
+                "Edit the video",
+                "Preview the take, trim dead air, add cuts, zooms, overlays, captions, and annotations where the lesson needs polish.",
                 "play.rectangle",
                 .blue
             )
         }
 
         return (
-            "Ready to render",
-            "The lesson has media and review edits. Export a video or package the lesson for LearnHouse.",
+            "Ready to export/package",
+            "The lesson has media and edits. Export a video or package the lesson for LearnHouse.",
             "checkmark.seal.fill",
             .green
         )
@@ -328,7 +328,7 @@ extension ProjectEditorView {
             return summary
         }
 
-        return "Local lesson bundle ready for recording, review, and export."
+        return "Local lesson bundle ready for recording, editing, export, and packaging."
     }
 
     func hasBlockingIssues(_ summary: ProjectBundleSummary) -> Bool {
@@ -366,7 +366,7 @@ extension ProjectEditorView {
     }
 
     func reviewDetail(_ manifest: ProjectManifest) -> String {
-        guard manifest.media.screen != nil else { return "Record or import video first, then review the take." }
+        guard manifest.media.screen != nil else { return "Record or import video first, then edit the take." }
 
         let pieces = [
             countLabel(model.cutRows.filter(\.isEnabled).count, singular: "cut"),
@@ -374,7 +374,7 @@ extension ProjectEditorView {
             countLabel(model.annotationItemCount, singular: "annotation")
         ].filter { !$0.hasPrefix("0 ") }
 
-        return pieces.isEmpty ? "Preview, cut retakes, add zooms, and mark important moments." : pieces.joined(separator: ", ")
+        return pieces.isEmpty ? "Preview, trim, cut retakes, add zooms, overlays, captions, and annotations." : pieces.joined(separator: ", ")
     }
 
     func exportStatus(_ summary: ProjectBundleSummary, manifest: ProjectManifest) -> String {
@@ -389,7 +389,7 @@ extension ProjectEditorView {
             return "Export unlocks after recording or importing video."
         }
         if hasBlockingIssues(summary) {
-            return "Resolve bundle errors before rendering."
+            return "Resolve bundle errors before exporting."
         }
         if !summary.issues.isEmpty {
             return "Warnings are visible in technical details."
@@ -515,7 +515,7 @@ extension ProjectEditorView {
                             model.loadProject(URL(fileURLWithPath: projectPath))
                         }
                     } label: {
-                        Label("Review Last Lesson", systemImage: "film.stack")
+                        Label("Edit Last Lesson", systemImage: "film")
                     }
                     Text(URL(fileURLWithPath: projectPath).lastPathComponent)
                         .font(.system(.caption, design: .monospaced))
@@ -532,27 +532,12 @@ extension ProjectEditorView {
     }
 
     var workflowPanel: some View {
-        EditorPanel(title: "Workflow", subtitle: "The normal path for a curriculum lesson.") {
+        EditorPanel(title: "Record, Edit, Export", subtitle: "The normal path for a curriculum lesson.") {
             VStack(alignment: .leading, spacing: 10) {
-                workflowRow("Set Up", "Permissions and defaults", systemImage: "checklist") {
-                    openWindow(id: "onboarding")
-                    NSApplication.shared.activate()
-                }
-                workflowRow("Record", "Screen, webcam, mic, and optional system audio", systemImage: "record.circle") {
-                    quickRecorder.presentControlBar(preferences: preferences)
-                }
-                workflowRow("Edit Video", "Open a recorded or imported source video, then cut, trim, zoom, annotate, and export", systemImage: "film") {
-                    confirmProjectTransition("import a video") {
-                        model.importVideoForEditing(preferences.snapshot)
+                ForEach(LessonWorkflowStage.allCases) { stage in
+                    workflowRow(stage.title, stage.detail, systemImage: stage.systemImage) {
+                        runWorkflowStage(stage)
                     }
-                }
-                workflowRow("Review", "Preview playback and check the lesson before export", systemImage: "film.stack") {
-                    confirmProjectTransition("open another project") {
-                        model.openProject()
-                    }
-                }
-                workflowRow("Render", "Export video or package for LearnHouse", systemImage: "shippingbox") {
-                    appRouter.openSettings(.export)
                 }
             }
         }
@@ -780,7 +765,7 @@ extension ProjectEditorView {
                             model.loadProject(URL(fileURLWithPath: projectPath))
                         }
                     } label: {
-                        Label("Review Last Lesson", systemImage: "film.stack")
+                        Label("Edit Last Lesson", systemImage: "film")
                     }
 
                     Button {
@@ -817,7 +802,7 @@ extension ProjectEditorView {
     }
 
     func lessonMarkersPanel(manifest: ProjectManifest) -> some View {
-        EditorPanel(title: "Markers", subtitle: "Plan chapters before recording, flag moments while recording, or clean up the lesson outline after review.") {
+        EditorPanel(title: "Markers", subtitle: "Plan chapters before recording, flag moments while recording, or clean up the lesson outline while editing.") {
             HStack(spacing: 10) {
                 Toggle("Show marker list", isOn: $showLessonMarkers)
                     .toggleStyle(.checkbox)
@@ -887,7 +872,7 @@ extension ProjectEditorView {
                     }
                 }
             } else {
-                Text("Markers are hidden for free-form review. Existing markers stay in the project and exports can still use them.")
+                Text("Markers are hidden for free-form editing. Existing markers stay in the project and exports can still use them.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1190,7 +1175,7 @@ extension ProjectEditorView {
     }
 
     func renderPanel(manifest: ProjectManifest) -> some View {
-        EditorPanel(title: "Render & Package", subtitle: "Create the final lesson video or package the project for LearnHouse.") {
+        EditorPanel(title: "Export & Package", subtitle: "Create the final lesson video or package the project for LearnHouse.") {
             HStack(spacing: 12) {
                 Picker("Quality", selection: $model.renderQuality) {
                     ForEach(RenderQuality.allCases, id: \.self) { quality in
@@ -1216,7 +1201,7 @@ extension ProjectEditorView {
                 Button("Check Readiness") {
                     model.inspectRender(preferences.snapshot)
                 }
-                Button(model.isRendering ? "Rendering..." : "Export Render") {
+                Button(model.isRendering ? "Exporting..." : "Export Video") {
                     model.exportRender(preferences.snapshot)
                 }
                 .disabled(model.isRendering || model.projectURL == nil)
@@ -1250,7 +1235,7 @@ extension ProjectEditorView {
                     valueRow("Captions", inspection.hasCaptions ? "Yes" : "No")
                     valueRow("Zoom Regions", inspection.hasZoomRegions ? "Yes" : "No")
                     valueRow("Audio Sources", "\(inspection.audioSourceCount)")
-                    valueRow("Render Issues", inspection.issues.isEmpty ? "None" : "\(inspection.issues.count)")
+                    valueRow("Export Issues", inspection.issues.isEmpty ? "None" : "\(inspection.issues.count)")
                 }
 
                 ForEach(inspection.issues.indices, id: \.self) { index in

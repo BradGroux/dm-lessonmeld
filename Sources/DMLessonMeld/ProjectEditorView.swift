@@ -229,7 +229,7 @@ struct ProjectEditorView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("LessonMeld")
                     .font(.title2.weight(.semibold))
-                Text("Record, review, render, and package your lessons.")
+                Text("Record, edit, export, and package your lessons.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -237,46 +237,9 @@ struct ProjectEditorView: View {
 
             sidebarSection("Workflow")
 
-            Button {
-                quickRecorder.presentControlBar(preferences: preferences)
-            } label: {
-                LessonMeldSidebarItem(
-                    title: quickRecorder.isRecording ? "Recording Controls" : "Record",
-                    systemImage: "record.circle",
-                    isSelected: model.manifest?.media.screen == nil
-                )
+            ForEach(LessonWorkflowStage.allCases) { stage in
+                workflowStageButton(stage)
             }
-            .buttonStyle(.plain)
-
-            Button {
-                if model.manifest?.media.screen == nil {
-                    confirmProjectTransition("import a video") {
-                        model.importVideoForEditing(preferences.snapshot)
-                    }
-                }
-            } label: {
-                LessonMeldSidebarItem(
-                    title: model.manifest?.media.screen == nil ? "Import Video" : "Edit Video",
-                    systemImage: "film",
-                    isSelected: model.manifest?.media.screen != nil
-                )
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                if annotationOverlay.isPresented {
-                    annotationOverlay.close()
-                } else {
-                    openAnnotationOverlayFromEditor()
-                }
-            } label: {
-                LessonMeldSidebarItem(
-                    title: annotationOverlay.isPresented ? "Close Tools" : "Annotate",
-                    systemImage: "paintpalette",
-                    isSelected: annotationOverlay.isPresented
-                )
-            }
-            .buttonStyle(.plain)
 
             Divider()
 
@@ -307,6 +270,25 @@ struct ProjectEditorView: View {
             }
             .buttonStyle(.plain)
             .disabled(model.projectURL == nil)
+
+            Divider()
+
+            sidebarSection("Tools")
+
+            Button {
+                if annotationOverlay.isPresented {
+                    annotationOverlay.close()
+                } else {
+                    openAnnotationOverlayFromEditor()
+                }
+            } label: {
+                LessonMeldSidebarItem(
+                    title: annotationOverlay.isPresented ? "Close Annotation Tools" : "Annotate",
+                    systemImage: "paintpalette",
+                    isSelected: annotationOverlay.isPresented
+                )
+            }
+            .buttonStyle(.plain)
 
             Divider()
 
@@ -344,7 +326,7 @@ struct ProjectEditorView: View {
                     .textSelection(.enabled)
                     .lineLimit(8)
             } else {
-                Text("Record a new lesson, import an existing video, or open a lesson bundle to review media, render cuts, and package a teaching-ready lesson.")
+                Text("Record a new lesson, import an existing video, or open a lesson bundle to edit video, export a final file, or package for LearnHouse.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -363,6 +345,58 @@ struct ProjectEditorView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    func workflowStageButton(_ stage: LessonWorkflowStage) -> some View {
+        Button {
+            runWorkflowStage(stage)
+        } label: {
+            LessonMeldSidebarItem(
+                title: sidebarTitle(for: stage),
+                systemImage: stage.systemImage,
+                isSelected: isWorkflowStageSelected(stage)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(stage == .exportPackage && model.manifest?.media.screen == nil)
+    }
+
+    func sidebarTitle(for stage: LessonWorkflowStage) -> String {
+        switch stage {
+        case .record:
+            quickRecorder.isRecording ? "Recording Controls" : stage.title
+        default:
+            stage.title
+        }
+    }
+
+    func runWorkflowStage(_ stage: LessonWorkflowStage) {
+        switch stage {
+        case .record:
+            quickRecorder.presentControlBar(preferences: preferences)
+        case .editVideo:
+            guard model.manifest?.media.screen == nil else {
+                editorInspectorTab = .edits
+                return
+            }
+            confirmProjectTransition("import a video") {
+                model.importVideoForEditing(preferences.snapshot)
+            }
+        case .exportPackage:
+            guard model.manifest?.media.screen != nil else { return }
+            editorInspectorTab = .export
+        }
+    }
+
+    func isWorkflowStageSelected(_ stage: LessonWorkflowStage) -> Bool {
+        switch stage {
+        case .record:
+            model.manifest?.media.screen == nil || quickRecorder.isRecording
+        case .editVideo:
+            model.manifest?.media.screen != nil && editorInspectorTab != .export
+        case .exportPackage:
+            model.manifest?.media.screen != nil && editorInspectorTab == .export
+        }
     }
 
     func sidebarSection(_ title: String) -> some View {
