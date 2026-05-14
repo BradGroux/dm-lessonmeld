@@ -24,6 +24,7 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
     case capture
     case annotations
     case export
+    case presets
     case community
     case privacy
     case shortcuts
@@ -37,6 +38,7 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
         case .capture: "Capture"
         case .annotations: "Annotations"
         case .export: "Export"
+        case .presets: "Presets"
         case .community: "Community"
         case .privacy: "Privacy"
         case .shortcuts: "Shortcuts"
@@ -50,6 +52,7 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
         case .capture: "record.circle"
         case .annotations: "pencil.tip"
         case .export: "square.and.arrow.up"
+        case .presets: "wand.and.stars"
         case .community: "person.2"
         case .privacy: "lock.shield"
         case .shortcuts: "keyboard"

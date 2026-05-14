@@ -17,6 +17,7 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - Timeline edit-decision sidecars for trims, cuts, speed regions, markers, zoom regions, timed video overlays, masks, and highlights
 - Render planning/export with webcam PiP, audio gain regions, background music, cursor/click/shortcut effects, zooms, masks/highlights, overlays, annotations, and styled caption burn-in
 - Caption and transcript import, timeline editing, styling, and sidecar exporters
+- Shareable `.dmlpreset` files for reusing project editor styles plus capture, annotation, and export defaults across lesson bundles
 - Local package export for course publishing workflows
 - Git-safe settings/template backup planning for non-sensitive config
 - Agent-readable project manifests and signed local app-control messages for automation
@@ -135,6 +136,8 @@ swift run dmlesson project create --lesson-title "Intro" --output /tmp/Intro.dml
 swift run dmlesson edit validate /tmp/Intro.dmlm --json
 swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --json
 swift run dmlesson render export /tmp/Intro.dmlm --output /tmp/lesson.mp4
+swift run dmlesson presets create-from-project /tmp/Intro.dmlm --output /tmp/workshop.dmlpreset --name "Workshop"
+swift run dmlesson presets apply /tmp/Intro.dmlm --preset /tmp/workshop.dmlpreset
 swift run dmlesson learnhouse package /tmp/Intro.dmlm --output /tmp/lesson-export --archive
 swift run dmlesson config plan ~/.dm-lessonmeld --json
 swift run dmlesson app status --json

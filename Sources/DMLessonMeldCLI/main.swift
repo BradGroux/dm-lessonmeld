@@ -975,7 +975,7 @@ struct DMLessonMeldCLI {
 
     static func runPresets(_ arguments: [String]) throws {
         guard let subcommand = arguments.first else {
-            throw CLIError.usage("Usage: dmlesson presets list|show <id> [--json]")
+            throw CLIError.usage("Usage: dmlesson presets list|show <id>|inspect <preset.dmlpreset>|create-from-project <project> --output <preset.dmlpreset> --name <name>|apply <project> --preset <preset.dmlpreset> [--json]")
         }
 
         switch subcommand {
@@ -993,6 +993,77 @@ struct DMLessonMeldCLI {
                 try printJSON(preset)
             } else {
                 print("\(preset.name): \(preset.format) \(preset.codec) \(preset.resolution)")
+            }
+        case "inspect":
+            guard arguments.count >= 2 else {
+                throw CLIError.usage("Usage: dmlesson presets inspect <preset.dmlpreset> [--json]")
+            }
+            let preset = try LessonPresetFile.load(from: URL(fileURLWithPath: arguments[1]))
+            if arguments.contains("--json") {
+                try printJSON(preset)
+            } else {
+                print("\(preset.name) (\(preset.id))")
+                if let summary = preset.summary {
+                    print(summary)
+                }
+                print("Editor settings: \(preset.editorSettings == nil ? "no" : "yes")")
+                print("Capture preferences: \(preset.capturePreferences == nil ? "no" : "yes")")
+                print("Annotation preferences: \(preset.annotationPreferences == nil ? "no" : "yes")")
+                print("Export preferences: \(preset.exportPreferences == nil ? "no" : "yes")")
+                print("Export preset IDs: \(preset.exportPresetIDs.isEmpty ? "none" : preset.exportPresetIDs.joined(separator: ", "))")
+            }
+        case "create-from-project", "export":
+            guard arguments.count >= 2,
+                  let output = optionValue("--output", in: arguments),
+                  let name = optionValue("--name", in: arguments) else {
+                throw CLIError.usage("Usage: dmlesson presets create-from-project <project> --output <preset.dmlpreset> --name <name> [--summary <text>] [--settings <settings.json>] [--json]")
+            }
+            let projectURL = URL(fileURLWithPath: arguments[1])
+            let preferences = try optionValue("--settings", in: arguments).map { path in
+                let data = try Data(contentsOf: URL(fileURLWithPath: path))
+                return try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data)
+            }
+            let preset = try LessonPreset.make(
+                fromProject: projectURL,
+                preferences: preferences,
+                name: name,
+                summary: optionValue("--summary", in: arguments)
+            )
+            let outputURL = normalizedPresetURL(URL(fileURLWithPath: output))
+            try LessonPresetFile.save(preset, to: outputURL)
+            if arguments.contains("--json") {
+                try printJSON(preset)
+            } else {
+                print("Created preset: \(outputURL.path)")
+            }
+        case "apply", "import":
+            guard arguments.count >= 2, let presetPath = optionValue("--preset", in: arguments) else {
+                throw CLIError.usage("Usage: dmlesson presets apply <project> --preset <preset.dmlpreset> [--json]")
+            }
+            let projectURL = URL(fileURLWithPath: arguments[1])
+            let preset = try LessonPresetFile.load(from: URL(fileURLWithPath: presetPath))
+            let preview = try LessonPresetApplier.apply(preset, toProject: projectURL)
+            if arguments.contains("--json") {
+                try printJSON(preview)
+            } else {
+                print("Applied preset: \(preview.presetName)")
+                print("Preserved: \(preview.preservedProjectFields.joined(separator: ", "))")
+            }
+        case "preview":
+            guard arguments.count >= 2, let presetPath = optionValue("--preset", in: arguments) else {
+                throw CLIError.usage("Usage: dmlesson presets preview <project> --preset <preset.dmlpreset> [--json]")
+            }
+            _ = try ProjectBundle.loadManifest(at: URL(fileURLWithPath: arguments[1]))
+            let preset = try LessonPresetFile.load(from: URL(fileURLWithPath: presetPath))
+            let preview = LessonPresetApplier.preview(preset)
+            if arguments.contains("--json") {
+                try printJSON(preview)
+            } else {
+                print("Preset: \(preview.presetName)")
+                print("Writes editor settings: \(preview.writesEditorSettings ? "yes" : "no")")
+                print("Updates capture settings: \(preview.updatesCaptureSettings ? "yes" : "no")")
+                print("Updates export preset IDs: \(preview.updatesExportPresets ? "yes" : "no")")
+                print("Preserves: \(preview.preservedProjectFields.joined(separator: ", "))")
             }
         default:
             throw CLIError.invalidCommand(subcommand)
@@ -1168,7 +1239,9 @@ struct DMLessonMeldCLI {
           export <project> --preset <id> [--json]
           templates list|show <id> [--json]
           templates apply <id> --lesson-title <title> --output <project> [--course-title <title>] [--json]
-          presets list|show <id> [--json]
+          presets list|show <id>|inspect <preset.dmlpreset> [--json]
+          presets create-from-project <project> --output <preset.dmlpreset> --name <name> [--summary <text>] [--settings <settings.json>] [--json]
+          presets apply <project> --preset <preset.dmlpreset> [--json]
           learnhouse package <project> --output <directory> [--archive] [--json]
           config plan|init|status <config-root> [--json]
           config commit <config-root> --message <message> [--json]
@@ -1497,6 +1570,12 @@ struct DMLessonMeldCLI {
         let quality = optionValue("--quality", in: arguments).flatMap(RenderQuality.init(rawValue:)) ?? .highest
         let fileType: RenderFileType = outputURL.pathExtension.lowercased() == "mov" ? .mov : .mp4
         return RenderPreset(fileType: fileType, quality: quality)
+    }
+
+    static func normalizedPresetURL(_ url: URL) -> URL {
+        url.pathExtension.isEmpty
+            ? url.appendingPathExtension(LessonPresetFile.fileExtension)
+            : url
     }
 
     static func annotationStoreURL(projectURL: URL, createIfMissing: Bool) throws -> URL {

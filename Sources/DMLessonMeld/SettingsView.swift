@@ -1,6 +1,7 @@
 import AppKit
 import DMLessonMeldCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LessonMeldSettingsView: View {
     @ObservedObject var appRouter: LessonMeldAppRouter
@@ -10,6 +11,7 @@ struct LessonMeldSettingsView: View {
     @State private var selectedSection: LessonMeldSettingsSection = .capture
     @State private var draft: LessonMeldPreferences
     @State private var saveMessage = "Saved"
+    @State private var presetMessage = ""
 
     init(appRouter: LessonMeldAppRouter, preferences: AppPreferencesController) {
         self.appRouter = appRouter
@@ -131,6 +133,8 @@ struct LessonMeldSettingsView: View {
             annotationsSection
         case .export:
             exportSection
+        case .presets:
+            presetsSection
         case .community:
             communitySection
         case .privacy:
@@ -319,6 +323,45 @@ struct LessonMeldSettingsView: View {
         }
     }
 
+    private var presetsSection: some View {
+        SettingsSectionView(title: "Presets", subtitle: "Share reusable capture, annotation, and export defaults as local preset files.") {
+            HStack {
+                Button {
+                    exportSettingsPreset()
+                } label: {
+                    Label("Export Settings Preset...", systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    importSettingsPreset()
+                } label: {
+                    Label("Import Settings Preset...", systemImage: "square.and.arrow.down")
+                }
+            }
+            if !presetMessage.isEmpty {
+                Text(presetMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            Text("Included")
+                .font(.headline)
+            diagnosticsRow("Capture", "Screen, mic, webcam, cursor, countdown defaults")
+            diagnosticsRow("Annotations", "Default tool, colors, line width, palette")
+            diagnosticsRow("Export", "Render quality, file type, LearnHouse packaging defaults")
+
+            Divider()
+
+            Text("Project styles")
+                .font(.headline)
+            Text("Open a lesson project and use the editor Presets tab to include canvas, cursor, camera, audio, caption, overlay, and export preset IDs.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var communitySection: some View {
         SettingsSectionView(title: "Community", subtitle: "Start Small, Think Big links for courses, episodes, and live discussion.") {
             CommunityLinkButton(
@@ -435,6 +478,63 @@ struct LessonMeldSettingsView: View {
             Text(value)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func exportSettingsPreset() {
+        let panel = NSSavePanel()
+        panel.title = "Export Settings Preset"
+        panel.nameFieldStringValue = "lessonmeld-settings.\(LessonPresetFile.fileExtension)"
+        if let contentType = Self.lessonPresetContentType {
+            panel.allowedContentTypes = [contentType]
+        }
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let preset = LessonPreset(
+                name: "LessonMeld Settings",
+                summary: "Capture, annotation, and export defaults.",
+                capturePreferences: draft.capture,
+                annotationPreferences: draft.annotation,
+                exportPreferences: draft.export
+            )
+            try LessonPresetFile.save(preset, to: Self.presetURLWithExtension(url))
+            presetMessage = "Exported \(preset.name)."
+        } catch {
+            presetMessage = error.localizedDescription
+        }
+    }
+
+    private func importSettingsPreset() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Settings Preset"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        if let contentType = Self.lessonPresetContentType {
+            panel.allowedContentTypes = [contentType]
+        }
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let preset = try LessonPresetFile.load(from: url)
+            draft = LessonPresetApplier.applyPreferences(preset, to: draft)
+            presetMessage = "Imported \(preset.name). Save to keep these settings."
+            saveMessage = "Unsaved"
+        } catch {
+            presetMessage = error.localizedDescription
+        }
+    }
+
+    private static var lessonPresetContentType: UTType? {
+        UTType(filenameExtension: LessonPresetFile.fileExtension) ?? .json
+    }
+
+    private static func presetURLWithExtension(_ url: URL) -> URL {
+        url.pathExtension.lowercased() == LessonPresetFile.fileExtension
+            ? url
+            : url.appendingPathExtension(LessonPresetFile.fileExtension)
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<LessonMeldPreferences, Value>) -> Binding<Value> {
