@@ -56,6 +56,9 @@ struct ProjectEditorView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             quickRecorder.refreshPermissions(updateMessage: false)
         }
+        .onReceive(appRouter.$importVideoRequest.compactMap(\.self)) { _ in
+            model.importVideoForEditing(preferences.snapshot)
+        }
     }
 
     private func applyLaunchPreferences() {
@@ -114,9 +117,9 @@ struct ProjectEditorView: View {
             }
 
             Button {
-                model.startDraftProject(preferences.snapshot)
+                model.importVideoForEditing(preferences.snapshot)
             } label: {
-                Label("Edit", systemImage: "square.and.pencil")
+                Label("Edit Video", systemImage: "film")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -193,7 +196,7 @@ struct ProjectEditorView: View {
                     .textSelection(.enabled)
                     .lineLimit(8)
             } else {
-                Text("Create or open a lesson bundle to review media, render cuts, and package a teaching-ready lesson.")
+                Text("Record a new lesson, import an existing video, or open a lesson bundle to review media, render cuts, and package a teaching-ready lesson.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -335,6 +338,12 @@ struct ProjectEditorView: View {
                             .buttonStyle(.borderedProminent)
 
                             Button {
+                                model.importVideoForEditing(preferences.snapshot)
+                            } label: {
+                                Label("Import Video", systemImage: "film")
+                            }
+
+                            Button {
                                 appRouter.openSettings(.capture)
                             } label: {
                                 Label("Check Defaults", systemImage: "gearshape")
@@ -385,9 +394,9 @@ struct ProjectEditorView: View {
                 Text("Lesson Readiness")
                     .font(.headline)
                 readinessLine(
-                    "Recording",
-                    status: manifest.media.screen == nil ? "Needed" : "Recorded",
-                    detail: manifest.media.screen?.relativePath ?? "Start with a screen, window, or area recording.",
+                    "Screen Video",
+                    status: manifest.media.screen == nil ? "Needed" : "Ready",
+                    detail: manifest.media.screen?.relativePath ?? "Record a take or import an existing video.",
                     systemImage: "display",
                     tint: manifest.media.screen == nil ? .orange : .green
                 )
@@ -465,8 +474,8 @@ struct ProjectEditorView: View {
     ) -> (title: String, detail: String, systemImage: String, tint: Color) {
         if manifest.media.screen == nil {
             return (
-                "Record the lesson",
-                "This bundle has lesson structure, but no screen recording yet. Open the recorder and capture the first take.",
+                "Add video",
+                "This bundle has lesson structure, but no screen video yet. Record a take or import an existing video to start editing.",
                 "record.circle",
                 .orange
             )
@@ -560,7 +569,7 @@ struct ProjectEditorView: View {
     }
 
     private func reviewDetail(_ manifest: ProjectManifest) -> String {
-        guard manifest.media.screen != nil else { return "Record first, then review the take." }
+        guard manifest.media.screen != nil else { return "Record or import video first, then review the take." }
 
         let pieces = [
             countLabel(model.cutRows.filter(\.isEnabled).count, singular: "cut"),
@@ -580,7 +589,7 @@ struct ProjectEditorView: View {
 
     private func exportDetail(_ summary: ProjectBundleSummary, manifest: ProjectManifest) -> String {
         if manifest.media.screen == nil {
-            return "Export unlocks after the first recording."
+            return "Export unlocks after recording or importing video."
         }
         if hasBlockingIssues(summary) {
             return "Resolve bundle errors before rendering."
@@ -650,7 +659,7 @@ struct ProjectEditorView: View {
     }
 
     private var startLessonPanel: some View {
-        EditorPanel(title: "Start a Lesson", subtitle: "Record into a local lesson project, or start editing a draft before you capture media.") {
+        EditorPanel(title: "Start a Lesson", subtitle: "Record into a local lesson project, or import an existing video and edit it immediately.") {
             HStack(spacing: 10) {
                 Button {
                     quickRecorder.presentControlBar(preferences: preferences)
@@ -660,9 +669,9 @@ struct ProjectEditorView: View {
                 .buttonStyle(.borderedProminent)
 
                 Button {
-                    model.startDraftProject(preferences.snapshot)
+                    model.importVideoForEditing(preferences.snapshot)
                 } label: {
-                    Label("Edit Lesson", systemImage: "square.and.pencil")
+                    Label("Edit Video", systemImage: "film")
                 }
 
                 Button {
@@ -710,7 +719,7 @@ struct ProjectEditorView: View {
                         .truncationMode(.middle)
                 }
             } else {
-                Text("Edit Lesson creates a local draft bundle immediately. You can fill in lesson details, markers, annotations, and later record into the same project.")
+                Text("Edit Video imports an MP4 or MOV into a local lesson bundle and opens the editor for preview, cuts, zooms, trims, annotations, and export.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -727,8 +736,8 @@ struct ProjectEditorView: View {
                 workflowRow("Record", "Screen, webcam, mic, and optional system audio", systemImage: "record.circle") {
                     quickRecorder.presentControlBar(preferences: preferences)
                 }
-                workflowRow("Edit", "Lesson details, markers, cuts, zooms, and annotations", systemImage: "square.and.pencil") {
-                    model.startDraftProject(preferences.snapshot)
+                workflowRow("Edit Video", "Import or open media, then cut, trim, zoom, annotate, and export", systemImage: "film") {
+                    model.importVideoForEditing(preferences.snapshot)
                 }
                 workflowRow("Review", "Preview playback and check the lesson before export", systemImage: "film.stack") {
                     model.openProject()
@@ -836,9 +845,9 @@ struct ProjectEditorView: View {
         EditorPanel(title: "Create or Open a Lesson Project", subtitle: "The editor works directly against local lesson bundles.") {
             HStack {
                 Button {
-                    model.startDraftProject(preferences.snapshot)
+                    model.importVideoForEditing(preferences.snapshot)
                 } label: {
-                    Label("Edit Lesson", systemImage: "square.and.pencil")
+                    Label("Edit Video...", systemImage: "film")
                 }
 
                 Button {
@@ -853,7 +862,7 @@ struct ProjectEditorView: View {
                     Label("Open Lesson...", systemImage: "folder")
                 }
             }
-            Text("New projects use the configured lesson template and stay local from the first manifest.")
+            Text("Importing a video creates a local lesson bundle with the media ready for preview, cuts, zooms, trims, annotations, and export.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1779,25 +1788,30 @@ private final class ProjectEditorModel: ObservableObject {
         previewDurationSeconds > 0 ? Self.formatClock(previewDurationSeconds) : "--:--"
     }
 
-    func startDraftProject(_ preferences: LessonMeldPreferences) {
-        if projectURL != nil {
-            setMessage("The current lesson is ready to edit.")
-            return
-        }
+    func importVideoForEditing(_ preferences: LessonMeldPreferences) {
+        let panel = NSOpenPanel()
+        panel.title = "Create Digital Meld LessonMeld Project from Video"
+        panel.message = "Choose an MP4 or MOV file to import into a local lesson bundle."
+        panel.prompt = "Import"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = Self.editableVideoContentTypes
+
+        guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
 
         do {
-            let defaultDirectory = Self.expandedURL(preferences.general.defaultProjectDirectory)
-            try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
-            let projectURL = try Self.makeDraftProjectURL(in: defaultDirectory)
-
-            guard let template = LessonTemplateLibrary.template(id: preferences.general.defaultTemplateID)
-                ?? LessonTemplateLibrary.defaultTemplates.first else {
-                throw ProjectEditorError.templateNotFound(preferences.general.defaultTemplateID)
+            let didAccess = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
             }
 
-            try ProjectBundle.writeManifest(template.seedManifest(lessonTitle: "Untitled Lesson"), to: projectURL)
+            setMessage("Importing \(sourceURL.lastPathComponent)...")
+            let projectURL = try importVideo(sourceURL, preferences: preferences)
             loadProject(projectURL)
-            setMessage("Started an editable lesson draft.")
+            setMessage("Imported \(sourceURL.lastPathComponent) for editing.")
         } catch {
             setError(error.localizedDescription)
         }
@@ -1848,6 +1862,65 @@ private final class ProjectEditorModel: ObservableObject {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         loadProject(url)
+    }
+
+    private func importVideo(_ sourceURL: URL, preferences: LessonMeldPreferences) throws -> URL {
+        let sourceExtension = sourceURL.pathExtension.lowercased()
+        guard Self.supportedEditableVideoExtensions.contains(sourceExtension) else {
+            throw ProjectEditorError.unsupportedVideoType(sourceURL.lastPathComponent)
+        }
+
+        let existingProjectURL = projectURL
+        let existingManifest = manifest
+        let shouldAttachToCurrentProject = existingProjectURL != nil && existingManifest?.media.screen == nil
+        let destinationProjectURL: URL
+        var nextManifest: ProjectManifest
+
+        if shouldAttachToCurrentProject, let existingProjectURL, let existingManifest {
+            destinationProjectURL = existingProjectURL
+            nextManifest = existingManifest
+            try FileManager.default.createDirectory(at: destinationProjectURL, withIntermediateDirectories: true)
+        } else {
+            let defaultDirectory = Self.expandedURL(preferences.general.defaultProjectDirectory)
+            try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+            destinationProjectURL = try Self.makeImportedVideoProjectURL(for: sourceURL, in: defaultDirectory)
+
+            guard let template = LessonTemplateLibrary.template(id: preferences.general.defaultTemplateID)
+                ?? LessonTemplateLibrary.defaultTemplates.first else {
+                throw ProjectEditorError.templateNotFound(preferences.general.defaultTemplateID)
+            }
+            nextManifest = template.seedManifest(lessonTitle: Self.lessonTitle(fromImportedVideo: sourceURL))
+            try FileManager.default.createDirectory(at: destinationProjectURL, withIntermediateDirectories: true)
+        }
+
+        let mediaFileName = Self.uniqueScreenMediaFileName(fileExtension: sourceExtension, in: destinationProjectURL)
+        let destinationMediaURL = destinationProjectURL.appendingPathComponent(mediaFileName)
+        let sourcePath = sourceURL.resolvingSymlinksInPath().standardizedFileURL.path
+        let destinationPath = destinationMediaURL.resolvingSymlinksInPath().standardizedFileURL.path
+        if sourcePath != destinationPath {
+            try FileManager.default.copyItem(at: sourceURL, to: destinationMediaURL)
+        }
+
+        nextManifest.media.screen = Self.projectFile(
+            for: destinationMediaURL,
+            role: .screenVideo,
+            projectURL: destinationProjectURL,
+            mimeType: Self.videoMimeType(for: sourceExtension)
+        )
+        if !nextManifest.tracks.contains(where: { $0.id == "screen" || $0.kind == .screen }) {
+            nextManifest.tracks.append(TimelineTrack(id: "screen", kind: .screen, displayName: "Screen"))
+        }
+        if nextManifest.metadata.lessonTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || nextManifest.metadata.lessonTitle == "Untitled Lesson" {
+            nextManifest.metadata.lessonTitle = Self.lessonTitle(fromImportedVideo: sourceURL)
+        }
+        if !nextManifest.exportPresets.contains("learnhouse-1080p") {
+            nextManifest.exportPresets.append("learnhouse-1080p")
+        }
+        nextManifest.updatedAt = Date()
+
+        try ProjectBundle.writeManifest(nextManifest, to: destinationProjectURL)
+        return destinationProjectURL
     }
 
     func loadProject(_ url: URL) {
@@ -2869,18 +2942,43 @@ private final class ProjectEditorModel: ObservableObject {
         url.pathExtension.lowercased() == "dmlm" ? url : url.appendingPathExtension("dmlm")
     }
 
-    private static func makeDraftProjectURL(in root: URL) throws -> URL {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd-HHmmss-SSS"
-        let baseName = "lesson-draft-\(formatter.string(from: Date()))"
-        for attempt in 0..<20 {
-            let suffix = attempt == 0 ? "" : "-\(String(UUID().uuidString.prefix(8)).lowercased())"
+    private static var editableVideoContentTypes: [UTType] {
+        [.mpeg4Movie, .quickTimeMovie]
+    }
+
+    private static let supportedEditableVideoExtensions: Set<String> = ["mp4", "mov"]
+
+    private static func makeImportedVideoProjectURL(for sourceURL: URL, in root: URL) throws -> URL {
+        let baseName = fileSlug(lessonTitle(fromImportedVideo: sourceURL))
+        for attempt in 0..<100 {
+            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
             let projectURL = root.appendingPathComponent("\(baseName)\(suffix).dmlm", isDirectory: true)
             if !FileManager.default.fileExists(atPath: projectURL.path) {
                 return projectURL
             }
         }
         return root.appendingPathComponent("\(baseName)-\(UUID().uuidString.lowercased()).dmlm", isDirectory: true)
+    }
+
+    private static func uniqueScreenMediaFileName(fileExtension: String, in projectURL: URL) -> String {
+        let normalizedExtension = supportedEditableVideoExtensions.contains(fileExtension.lowercased())
+            ? fileExtension.lowercased()
+            : "mp4"
+        for attempt in 0..<100 {
+            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
+            let fileName = "screen\(suffix).\(normalizedExtension)"
+            if !FileManager.default.fileExists(atPath: projectURL.appendingPathComponent(fileName).path) {
+                return fileName
+            }
+        }
+        return "screen-\(UUID().uuidString.lowercased()).\(normalizedExtension)"
+    }
+
+    private static func videoMimeType(for fileExtension: String) -> String {
+        switch fileExtension.lowercased() {
+        case "mov": "video/quicktime"
+        default: "video/mp4"
+        }
     }
 
     private static var lessonProjectContentType: UTType? {
@@ -2890,6 +2988,11 @@ private final class ProjectEditorModel: ObservableObject {
     private static func lessonTitle(from projectURL: URL) -> String {
         let title = projectURL.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
         return title.isEmpty ? "Untitled Lesson" : title
+    }
+
+    private static func lessonTitle(fromImportedVideo url: URL) -> String {
+        let title = url.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? "Imported Video" : title
     }
 
     private static func optionalText(_ value: String) -> String? {
@@ -3029,6 +3132,7 @@ private enum ProjectEditorError: Error, LocalizedError {
     case editValidationFailed
     case templateNotFound(String)
     case frameExportFailed
+    case unsupportedVideoType(String)
 
     var errorDescription: String? {
         switch self {
@@ -3048,6 +3152,8 @@ private enum ProjectEditorError: Error, LocalizedError {
             "Lesson template was not found: \(id)"
         case .frameExportFailed:
             "Could not export the current preview frame."
+        case .unsupportedVideoType(let fileName):
+            "Choose an MP4 or MOV video file to import. Unsupported file: \(fileName)"
         }
     }
 }

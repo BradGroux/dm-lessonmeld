@@ -116,6 +116,15 @@ private struct LessonMeldAppCommands: Commands {
             .keyboardShortcut(",", modifiers: .command)
         }
 
+        CommandGroup(after: .newItem) {
+            Button("Create Project from Video...") {
+                openWindow(id: "main")
+                appRouter.importVideoForEditing()
+                NSApplication.shared.activate()
+            }
+            .keyboardShortcut("i", modifiers: .command)
+        }
+
         CommandMenu("Tools") {
             Button("New Recording...") {
                 quickRecorder.presentControlBar(preferences: preferences)
@@ -148,6 +157,12 @@ private struct LessonMeldAppCommands: Commands {
                 NSApplication.shared.activate()
             }
             .keyboardShortcut("e", modifiers: .command)
+
+            Button("Import Video for Editing...") {
+                openWindow(id: "main")
+                appRouter.importVideoForEditing()
+                NSApplication.shared.activate()
+            }
 
             Button("Onboarding...") {
                 openWindow(id: "onboarding")
@@ -215,6 +230,18 @@ private struct CommandPaletteWindowContent: View {
                 annotationOverlay.toggle(preferences: preferences.snapshot, forceToolbarVisible: true)
             },
             CommandPaletteCommand(
+                id: "import-video",
+                title: "Create Project from Video",
+                subtitle: "Import an existing MP4 or MOV and open it in the editor.",
+                systemImage: "film",
+                shortcut: nil,
+                keywords: ["import", "video", "edit", "project", "mp4", "mov"]
+            ) {
+                openWindow(id: "main")
+                appRouter.importVideoForEditing()
+                NSApplication.shared.activate()
+            },
+            CommandPaletteCommand(
                 id: "permissions",
                 title: "Open Capture Permissions",
                 subtitle: "Open onboarding for Screen Recording, Microphone, and Camera.",
@@ -280,6 +307,12 @@ private struct MenuBarStatusView: View {
 
             Button("Show Main Window") {
                 openWindow(id: "main")
+                NSApplication.shared.activate()
+            }
+
+            Button("Import Video for Editing...") {
+                openWindow(id: "main")
+                appRouter.importVideoForEditing()
                 NSApplication.shared.activate()
             }
 

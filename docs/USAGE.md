@@ -29,13 +29,19 @@ You can continue without optional permissions and enable them later from **Setti
 ## Record a Lesson
 
 1. Open LessonMeld.
-2. Click **Record** in the sidebar to capture immediately, or click **Edit** / **Edit Lesson** to create an editable draft before recording.
+2. Click **Record** in the sidebar to capture immediately.
 3. Choose the capture target from the floating recorder.
 4. Confirm camera, microphone, annotation, and audio choices.
 5. Press the record button.
 6. Use the floating controls to pause, stop, mark moments, or open settings.
 
 When you press **Stop**, LessonMeld opens the saved lesson in the editor. The `.dmlm` item is a macOS package directory: it is the lesson project, not the final video file. It contains `screen.mp4`, optional webcam/audio tracks, and the local sidecars used for review, cuts, zooms, annotations, rendering, and course packaging.
+
+## Edit an Existing Video
+
+Use **Edit Video** in the sidebar, **File > Create Project from Video...**, the command palette, or the menu bar extra to import an existing MP4 or MOV.
+
+LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the editor immediately. Imported videos can be previewed, cut, trimmed, zoomed, annotated, rendered, and packaged. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle.
 
 ## Review a Project
 
