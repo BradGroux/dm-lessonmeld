@@ -35,11 +35,11 @@ You can continue without optional permissions and enable them later from **Setti
 5. Press the record button.
 6. Use the floating controls to pause, stop, mark moments, or open settings.
 
-Recordings are saved into local `.dmlm` project bundles.
+When you press **Stop**, LessonMeld opens the saved lesson in the editor. The `.dmlm` item is a macOS package directory: it is the lesson project, not the final video file. It contains `screen.mp4`, optional webcam/audio tracks, and the local sidecars used for review, cuts, zooms, annotations, rendering, and course packaging.
 
 ## Review a Project
 
-Open a `.dmlm` bundle from the sidebar or Finder. The project editor lets you:
+Open a `.dmlm` lesson bundle from the sidebar or Finder. The project editor lets you:
 
 - Edit lesson title, course, module, instructor, tags, and summary
 - Review media readiness

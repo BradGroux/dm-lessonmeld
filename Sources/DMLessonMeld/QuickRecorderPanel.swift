@@ -68,9 +68,15 @@ struct QuickRecorderPanel: View {
 
             if let lastProjectPath = model.lastProjectPath {
                 Button {
+                    model.openLastProjectInEditor()
+                } label: {
+                    Label("Review Last Lesson", systemImage: "film.stack")
+                }
+
+                Button {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: lastProjectPath)])
                 } label: {
-                    Label("Reveal Recording", systemImage: "arrow.up.forward.app")
+                    Label("Reveal Bundle", systemImage: "arrow.up.forward.app")
                 }
             }
         }
@@ -129,7 +135,7 @@ private struct QuickRecordingControlBar: View {
             ControlBarDivider()
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.isRenderingCompletion ? "Saving Video" : "Recording Saved")
+                Text(model.isRenderingCompletion ? "Exporting Video" : "Lesson Project Saved")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(ControlBarPalette.primaryText)
                 Text(model.isRenderingCompletion ? model.formattedCompletionRenderProgress : completion.projectName)
@@ -142,16 +148,16 @@ private struct QuickRecordingControlBar: View {
 
             ControlBarDivider()
 
-            ControlBarButton(icon: "film.stack", title: "Edit") {
+            ControlBarButton(icon: "film.stack", title: "Review") {
                 model.openCompletionInEditor()
             }
 
-            ControlBarButton(icon: "square.and.arrow.down", title: model.isRenderingCompletion ? "Saving" : "Save") {
+            ControlBarButton(icon: "square.and.arrow.down", title: model.isRenderingCompletion ? "Exporting" : "Export") {
                 model.saveCompletionVideo(preferences.snapshot)
             }
             .disabled(model.isRenderingCompletion)
 
-            ControlBarButton(icon: "folder", title: "Reveal") {
+            ControlBarButton(icon: "folder", title: "Reveal Project") {
                 model.revealCompletion()
             }
 
@@ -166,7 +172,7 @@ private struct QuickRecordingControlBar: View {
 
             ControlBarDivider()
 
-            PrimaryControlBarButton(icon: "record.circle.fill", title: "New") {
+            PrimaryControlBarButton(icon: "record.circle.fill", title: "New Recording") {
                 model.dismissCompletion()
                 model.startRecording(preferences.snapshot)
             }
@@ -2003,13 +2009,25 @@ final class QuickRecorderModel: ObservableObject {
 
     func openCompletionInEditor() {
         guard let completion else { return }
+        openProjectInEditor(completion.projectURL, projectName: completion.projectName)
+    }
+
+    func openLastProjectInEditor() {
+        guard let lastProjectPath else { return }
+        let projectURL = URL(fileURLWithPath: lastProjectPath)
+        openProjectInEditor(projectURL, projectName: projectURL.lastPathComponent)
+    }
+
+    private func openProjectInEditor(_ projectURL: URL, projectName: String, updateMessage: Bool = true) {
         if let openProjectHandler {
-            openProjectHandler(completion.projectURL)
+            openProjectHandler(projectURL)
         } else {
-            ProjectOpenRouter.shared.publish(completion.projectURL)
+            ProjectOpenRouter.shared.publish(projectURL)
         }
         NSApplication.shared.activate()
-        message = "Opened \(completion.projectName) in the editor."
+        if updateMessage {
+            message = "Opened \(projectName) in the editor."
+        }
     }
 
     func revealCompletion() {
@@ -2109,11 +2127,13 @@ final class QuickRecorderModel: ObservableObject {
         } else {
             persistMarkers(markers, to: projectURL)
             lastProjectPath = projectURL.path
-            completion = QuickRecordingCompletion(projectURL: projectURL)
+            let savedCompletion = QuickRecordingCompletion(projectURL: projectURL)
+            completion = savedCompletion
+            openProjectInEditor(savedCompletion.projectURL, projectName: savedCompletion.projectName, updateMessage: false)
             if warnings.isEmpty {
-                message = "Recorded \(Int(screenSize.width))x\(Int(screenSize.height)) \(recordTarget.displayName.lowercased()) lesson bundle."
+                message = "Ready to review \(savedCompletion.projectName) in the editor."
             } else {
-                message = "Recorded screen bundle. \(warnings.joined(separator: " "))"
+                message = "Ready to review \(savedCompletion.projectName). \(warnings.joined(separator: " "))"
             }
         }
 
@@ -2515,7 +2535,7 @@ final class QuickRecorderModel: ObservableObject {
         let root = expandedPath(preferences.general.defaultProjectDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
-        let baseName = "recording-\(formatter.string(from: Date()))"
+        let baseName = "lesson-\(formatter.string(from: Date()))"
         for attempt in 0..<20 {
             let suffix = attempt == 0 ? "" : "-\(String(UUID().uuidString.prefix(8)).lowercased())"
             let projectURL = root.appendingPathComponent("\(baseName)\(suffix).dmlm", isDirectory: true)

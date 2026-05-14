@@ -186,7 +186,7 @@ struct ProjectEditorView: View {
                     .textSelection(.enabled)
                     .lineLimit(8)
             } else {
-                Text("Create or open a `.dmlm` bundle to record media, review readiness, render cuts, and package a teaching-ready lesson.")
+                Text("Create or open a lesson bundle to review media, render cuts, and package a teaching-ready lesson.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -643,7 +643,7 @@ struct ProjectEditorView: View {
     }
 
     private var startLessonPanel: some View {
-        EditorPanel(title: "Start a Lesson", subtitle: "Record into a local `.dmlm` bundle, then review, render, and package it.") {
+        EditorPanel(title: "Start a Lesson", subtitle: "Record into a local lesson project, then review, render, and package it.") {
             HStack(spacing: 10) {
                 Button {
                     quickRecorder.presentControlBar(preferences: preferences)
@@ -688,7 +688,7 @@ struct ProjectEditorView: View {
                     Button {
                         model.loadProject(URL(fileURLWithPath: projectPath))
                     } label: {
-                        Label("Open Last Recording", systemImage: "film.stack")
+                        Label("Review Last Lesson", systemImage: "film.stack")
                     }
                     Text(URL(fileURLWithPath: projectPath).lastPathComponent)
                         .font(.system(.caption, design: .monospaced))
@@ -817,7 +817,7 @@ struct ProjectEditorView: View {
     }
 
     private var emptyState: some View {
-        EditorPanel(title: "Create or Open a Lesson Project", subtitle: "The editor works directly against local `.dmlm` bundles.") {
+        EditorPanel(title: "Create or Open a Lesson Project", subtitle: "The editor works directly against local lesson bundles.") {
             HStack {
                 Button {
                     model.newProject(preferences.snapshot)
@@ -878,7 +878,7 @@ struct ProjectEditorView: View {
                     Button {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: projectPath)])
                     } label: {
-                        Label("Reveal Last Recording", systemImage: "arrow.up.forward.app")
+                        Label("Reveal Lesson Bundle", systemImage: "arrow.up.forward.app")
                     }
 
                     Text(URL(fileURLWithPath: projectPath).lastPathComponent)
@@ -921,7 +921,7 @@ struct ProjectEditorView: View {
                 }
                 .foregroundStyle(.secondary)
             } else {
-                Text("Recordings continue until you press Stop and are saved as local `.dmlm` lesson bundles.")
+                Text("Recordings continue until you press Stop, then open in the editor as local lesson bundles.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -932,7 +932,7 @@ struct ProjectEditorView: View {
                     Button {
                         model.loadProject(URL(fileURLWithPath: projectPath))
                     } label: {
-                        Label("Open Last Recording", systemImage: "film.stack")
+                        Label("Review Last Lesson", systemImage: "film.stack")
                     }
 
                     Button {
