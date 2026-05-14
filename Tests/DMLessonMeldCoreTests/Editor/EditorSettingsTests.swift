@@ -22,7 +22,8 @@ struct EditorSettingsTests {
                 shadow: EditorCanvasShadow(isEnabled: true, opacity: 0.62),
                 cropRect: NormalizedEditRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6),
                 customSize: EditorCanvasCustomSize(width: 1200, height: 900)
-            )
+            ),
+            zoom: EditorZoomSettings(automaticClickZoomsEnabled: false)
         )
 
         try EditorSettingsFile.save(settings, toProject: temp.url)

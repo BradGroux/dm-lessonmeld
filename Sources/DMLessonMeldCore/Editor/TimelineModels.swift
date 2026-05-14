@@ -86,25 +86,63 @@ public struct NormalizedEditRect: Codable, Equatable, Sendable {
     }
 }
 
+public enum ZoomFocusMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case manual
+    case clickMetadata
+    case cursorMetadata
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .manual: "Manual"
+        case .clickMetadata: "Click"
+        case .cursorMetadata: "Cursor"
+        }
+    }
+}
+
+public enum ZoomEasing: String, Codable, CaseIterable, Identifiable, Sendable {
+    case smooth
+    case linear
+    case instant
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .smooth: "Smooth"
+        case .linear: "Linear"
+        case .instant: "Instant"
+        }
+    }
+}
+
 public struct ZoomRegion: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var range: EditTimeRange
     public var focusRect: NormalizedEditRect
     public var scale: Double
     public var isEnabled: Bool
+    public var focusMode: ZoomFocusMode?
+    public var easing: ZoomEasing?
 
     public init(
         id: String,
         range: EditTimeRange,
         focusRect: NormalizedEditRect = .center,
         scale: Double = 1.5,
-        isEnabled: Bool = true
+        isEnabled: Bool = true,
+        focusMode: ZoomFocusMode? = .manual,
+        easing: ZoomEasing? = .smooth
     ) {
         self.id = id
         self.range = range
         self.focusRect = focusRect
         self.scale = scale
         self.isEnabled = isEnabled
+        self.focusMode = focusMode
+        self.easing = easing
     }
 }
 

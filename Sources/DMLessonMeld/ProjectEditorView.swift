@@ -402,6 +402,7 @@ struct ProjectEditorView: View {
                     Text("Preview will load after the project screen video is available.")
                         .foregroundStyle(.secondary)
                 }
+                zoomFocusOverlay
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
@@ -689,7 +690,20 @@ struct ProjectEditorView: View {
                 } label: {
                     Label("Add", systemImage: "plus")
                 }
+                Button {
+                    model.addInstantZoomAtPlayhead()
+                } label: {
+                    Label("Instant", systemImage: "bolt")
+                }
+                Button {
+                    model.generateAutoZoomsFromClicks()
+                } label: {
+                    Label("Auto", systemImage: "cursorarrow.click")
+                }
             }
+
+            Toggle("Generate automatic zooms from click metadata", isOn: $model.zoomAutoGenerationEnabled)
+                .toggleStyle(.checkbox)
 
             if model.zoomRows.isEmpty {
                 Text("No zooms yet. Seek to an important moment and add a zoom region.")
@@ -720,13 +734,26 @@ struct ProjectEditorView: View {
                             compactNumberField("End", text: $zoom.endSeconds)
                         }
                         HStack {
-                            compactNumberField("Scale", text: $zoom.scale)
-                            compactNumberField("Size", text: $zoom.size)
+                            Picker("Focus", selection: $zoom.focusMode) {
+                                ForEach(ZoomFocusMode.allCases) { mode in
+                                    Text(mode.title).tag(mode)
+                                }
+                            }
+                            Picker("Easing", selection: $zoom.easing) {
+                                ForEach(ZoomEasing.allCases) { easing in
+                                    Text(easing.title).tag(easing)
+                                }
+                            }
                         }
+                        numericStringSlider("Scale", text: $zoom.scale, range: 1.1...6, format: "%.1f")
+                        numericStringSlider("Focus size", text: $zoom.size, range: 0.08...1, format: "%.2f")
                         HStack {
-                            compactNumberField("X", text: $zoom.centerX)
-                            compactNumberField("Y", text: $zoom.centerY)
+                            numericStringSlider("X", text: $zoom.centerX, range: 0...1, format: "%.2f")
+                            numericStringSlider("Y", text: $zoom.centerY, range: 0...1, format: "%.2f")
                         }
+                        Text("Select the zoom block, then drag the focus box on the preview to place it visually.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(10)
                     .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
@@ -736,6 +763,7 @@ struct ProjectEditorView: View {
             HStack {
                 Button("Save") { model.saveEditDecisions() }
                 Button("Reload") { model.reloadEditDecisions() }
+                Button("Save Zoom Defaults") { model.saveEditorSettings() }
             }
 
             validationIssuesList
@@ -1375,6 +1403,24 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func numericStringSlider(
+        _ title: String,
+        text: Binding<String>,
+        range: ClosedRange<Double>,
+        format: String
+    ) -> some View {
+        let value = Binding<Double>(
+            get: {
+                let parsed = Double(text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)) ?? range.lowerBound
+                return min(max(parsed, range.lowerBound), range.upperBound)
+            },
+            set: { nextValue in
+                text.wrappedValue = String(format: format, min(max(nextValue, range.lowerBound), range.upperBound))
+            }
+        )
+        return labeledSlider(title, value: value, range: range, format: format)
+    }
+
     private func colorPickerRow(_ title: String, selection: Binding<RGBAColor>) -> some View {
         HStack {
             Text(title)
@@ -1422,6 +1468,61 @@ struct ProjectEditorView: View {
                 Color.black
             }
         }
+    }
+
+    @ViewBuilder private var zoomFocusOverlay: some View {
+        if let zoomID = selectedZoomID,
+           let zoom = model.zoomRow(id: zoomID),
+           let centerX = secondsValue(zoom.centerX),
+           let centerY = secondsValue(zoom.centerY),
+           let size = secondsValue(zoom.size) {
+            GeometryReader { proxy in
+                let width = max(proxy.size.width, 1)
+                let height = max(proxy.size.height, 1)
+                let boxWidth = max(40, width * CGFloat(size))
+                let boxHeight = max(40, height * CGFloat(size))
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .frame(width: boxWidth, height: boxHeight)
+                    .position(
+                        x: min(max(CGFloat(centerX) * width, boxWidth / 2), width - boxWidth / 2),
+                        y: min(max(CGFloat(centerY) * height, boxHeight / 2), height - boxHeight / 2)
+                    )
+                    .overlay(alignment: .topLeading) {
+                        Text("\(zoom.scale)x")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor, in: Capsule())
+                            .foregroundStyle(.white)
+                            .offset(x: 10, y: 10)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                model.updateZoomFocus(
+                                    id: zoomID,
+                                    centerX: Double(value.location.x / width),
+                                    centerY: Double(value.location.y / height)
+                                )
+                            }
+                            .onEnded { _ in
+                                model.saveEditDecisions()
+                            }
+                    )
+                    .help("Drag to move the selected zoom focus")
+            }
+            .allowsHitTesting(true)
+        }
+    }
+
+    private var selectedZoomID: String? {
+        if case .zoom(let id) = selectedTimelineItem {
+            return id
+        }
+        return nil
     }
 
     private func valueLine(_ label: String, _ value: String) -> some View {
@@ -2985,6 +3086,8 @@ private struct EditableZoomRow: Identifiable, Equatable {
     var centerX: String
     var centerY: String
     var size: String
+    var focusMode: ZoomFocusMode
+    var easing: ZoomEasing
     var isEnabled: Bool
 }
 
@@ -3055,6 +3158,7 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var canvasCropY = "0"
     @Published var canvasCropWidth = "1"
     @Published var canvasCropHeight = "1"
+    @Published var zoomAutoGenerationEnabled = true
     @Published var annotationItemCount = 0
     @Published var annotationSidecarStatus = "Not initialized"
     @Published var annotationDraftText = "Annotation note"
@@ -3429,6 +3533,28 @@ private final class ProjectEditorModel: ObservableObject {
                 centerX: "0.5",
                 centerY: "0.5",
                 size: "0.5",
+                focusMode: .manual,
+                easing: .smooth,
+                isEnabled: true
+            )
+        )
+    }
+
+    func addInstantZoomAtPlayhead() {
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 1)
+        let start = min(max(currentTimeSeconds, 0), max(duration - 0.1, 0))
+        let end = min(start + 1.5, max(duration, start + 0.1))
+        zoomRows.append(
+            EditableZoomRow(
+                id: "zoom-\(UUID().uuidString)",
+                startSeconds: Self.formatSecondsForEditing(start),
+                endSeconds: Self.formatSecondsForEditing(end),
+                scale: "1.8",
+                centerX: "0.5",
+                centerY: "0.5",
+                size: "0.42",
+                focusMode: .manual,
+                easing: .instant,
                 isEnabled: true
             )
         )
@@ -3466,6 +3592,80 @@ private final class ProjectEditorModel: ObservableObject {
         duplicate.endSeconds = Self.formatSecondsForEditing(nextStart + length)
         zoomRows.append(duplicate)
         clearTimelineValidation()
+    }
+
+    func updateZoomFocus(id: String, centerX: Double? = nil, centerY: Double? = nil, size: Double? = nil) {
+        guard let index = zoomRows.firstIndex(where: { $0.id == id }) else { return }
+        if let centerX {
+            zoomRows[index].centerX = Self.formatNormalized(min(max(centerX, 0), 1))
+        }
+        if let centerY {
+            zoomRows[index].centerY = Self.formatNormalized(min(max(centerY, 0), 1))
+        }
+        if let size {
+            zoomRows[index].size = Self.formatNormalized(min(max(size, 0.08), 1))
+        }
+        zoomRows[index].focusMode = .manual
+        clearTimelineValidation()
+    }
+
+    func zoomRow(id: String) -> EditableZoomRow? {
+        zoomRows.first { $0.id == id }
+    }
+
+    func generateAutoZoomsFromClicks() {
+        do {
+            guard zoomAutoGenerationEnabled else {
+                throw ProjectEditorError.invalidMetadata("Automatic click zooms are disabled for this project.")
+            }
+            guard let projectURL, let manifest else {
+                throw ProjectEditorError.projectRequired
+            }
+            guard let cursorMetadata = manifest.media.cursorMetadata else {
+                throw ProjectEditorError.invalidMetadata("This project has no cursor/click metadata.")
+            }
+
+            let metadataURL = ProjectBundle.fileURL(for: cursorMetadata, in: projectURL)
+            let data = try Data(contentsOf: metadataURL)
+            let metadata = try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
+            let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? 0)
+            let clicks = metadata.clicks
+                .filter { $0.phase == .down }
+                .sorted { $0.timestampSeconds < $1.timestampSeconds }
+            guard !clicks.isEmpty else {
+                setMessage("No click events were found in cursor metadata.")
+                return
+            }
+
+            var added = 0
+            for click in clicks.prefix(24) {
+                let start = max(0, click.timestampSeconds - 0.25)
+                let end = duration > 0 ? min(duration, click.timestampSeconds + 1.35) : click.timestampSeconds + 1.35
+                guard end > start else { continue }
+                zoomRows.append(
+                    EditableZoomRow(
+                        id: "zoom-click-\(UUID().uuidString)",
+                        startSeconds: Self.formatSecondsForEditing(start),
+                        endSeconds: Self.formatSecondsForEditing(end),
+                        scale: click.clickCount > 1 ? "2.1" : "1.8",
+                        centerX: Self.formatNormalized(click.position.x),
+                        centerY: Self.formatNormalized(click.position.y),
+                        size: "0.38",
+                        focusMode: .clickMetadata,
+                        easing: .smooth,
+                        isEnabled: true
+                    )
+                )
+                added += 1
+            }
+            clearTimelineValidation()
+            if added > 0 {
+                saveEditDecisions()
+                setMessage("Added \(added) click zoom\(added == 1 ? "" : "s").")
+            }
+        } catch {
+            setError(error.localizedDescription)
+        }
     }
 
     func addMarkerAtPlayhead() {
@@ -4163,6 +4363,8 @@ private final class ProjectEditorModel: ObservableObject {
                     centerX: Self.formatNormalized(zoom.focusRect.centerX),
                     centerY: Self.formatNormalized(zoom.focusRect.centerY),
                     size: Self.formatNormalized(size),
+                    focusMode: zoom.focusMode ?? .manual,
+                    easing: zoom.easing ?? .smooth,
                     isEnabled: zoom.isEnabled
                 )
             }
@@ -4262,6 +4464,7 @@ private final class ProjectEditorModel: ObservableObject {
             canvasCropWidth = "1"
             canvasCropHeight = "1"
         }
+        zoomAutoGenerationEnabled = settings.zoom?.automaticClickZoomsEnabled ?? true
     }
 
     private func currentEditorSettings() throws -> EditorSettings {
@@ -4321,7 +4524,8 @@ private final class ProjectEditorModel: ObservableObject {
                 ),
                 cropRect: cropRect,
                 customSize: customSize
-            )
+            ),
+            zoom: EditorZoomSettings(automaticClickZoomsEnabled: zoomAutoGenerationEnabled)
         )
     }
 
@@ -4517,7 +4721,9 @@ private final class ProjectEditorModel: ObservableObject {
                     height: size
                 ),
                 scale: scale,
-                isEnabled: row.isEnabled
+                isEnabled: row.isEnabled,
+                focusMode: row.focusMode,
+                easing: row.easing
             )
         }
 
