@@ -37,7 +37,7 @@ Tests/
 - The app owns the interactive permission/recording path. The CLI also supports direct local capture for automation, smoke tests, and agent workflows.
 - Settings are persisted locally through `UserDefaults` as a versioned `LessonMeldPreferences` snapshot.
 - Settings backup controls can write the current preferences snapshot to `settings/preferences.json`, initialize the local backup repo, preview the plan, and commit through the core config sync folder.
-- The app editor opens local `.dmlm` bundles, inspects manifests, previews/scrubs screen media, saves `edit-decision-list.json` cut and zoom sidecars, exports those saved cuts, checks render readiness, exports full renders with cursor/click/shortcut/zoom/annotation/caption burn-in and progress/cancel controls, and creates contiguous trim exports through existing core services.
+- The app editor opens local `.dmlm` bundles, inspects manifests, opens video-backed projects in a preview-first timeline workspace, saves `edit-decision-list.json` cut and zoom sidecars, exports those saved cuts, checks render readiness, exports full renders with cursor/click/shortcut/zoom/annotation/caption burn-in and progress/cancel controls, and creates contiguous trim exports through existing core services.
 - Project media URL resolution is centralized through `ProjectBundle.fileURL(for:in:)` so project-relative and explicitly attached absolute files behave the same across app, CLI, render, validation, and LearnHouse package paths.
 - First-run onboarding covers Screen Recording, Microphone, Camera, Accessibility, Input Monitoring, teaching defaults, local-only posture, Git-safe settings backup, LearnHouse, and agent manifests.
 - Git-friendly settings exports use stable JSON object keys, including shortcut values, so backups diff cleanly.
@@ -46,7 +46,7 @@ Tests/
 
 ## Remaining implementation gaps
 
-- Full multi-track timeline editing UI with richer effect controls.
+- Effect controls beyond trims, cuts, zooms, markers, annotations, and export readiness.
 - iOS device capture.
 - Local transcription model download/runtime.
 - Higher-fidelity renderer support for caption styling, cursor styling, zoom/pan keyframes, GIF/ProRes, and parallel rendering.

@@ -41,7 +41,7 @@ When you press **Stop**, LessonMeld opens the saved lesson in the editor. The `.
 
 Use **Edit Video** in the sidebar, **File > Create Project from Video...**, the command palette, or the menu bar extra to import an existing MP4 or MOV.
 
-LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the editor immediately. Imported videos can be previewed, cut, trimmed, zoomed, annotated, rendered, and packaged. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle.
+LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the timeline editor immediately. Imported videos use the full editing workspace: a large preview canvas, custom playback controls, trim in/out points, cut blocks, zoom blocks, markers, annotation controls, export controls, and a bottom timeline. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle.
 
 ## Review a Project
 
@@ -50,7 +50,8 @@ Open a `.dmlm` lesson bundle from the sidebar or Finder. The project editor lets
 - Edit lesson title, course, module, instructor, tags, and summary
 - Review media readiness
 - Add and edit markers
-- Save cuts and zoom regions
+- Save timeline cuts and zoom regions
+- Scrub through a bottom timeline with clip, cut, zoom, and marker lanes
 - Open annotation tools
 - Render local video files
 - Package course exports
