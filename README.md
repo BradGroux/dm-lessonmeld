@@ -4,7 +4,7 @@
 
 It records lessons into local `.dmlm` project bundles, lets you review and annotate them, renders teaching-ready videos, and packages exports for course workflows without accounts, telemetry, analytics, or cloud processing.
 
-> Status: v0.0.1 developer preview. The core app, CLI, project bundle, recording, annotation, render, export, settings, and packaging foundations are in place. Device-matrix QA, Developer ID signing, notarization, and broader distribution hardening are still release work.
+> Status: v0.0.2 developer preview. The core app, CLI, project bundle, recording, annotation, render, export, settings, and packaging foundations are in place. Device-matrix QA, Developer ID signing, notarization, and broader distribution hardening are still release work.
 
 ## Features
 
