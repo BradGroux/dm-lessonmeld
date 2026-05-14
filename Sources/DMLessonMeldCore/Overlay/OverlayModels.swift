@@ -64,6 +64,7 @@ public enum OverlayKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case arrow
     case callout
     case image
+    case highlight
 
     public var id: String { rawValue }
 
@@ -83,6 +84,49 @@ public enum OverlayKind: String, Codable, CaseIterable, Identifiable, Sendable {
             "Callout"
         case .image:
             "Image"
+        case .highlight:
+            "Highlight"
+        }
+    }
+}
+
+public enum OverlayHighlightMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case dim
+    case blur
+    case spotlight
+    case outline
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .dim:
+            "Dim"
+        case .blur:
+            "Blur"
+        case .spotlight:
+            "Spotlight"
+        case .outline:
+            "Outline"
+        }
+    }
+}
+
+public enum OverlayHighlightShape: String, Codable, CaseIterable, Identifiable, Sendable {
+    case rectangle
+    case roundedRectangle
+    case ellipse
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .rectangle:
+            "Rectangle"
+        case .roundedRectangle:
+            "Rounded"
+        case .ellipse:
+            "Ellipse"
         }
     }
 }
@@ -98,6 +142,10 @@ public struct OverlayStyle: Codable, Equatable, Sendable {
     public var cornerRadius: Double
     public var shadowEnabled: Bool
     public var imagePath: String?
+    public var highlightMode: OverlayHighlightMode?
+    public var highlightShape: OverlayHighlightShape?
+    public var blurRadius: Double?
+    public var featherRadius: Double?
 
     public init(
         text: String = "Overlay",
@@ -109,7 +157,11 @@ public struct OverlayStyle: Codable, Equatable, Sendable {
         backgroundColor: RGBAColor? = RGBAColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.68),
         cornerRadius: Double = 12,
         shadowEnabled: Bool = true,
-        imagePath: String? = nil
+        imagePath: String? = nil,
+        highlightMode: OverlayHighlightMode? = nil,
+        highlightShape: OverlayHighlightShape? = nil,
+        blurRadius: Double? = nil,
+        featherRadius: Double? = nil
     ) {
         self.text = text
         self.fontSize = min(160, max(8, fontSize.isFinite ? fontSize : 34))
@@ -121,6 +173,10 @@ public struct OverlayStyle: Codable, Equatable, Sendable {
         self.cornerRadius = min(96, max(0, cornerRadius.isFinite ? cornerRadius : 12))
         self.shadowEnabled = shadowEnabled
         self.imagePath = imagePath?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        self.highlightMode = highlightMode
+        self.highlightShape = highlightShape
+        self.blurRadius = blurRadius.map { min(80, max(0, $0.isFinite ? $0 : 0)) }
+        self.featherRadius = featherRadius.map { min(80, max(0, $0.isFinite ? $0 : 0)) }
     }
 }
 
