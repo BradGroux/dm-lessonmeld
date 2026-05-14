@@ -1467,9 +1467,7 @@ final class QuickRecorderModel: ObservableObject {
     private var controlBarWindow: QuickRecordingControlBarWindow?
     private var regionSelectionWindow: RegionSelectionWindow?
     private var elapsedTimer: Timer?
-    private var startedAt: Date?
-    private var pauseStartedAt: Date?
-    private var accumulatedPausedDuration: TimeInterval = 0
+    private var lifecycle = RecordingLifecycleStateMachine()
     private var floatingWebcamPreviewWindow: FloatingWebcamPreviewWindow?
     private var recordingMarkers: [ProjectTimelineMarker] = []
     private var deleteAfterStop = false
@@ -1803,13 +1801,7 @@ final class QuickRecorderModel: ObservableObject {
             completion = nil
 
             let startedAt = Date()
-            self.startedAt = startedAt
-            elapsedSeconds = 0
-            accumulatedPausedDuration = 0
-            pauseStartedAt = nil
-            isPaused = false
-            isStopping = false
-            isRecording = true
+            applyLifecycleSnapshot(lifecycle.start(at: startedAt))
             syncFloatingWebcamPreviewWindow()
             startElapsedTimer()
             message = autoStopEnabled
@@ -1836,8 +1828,7 @@ final class QuickRecorderModel: ObservableObject {
                             }
                         }
                         await MainActor.run {
-                            self.startedAt = Date()
-                            self.elapsedSeconds = 0
+                            self.applyLifecycleSnapshot(self.lifecycle.start(at: Date()))
                             self.startElapsedTimer()
                             self.message = self.autoStopEnabled
                                 ? "Recording \(self.enabledTrackLabels) from \(self.recordTarget.displayName.lowercased()) for up to \(self.formattedMaxDuration)..."
@@ -1915,8 +1906,7 @@ final class QuickRecorderModel: ObservableObject {
 
     func pauseRecording() {
         guard isRecording, !isPaused else { return }
-        isPaused = true
-        pauseStartedAt = Date()
+        applyLifecycleSnapshot(lifecycle.pause())
         recordingRuntime.pause()
         message = "Recording paused."
         publishStatus()
@@ -1924,11 +1914,7 @@ final class QuickRecorderModel: ObservableObject {
 
     func resumeRecording() {
         guard isRecording, isPaused else { return }
-        if let pauseStartedAt {
-            accumulatedPausedDuration += Date().timeIntervalSince(pauseStartedAt)
-        }
-        pauseStartedAt = nil
-        isPaused = false
+        applyLifecycleSnapshot(lifecycle.resume())
         recordingRuntime.resume()
         message = "Recording resumed."
         publishStatus()
@@ -1936,8 +1922,7 @@ final class QuickRecorderModel: ObservableObject {
 
     func stopRecording() {
         guard isRecording, !isStopping else { return }
-        isStopping = true
-        isPaused = false
+        applyLifecycleSnapshot(lifecycle.requestStop())
         message = "Stopping recording and writing the project bundle..."
         publishStatus()
         recordingRuntime.requestStop()
@@ -2080,6 +2065,7 @@ final class QuickRecorderModel: ObservableObject {
         recordTarget: QuickRecordTarget,
         warnings: [String]
     ) {
+        applyLifecycleSnapshot(lifecycle.finish())
         let shouldDelete = deleteAfterStop
         let shouldRestart = restartAfterStop
         let markers = recordingMarkers
@@ -2110,6 +2096,7 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     private func failRecording(_ error: Error) {
+        applyLifecycleSnapshot(lifecycle.fail())
         cleanupRecordingState()
         if let quickRecorderError = error as? QuickRecorderError,
            let preservedPath = quickRecorderError.preservedProjectPath {
@@ -2121,12 +2108,7 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     private func cleanupRecordingState() {
-        isRecording = false
-        isPaused = false
-        isStopping = false
-        startedAt = nil
-        pauseStartedAt = nil
-        accumulatedPausedDuration = 0
+        applyLifecycleSnapshot(lifecycle.reset())
         recordingRuntime.clear()
         cameraPreviewSession = nil
         closeFloatingWebcamPreviewWindow()
@@ -2161,17 +2143,19 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     private func updateElapsed() {
-        guard let startedAt else {
-            elapsedSeconds = 0
-            return
-        }
-        let currentPause = pauseStartedAt.map { Date().timeIntervalSince($0) } ?? 0
-        elapsedSeconds = max(0, Date().timeIntervalSince(startedAt) - accumulatedPausedDuration - currentPause)
+        elapsedSeconds = lifecycle.elapsed()
         let wholeSecond = Int(elapsedSeconds.rounded(.down))
         if wholeSecond != lastPublishedStatusSecond {
             lastPublishedStatusSecond = wholeSecond
             publishStatus()
         }
+    }
+
+    private func applyLifecycleSnapshot(_ snapshot: RecordingLifecycleSnapshot) {
+        isRecording = snapshot.isRecording
+        isPaused = snapshot.isPaused
+        isStopping = snapshot.isStopping
+        elapsedSeconds = snapshot.elapsedSeconds
     }
 
     func publishStatus() {
