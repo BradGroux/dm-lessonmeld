@@ -456,6 +456,12 @@ struct RenderPlanTests {
                 paddingRatio: 0.08,
                 cornerRadiusRatio: 0.06,
                 shadow: EditorCanvasShadow(isEnabled: true, opacity: 0.5)
+            ),
+            cursor: EditorCursorSettings(
+                pointerStyle: .touchDot,
+                smoothMovement: false,
+                hiddenRanges: [EditTimeRange(startSeconds: 0.7, endSeconds: 0.9)],
+                clickEffects: EditorClickEffectSettings(soundEnabled: true, soundVolume: 0.5)
             )
         )
         try EditorSettingsFile.save(canvasSettings, toProject: projectURL)
@@ -489,6 +495,7 @@ struct RenderPlanTests {
         #expect(inspection.plan?.captionSource?.url == transcriptURL)
         #expect(inspection.plan?.zoomRegions.map(\.id) == ["zoom-1"])
         #expect(inspection.plan?.canvas == canvasSettings.canvas)
+        #expect(inspection.plan?.cursor == canvasSettings.cursor)
         var plan = try #require(inspection.plan)
         plan.webcamOverlay?.placement = PictureInPicturePlacement(
             corner: .bottomTrailing,

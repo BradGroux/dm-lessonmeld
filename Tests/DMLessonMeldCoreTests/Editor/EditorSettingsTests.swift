@@ -23,7 +23,25 @@ struct EditorSettingsTests {
                 cropRect: NormalizedEditRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6),
                 customSize: EditorCanvasCustomSize(width: 1200, height: 900)
             ),
-            zoom: EditorZoomSettings(automaticClickZoomsEnabled: false)
+            zoom: EditorZoomSettings(automaticClickZoomsEnabled: false),
+            cursor: EditorCursorSettings(
+                pointerStyle: .touchDot,
+                pointerVisible: false,
+                smoothMovement: false,
+                pointerScale: 1.4,
+                pointerFillColor: .cyan,
+                hiddenRanges: [
+                    EditTimeRange(startSeconds: 1, endSeconds: 3)
+                ],
+                clickEffects: EditorClickEffectSettings(
+                    rippleVisible: true,
+                    color: .pink,
+                    scale: 1.5,
+                    soundEnabled: true,
+                    soundVolume: 0.6
+                ),
+                keyboardOverlay: EditorKeyboardOverlaySettings(isVisible: false)
+            )
         )
 
         try EditorSettingsFile.save(settings, toProject: temp.url)

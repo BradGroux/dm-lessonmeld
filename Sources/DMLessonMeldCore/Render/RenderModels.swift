@@ -238,6 +238,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
     public var zoomRegions: [ZoomRegion]
     public var markers: [ProjectTimelineMarker]
     public var canvas: EditorCanvasSettings
+    public var cursor: EditorCursorSettings
 
     public init(
         projectURL: URL,
@@ -251,7 +252,8 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         captionSource: RenderMediaSource? = nil,
         zoomRegions: [ZoomRegion] = [],
         markers: [ProjectTimelineMarker] = [],
-        canvas: EditorCanvasSettings = EditorCanvasSettings()
+        canvas: EditorCanvasSettings = EditorCanvasSettings(),
+        cursor: EditorCursorSettings = EditorCursorSettings()
     ) {
         self.projectURL = projectURL
         self.destinationURL = destinationURL
@@ -265,6 +267,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         self.zoomRegions = zoomRegions
         self.markers = markers
         self.canvas = canvas
+        self.cursor = cursor
     }
 
     public static func make(
@@ -361,7 +364,8 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             captionSource: captionSource,
             zoomRegions: editDecisionList?.enabledZoomRegions ?? [],
             markers: manifest.markers,
-            canvas: editorSettings?.canvas ?? EditorCanvasSettings()
+            canvas: editorSettings?.canvas ?? EditorCanvasSettings(),
+            cursor: editorSettings?.cursor ?? EditorCursorSettings()
         )
     }
 

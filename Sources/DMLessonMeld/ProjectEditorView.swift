@@ -403,6 +403,7 @@ struct ProjectEditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 zoomFocusOverlay
+                cursorPreviewOverlay
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
@@ -462,6 +463,8 @@ struct ProjectEditorView: View {
                         editorCutsInspector(manifest: manifest)
                     case .zooms:
                         editorZoomsInspector(manifest: manifest)
+                    case .cursor:
+                        editorCursorInspector(manifest: manifest)
                     case .export:
                         editorExportInspector(summary: summary, manifest: manifest)
                     }
@@ -770,6 +773,100 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func editorCursorInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            inspectorSectionTitle("Cursor Effects")
+
+            if manifest.media.cursorMetadata == nil {
+                Text("This project has no cursor metadata. Import-only videos can still be edited, but cursor, click, and keyboard overlays need a recorded metadata sidecar.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Picker("Pointer style", selection: $model.cursorPointerStyle) {
+                ForEach(EditorCursorPointerStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .disabled(manifest.media.cursorMetadata == nil)
+            Toggle("Show pointer", isOn: $model.cursorPointerVisible)
+                .toggleStyle(.checkbox)
+                .disabled(manifest.media.cursorMetadata == nil)
+            Toggle("Smooth movement", isOn: $model.cursorSmoothMovement)
+                .toggleStyle(.checkbox)
+                .disabled(manifest.media.cursorMetadata == nil)
+            labeledSlider("Pointer size", value: $model.cursorPointerScale, range: 0.5...2.5, format: "%.2f")
+                .disabled(manifest.media.cursorMetadata == nil)
+            colorPickerRow("Pointer fill", selection: $model.cursorPointerFillColor)
+                .disabled(manifest.media.cursorMetadata == nil)
+            colorPickerRow("Pointer outline", selection: $model.cursorPointerStrokeColor)
+                .disabled(manifest.media.cursorMetadata == nil)
+
+            Divider()
+            inspectorSectionTitle("Clicks")
+            Toggle("Show click ripple", isOn: $model.cursorClickEffectsVisible)
+                .toggleStyle(.checkbox)
+                .disabled(manifest.media.cursorMetadata == nil)
+            colorPickerRow("Click color", selection: $model.cursorClickColor)
+                .disabled(manifest.media.cursorMetadata == nil)
+            labeledSlider("Click scale", value: $model.cursorClickScale, range: 0.5...3, format: "%.2f")
+                .disabled(manifest.media.cursorMetadata == nil)
+            labeledSlider("Click opacity", value: $model.cursorClickOpacity, range: 0...1, format: "%.2f")
+                .disabled(manifest.media.cursorMetadata == nil)
+            labeledSlider("Click duration", value: $model.cursorClickDuration, range: 0.08...1.5, format: "%.2f")
+                .disabled(manifest.media.cursorMetadata == nil)
+            Toggle("Click sound", isOn: $model.cursorClickSoundEnabled)
+                .toggleStyle(.checkbox)
+                .disabled(manifest.media.cursorMetadata == nil)
+            labeledSlider("Click volume", value: $model.cursorClickSoundVolume, range: 0...1, format: "%.2f")
+                .disabled(manifest.media.cursorMetadata == nil || !model.cursorClickSoundEnabled)
+
+            Divider()
+            inspectorSectionTitle("Keyboard")
+            Toggle("Show shortcuts", isOn: $model.cursorKeyboardVisible)
+                .toggleStyle(.checkbox)
+                .disabled(manifest.media.cursorMetadata == nil)
+            labeledSlider("Shortcut opacity", value: $model.cursorKeyboardOpacity, range: 0...1, format: "%.2f")
+                .disabled(manifest.media.cursorMetadata == nil)
+
+            Divider()
+            HStack {
+                inspectorSectionTitle("Hidden Ranges")
+                Spacer()
+                Button {
+                    model.addCursorHiddenRangeAtPlayhead()
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .disabled(manifest.media.cursorMetadata == nil)
+            }
+            if model.cursorHiddenRangeRows.isEmpty {
+                Text("No cursor hide ranges.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach($model.cursorHiddenRangeRows) { $range in
+                    HStack {
+                        compactNumberField("Start", text: $range.startSeconds)
+                        compactNumberField("End", text: $range.endSeconds)
+                        Button {
+                            model.removeCursorHiddenRange(id: range.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+
+            Button("Save Cursor Settings") {
+                model.saveEditorSettings()
+            }
+            .disabled(manifest.media.cursorMetadata == nil)
+        }
+    }
+
     private func editorExportInspector(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             inspectorSectionTitle("Export")
@@ -872,6 +969,13 @@ struct ProjectEditorView: View {
                 }
                 .keyboardShortcut("z", modifiers: [])
                 Button {
+                    model.addCursorHiddenRangeAtPlayhead()
+                    persistTimelineEditChanges(for: .moveCursorHide)
+                    editorInspectorTab = .cursor
+                } label: {
+                    Label("Hide Cursor", systemImage: "cursorarrow.slash")
+                }
+                Button {
                     deleteSelectedTimelineItem()
                 } label: {
                     Label("Delete", systemImage: "trash")
@@ -928,6 +1032,15 @@ struct ProjectEditorView: View {
                             height: 30
                         ) {
                             zoomTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                        timelineLane(
+                            title: "Cursor",
+                            tint: .cyan,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 30
+                        ) {
+                            cursorTimelineContent(width: timelineWidth, duration: duration)
                         }
                         timelineLane(
                             title: "Markers",
@@ -1157,6 +1270,49 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func cursorTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            ForEach(model.cursorHiddenRangeRows) { range in
+                if let start = secondsValue(range.startSeconds), let end = secondsValue(range.endSeconds), end > start {
+                    timelineBlock(
+                        title: "Hide pointer",
+                        tint: .cyan,
+                        start: start,
+                        end: end,
+                        width: width,
+                        duration: duration,
+                        height: 22,
+                        isEnabled: true,
+                        isSelected: selectedTimelineItem == .cursorHide(range.id)
+                    )
+                    .onTapGesture {
+                        selectedTimelineItem = .cursorHide(range.id)
+                        editorInspectorTab = .cursor
+                    }
+                    .gesture(timelineDragGesture(action: .moveCursorHide, id: range.id, start: start, end: end, width: width, duration: duration))
+                    .overlay(alignment: .leading) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeCursorHideStart, id: range.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .overlay(alignment: .trailing) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeCursorHideEnd, id: range.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .contextMenu {
+                        Button("Jump to Range") {
+                            model.seek(to: start)
+                        }
+                        Button("Remove Range", role: .destructive) {
+                            model.removeCursorHiddenRange(id: range.id)
+                            selectedTimelineItem = nil
+                            model.saveEditorSettings()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func markerTimelineContent(width: CGFloat, duration: Double) -> some View {
         ZStack(alignment: .leading) {
             ForEach(model.markerRows) { marker in
@@ -1237,7 +1393,7 @@ struct ProjectEditorView: View {
                 .frame(width: 10, height: 10)
             Rectangle()
                 .fill(Color.accentColor)
-                .frame(width: 2, height: 146)
+                .frame(width: 2, height: 184)
         }
         .offset(x: x)
     }
@@ -1321,6 +1477,12 @@ struct ProjectEditorView: View {
             model.resizeZoom(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
         case .resizeZoomEnd:
             model.resizeZoom(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
+        case .moveCursorHide:
+            model.moveCursorHiddenRange(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
+        case .resizeCursorHideStart:
+            model.resizeCursorHiddenRange(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
+        case .resizeCursorHideEnd:
+            model.resizeCursorHiddenRange(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
         case .moveMarker:
             model.moveMarker(id: drag.id, to: drag.startSeconds + delta, duration: duration)
         }
@@ -1330,6 +1492,8 @@ struct ProjectEditorView: View {
         switch action {
         case .moveMarker:
             model.saveMarkers()
+        case .moveCursorHide, .resizeCursorHideStart, .resizeCursorHideEnd:
+            model.saveEditorSettings()
         default:
             model.saveEditDecisions()
         }
@@ -1344,6 +1508,9 @@ struct ProjectEditorView: View {
         case .zoom(let id):
             model.removeZoom(id: id)
             persistTimelineEditChanges(for: .moveZoom)
+        case .cursorHide(let id):
+            model.removeCursorHiddenRange(id: id)
+            persistTimelineEditChanges(for: .moveCursorHide)
         case .marker(let id):
             model.removeMarker(id: id)
             persistTimelineEditChanges(for: .moveMarker)
@@ -1516,6 +1683,96 @@ struct ProjectEditorView: View {
             }
             .allowsHitTesting(true)
         }
+    }
+
+    @ViewBuilder private var cursorPreviewOverlay: some View {
+        if model.cursorPreviewMetadata != nil {
+            GeometryReader { proxy in
+                let contentFrame = previewContentFrame(in: proxy.size)
+                ZStack {
+                    if model.cursorClickEffectsVisible,
+                       let click = model.cursorClick(at: model.currentTimeSeconds) {
+                        let point = previewPoint(click.position, in: contentFrame)
+                        let progress = model.cursorClickProgress(click, at: model.currentTimeSeconds)
+                        let ringSize = CGFloat(36 * model.cursorClickScale * (0.65 + progress))
+                        Circle()
+                            .stroke(Color(rgba: model.cursorClickColor).opacity(model.cursorClickOpacity * (1 - progress)), lineWidth: 3)
+                            .frame(width: ringSize, height: ringSize)
+                            .position(point)
+                    }
+
+                    if model.cursorPointerVisible,
+                       let sample = model.cursorSample(at: model.currentTimeSeconds) {
+                        cursorPointerPreview(style: model.cursorPointerStyle)
+                            .scaleEffect(model.cursorPointerScale)
+                            .position(previewPoint(sample.position, in: contentFrame))
+                    }
+
+                    if model.cursorKeyboardVisible,
+                       let label = model.keyboardPreviewLabel(at: model.currentTimeSeconds) {
+                        Text(label)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.82 * model.cursorKeyboardOpacity), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                            )
+                            .foregroundStyle(.white)
+                            .position(x: contentFrame.midX, y: max(contentFrame.minY + 32, contentFrame.maxY - 34))
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder private func cursorPointerPreview(style: EditorCursorPointerStyle) -> some View {
+        switch style {
+        case .macOS:
+            Image(systemName: "cursorarrow")
+                .font(.system(size: 23, weight: .semibold))
+                .foregroundStyle(Color(rgba: model.cursorPointerFillColor))
+                .shadow(color: Color(rgba: model.cursorPointerStrokeColor).opacity(0.95), radius: 1.6)
+        case .touchDot:
+            Circle()
+                .fill(Color(rgba: model.cursorPointerFillColor).opacity(0.92))
+                .frame(width: 18, height: 18)
+                .overlay(
+                    Circle()
+                        .stroke(Color(rgba: model.cursorPointerStrokeColor).opacity(0.95), lineWidth: 2)
+                )
+        }
+    }
+
+    private func previewContentFrame(in size: CGSize) -> CGRect {
+        let padding = model.canvasPreviewPadding
+        let availableWidth = max(1, size.width - padding * 2)
+        let availableHeight = max(1, size.height - padding * 2)
+        let aspectRatio = model.canvasPreviewAspectRatio ?? (availableWidth / max(availableHeight, 1))
+        let availableRatio = availableWidth / max(availableHeight, 1)
+        let contentSize: CGSize
+        if availableRatio > aspectRatio {
+            let height = availableHeight
+            contentSize = CGSize(width: height * aspectRatio, height: height)
+        } else {
+            let width = availableWidth
+            contentSize = CGSize(width: width, height: width / max(aspectRatio, 0.01))
+        }
+        return CGRect(
+            x: padding + (availableWidth - contentSize.width) / 2,
+            y: padding + (availableHeight - contentSize.height) / 2,
+            width: contentSize.width,
+            height: contentSize.height
+        )
+    }
+
+    private func previewPoint(_ point: NormalizedCapturePoint, in frame: CGRect) -> CGPoint {
+        CGPoint(
+            x: frame.minX + CGFloat(point.x) * frame.width,
+            y: frame.minY + (1 - CGFloat(point.y)) * frame.height
+        )
     }
 
     private var selectedZoomID: String? {
@@ -2931,6 +3188,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     case canvas
     case cuts
     case zooms
+    case cursor
     case export
 
     var id: String { rawValue }
@@ -2941,6 +3199,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
         case .canvas: "Canvas"
         case .cuts: "Cuts"
         case .zooms: "Zooms"
+        case .cursor: "Cursor"
         case .export: "Export"
         }
     }
@@ -2949,6 +3208,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
 private enum TimelineSelection: Equatable {
     case cut(String)
     case zoom(String)
+    case cursorHide(String)
     case marker(String)
 }
 
@@ -2961,6 +3221,9 @@ private enum TimelineDragAction: Equatable {
     case moveZoom
     case resizeZoomStart
     case resizeZoomEnd
+    case moveCursorHide
+    case resizeCursorHideStart
+    case resizeCursorHideEnd
     case moveMarker
 }
 
@@ -3099,6 +3362,7 @@ private protocol EditableTimelineRangeRow {
 
 extension EditableCutRow: EditableTimelineRangeRow {}
 extension EditableZoomRow: EditableTimelineRangeRow {}
+extension EditableTimeRangeRow: EditableTimelineRangeRow {}
 
 private struct EditableMarkerRow: Identifiable, Equatable {
     var id: String
@@ -3106,6 +3370,12 @@ private struct EditableMarkerRow: Identifiable, Equatable {
     var timeSeconds: String
     var title: String
     var notes: String
+}
+
+private struct EditableTimeRangeRow: Identifiable, Equatable {
+    var id: String
+    var startSeconds: String
+    var endSeconds: String
 }
 
 @MainActor
@@ -3159,6 +3429,23 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var canvasCropWidth = "1"
     @Published var canvasCropHeight = "1"
     @Published var zoomAutoGenerationEnabled = true
+    @Published var cursorPreviewMetadata: InteractionMetadataDocument?
+    @Published var cursorPointerStyle: EditorCursorPointerStyle = .macOS
+    @Published var cursorPointerVisible = true
+    @Published var cursorSmoothMovement = true
+    @Published var cursorPointerScale = 1.0
+    @Published var cursorPointerFillColor: RGBAColor = .white
+    @Published var cursorPointerStrokeColor: RGBAColor = .black
+    @Published var cursorClickEffectsVisible = true
+    @Published var cursorClickColor: RGBAColor = .yellow
+    @Published var cursorClickScale = 1.0
+    @Published var cursorClickOpacity = 0.85
+    @Published var cursorClickDuration = 0.42
+    @Published var cursorClickSoundEnabled = false
+    @Published var cursorClickSoundVolume = 0.45
+    @Published var cursorKeyboardVisible = true
+    @Published var cursorKeyboardOpacity = 0.9
+    @Published var cursorHiddenRangeRows: [EditableTimeRangeRow] = []
     @Published var annotationItemCount = 0
     @Published var annotationSidecarStatus = "Not initialized"
     @Published var annotationDraftText = "Annotation note"
@@ -3193,6 +3480,54 @@ private final class ProjectEditorModel: ObservableObject {
 
     var formattedDuration: String {
         previewDurationSeconds > 0 ? Self.formatClock(previewDurationSeconds) : "--:--"
+    }
+
+    func cursorSample(at seconds: Double) -> CursorSample? {
+        guard let cursorPreviewMetadata else { return nil }
+        let hiddenRanges = cursorHiddenRangeRows.compactMap { row -> EditTimeRange? in
+            guard let start = Double(row.startSeconds.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  let end = Double(row.endSeconds.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  end > start else {
+                return nil
+            }
+            return EditTimeRange(startSeconds: start, endSeconds: end)
+        }
+        guard !hiddenRanges.contains(where: { $0.contains(seconds) }) else { return nil }
+        return cursorPreviewMetadata.cursorSamples
+            .filter { $0.timestampSeconds <= seconds && $0.isVisible }
+            .max { $0.timestampSeconds < $1.timestampSeconds }
+    }
+
+    func cursorClick(at seconds: Double) -> CursorClick? {
+        guard let cursorPreviewMetadata else { return nil }
+        return cursorPreviewMetadata.clicks
+            .filter {
+                $0.phase == .down
+                    && seconds >= $0.timestampSeconds
+                    && seconds <= $0.timestampSeconds + max(0.05, cursorClickDuration)
+            }
+            .max { $0.timestampSeconds < $1.timestampSeconds }
+    }
+
+    func cursorClickProgress(_ click: CursorClick, at seconds: Double) -> Double {
+        let duration = max(0.05, cursorClickDuration)
+        return min(1, max(0, (seconds - click.timestampSeconds) / duration))
+    }
+
+    func keyboardPreviewLabel(at seconds: Double) -> String? {
+        guard let cursorPreviewMetadata else { return nil }
+        let event = cursorPreviewMetadata.keystrokes
+            .filter {
+                $0.phase == .down
+                    && !$0.isRepeat
+                    && seconds >= $0.timestampSeconds
+                    && seconds <= $0.timestampSeconds + 0.9
+            }
+            .max(by: { $0.timestampSeconds < $1.timestampSeconds })
+        guard let event else {
+            return nil
+        }
+        return Self.keyboardLabel(for: event)
     }
 
     var canvasPreviewAspectRatio: CGFloat? {
@@ -3703,6 +4038,31 @@ private final class ProjectEditorModel: ObservableObject {
         duplicate.timeSeconds = Self.formatSecondsForEditing(min(seconds + 1, max(duration, 0)))
         markerRows.append(duplicate)
         clearTimelineValidation()
+    }
+
+    func addCursorHiddenRangeAtPlayhead() {
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 2)
+        let start = min(max(currentTimeSeconds, 0), max(duration - 0.25, 0))
+        let end = min(start + 2, max(duration, start + 0.25))
+        cursorHiddenRangeRows.append(
+            EditableTimeRangeRow(
+                id: "cursor-hide-\(UUID().uuidString)",
+                startSeconds: Self.formatSecondsForEditing(start),
+                endSeconds: Self.formatSecondsForEditing(end)
+            )
+        )
+    }
+
+    func removeCursorHiddenRange(id: String) {
+        cursorHiddenRangeRows.removeAll { $0.id == id }
+    }
+
+    func moveCursorHiddenRange(id: String, start: Double, end: Double, duration: Double) {
+        updateRangeRow(id: id, start: start, end: end, duration: duration, rows: &cursorHiddenRangeRows)
+    }
+
+    func resizeCursorHiddenRange(id: String, start: Double, end: Double, duration: Double) {
+        resizeRangeRow(id: id, start: start, end: end, duration: duration, rows: &cursorHiddenRangeRows)
     }
 
     func saveMarkers() {
@@ -4321,6 +4681,7 @@ private final class ProjectEditorModel: ObservableObject {
         loadMarkerRows(loadedManifest.markers)
         loadAnnotationStatus(projectURL: url, manifest: loadedManifest)
         loadEditorSettings(projectURL: url)
+        loadCursorPreviewMetadata(projectURL: url, manifest: loadedManifest)
         refreshDefaultDestinations()
         configurePreview(projectURL: url, manifest: loadedManifest)
         loadEditDecisions(projectURL: url, manifest: loadedManifest)
@@ -4332,6 +4693,22 @@ private final class ProjectEditorModel: ObservableObject {
             player.removeTimeObserver(timeObserver)
         }
         timeObserver = nil
+    }
+
+    private func loadCursorPreviewMetadata(projectURL: URL, manifest: ProjectManifest) {
+        guard let cursorMetadata = manifest.media.cursorMetadata else {
+            cursorPreviewMetadata = nil
+            return
+        }
+
+        do {
+            let metadataURL = ProjectBundle.fileURL(for: cursorMetadata, in: projectURL)
+            let data = try Data(contentsOf: metadataURL)
+            cursorPreviewMetadata = try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
+        } catch {
+            cursorPreviewMetadata = nil
+            setError("Could not load cursor metadata preview: \(error.localizedDescription)")
+        }
     }
 
     private func loadEditDecisions(projectURL: URL, manifest: ProjectManifest) {
@@ -4465,6 +4842,29 @@ private final class ProjectEditorModel: ObservableObject {
             canvasCropHeight = "1"
         }
         zoomAutoGenerationEnabled = settings.zoom?.automaticClickZoomsEnabled ?? true
+        let cursor = settings.cursor ?? EditorCursorSettings()
+        cursorPointerStyle = cursor.pointerStyle
+        cursorPointerVisible = cursor.pointerVisible
+        cursorSmoothMovement = cursor.smoothMovement
+        cursorPointerScale = cursor.pointerScale
+        cursorPointerFillColor = cursor.pointerFillColor
+        cursorPointerStrokeColor = cursor.pointerStrokeColor
+        cursorClickEffectsVisible = cursor.clickEffects.rippleVisible
+        cursorClickColor = cursor.clickEffects.color
+        cursorClickScale = cursor.clickEffects.scale
+        cursorClickOpacity = cursor.clickEffects.opacity
+        cursorClickDuration = cursor.clickEffects.durationSeconds
+        cursorClickSoundEnabled = cursor.clickEffects.soundEnabled
+        cursorClickSoundVolume = cursor.clickEffects.soundVolume
+        cursorKeyboardVisible = cursor.keyboardOverlay.isVisible
+        cursorKeyboardOpacity = cursor.keyboardOverlay.opacity
+        cursorHiddenRangeRows = cursor.hiddenRanges.enumerated().map { index, range in
+            EditableTimeRangeRow(
+                id: "cursor-hide-\(index)-\(UUID().uuidString)",
+                startSeconds: Self.formatSecondsForEditing(range.startSeconds),
+                endSeconds: Self.formatSecondsForEditing(range.endSeconds)
+            )
+        }
     }
 
     private func currentEditorSettings() throws -> EditorSettings {
@@ -4506,6 +4906,15 @@ private final class ProjectEditorModel: ObservableObject {
             cropRect = nil
         }
 
+        let cursorHiddenRanges = try cursorHiddenRangeRows.map { row in
+            let start = try parseSeconds(row.startSeconds, label: "Cursor hide start")
+            let end = try parseSeconds(row.endSeconds, label: "Cursor hide end")
+            guard end > start else {
+                throw ProjectEditorError.invalidNumber("Cursor hide end must be greater than cursor hide start.")
+            }
+            return EditTimeRange(startSeconds: start, endSeconds: end)
+        }
+
         return EditorSettings(
             canvas: EditorCanvasSettings(
                 aspectRatio: canvasAspectRatio,
@@ -4525,7 +4934,29 @@ private final class ProjectEditorModel: ObservableObject {
                 cropRect: cropRect,
                 customSize: customSize
             ),
-            zoom: EditorZoomSettings(automaticClickZoomsEnabled: zoomAutoGenerationEnabled)
+            zoom: EditorZoomSettings(automaticClickZoomsEnabled: zoomAutoGenerationEnabled),
+            cursor: EditorCursorSettings(
+                pointerStyle: cursorPointerStyle,
+                pointerVisible: cursorPointerVisible,
+                smoothMovement: cursorSmoothMovement,
+                pointerScale: cursorPointerScale,
+                pointerFillColor: cursorPointerFillColor,
+                pointerStrokeColor: cursorPointerStrokeColor,
+                hiddenRanges: cursorHiddenRanges,
+                clickEffects: EditorClickEffectSettings(
+                    rippleVisible: cursorClickEffectsVisible,
+                    color: cursorClickColor,
+                    scale: cursorClickScale,
+                    opacity: cursorClickOpacity,
+                    durationSeconds: cursorClickDuration,
+                    soundEnabled: cursorClickSoundEnabled,
+                    soundVolume: cursorClickSoundVolume
+                ),
+                keyboardOverlay: EditorKeyboardOverlaySettings(
+                    isVisible: cursorKeyboardVisible,
+                    opacity: cursorKeyboardOpacity
+                )
+            )
         )
     }
 
@@ -4974,6 +5405,32 @@ private final class ProjectEditorModel: ObservableObject {
         let minutes = wholeSeconds / 60
         let remainder = seconds - Double(minutes * 60)
         return String(format: "%02d:%05.2f", minutes, remainder)
+    }
+
+    private static func keyboardLabel(for event: KeyboardMetadataEvent) -> String {
+        var parts: [String] = []
+        if event.modifiers.contains(.control) {
+            parts.append("Control")
+        }
+        if event.modifiers.contains(.option) {
+            parts.append("Option")
+        }
+        if event.modifiers.contains(.shift) {
+            parts.append("Shift")
+        }
+        if event.modifiers.contains(.command) {
+            parts.append("Command")
+        }
+
+        let trimmedKey = event.characters?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if let trimmedKey, !trimmedKey.isEmpty {
+            parts.append(trimmedKey)
+        } else {
+            parts.append("Key \(event.keyCode)")
+        }
+        return parts.joined(separator: " + ")
     }
 
     private static func fileSlug(_ value: String) -> String {

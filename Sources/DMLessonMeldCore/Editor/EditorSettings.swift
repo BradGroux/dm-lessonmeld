@@ -7,15 +7,18 @@ public struct EditorSettings: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var canvas: EditorCanvasSettings
     public var zoom: EditorZoomSettings?
+    public var cursor: EditorCursorSettings?
 
     public init(
         schemaVersion: Int = Self.currentSchemaVersion,
         canvas: EditorCanvasSettings = EditorCanvasSettings(),
-        zoom: EditorZoomSettings? = EditorZoomSettings()
+        zoom: EditorZoomSettings? = EditorZoomSettings(),
+        cursor: EditorCursorSettings? = EditorCursorSettings()
     ) {
         self.schemaVersion = schemaVersion
         self.canvas = canvas
         self.zoom = zoom
+        self.cursor = cursor
     }
 }
 
@@ -275,5 +278,143 @@ public struct EditorZoomSettings: Codable, Equatable, Sendable {
 
     public init(automaticClickZoomsEnabled: Bool = true) {
         self.automaticClickZoomsEnabled = automaticClickZoomsEnabled
+    }
+}
+
+public struct EditorCursorSettings: Codable, Equatable, Sendable {
+    public var pointerStyle: EditorCursorPointerStyle
+    public var pointerVisible: Bool
+    public var smoothMovement: Bool
+    public var pointerScale: Double
+    public var pointerFillColor: RGBAColor
+    public var pointerStrokeColor: RGBAColor
+    public var hiddenRanges: [EditTimeRange]
+    public var clickEffects: EditorClickEffectSettings
+    public var keyboardOverlay: EditorKeyboardOverlaySettings
+
+    public init(
+        pointerStyle: EditorCursorPointerStyle = .macOS,
+        pointerVisible: Bool = true,
+        smoothMovement: Bool = true,
+        pointerScale: Double = 1,
+        pointerFillColor: RGBAColor = .white,
+        pointerStrokeColor: RGBAColor = .black,
+        hiddenRanges: [EditTimeRange] = [],
+        clickEffects: EditorClickEffectSettings = EditorClickEffectSettings(),
+        keyboardOverlay: EditorKeyboardOverlaySettings = EditorKeyboardOverlaySettings()
+    ) {
+        self.pointerStyle = pointerStyle
+        self.pointerVisible = pointerVisible
+        self.smoothMovement = smoothMovement
+        self.pointerScale = min(3, max(0.25, pointerScale.isFinite ? pointerScale : 1))
+        self.pointerFillColor = pointerFillColor
+        self.pointerStrokeColor = pointerStrokeColor
+        self.hiddenRanges = hiddenRanges
+        self.clickEffects = clickEffects
+        self.keyboardOverlay = keyboardOverlay
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pointerStyle
+        case pointerVisible
+        case smoothMovement
+        case pointerScale
+        case pointerFillColor
+        case pointerStrokeColor
+        case hiddenRanges
+        case clickEffects
+        case keyboardOverlay
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            pointerStyle: try container.decodeIfPresent(EditorCursorPointerStyle.self, forKey: .pointerStyle) ?? .macOS,
+            pointerVisible: try container.decodeIfPresent(Bool.self, forKey: .pointerVisible) ?? true,
+            smoothMovement: try container.decodeIfPresent(Bool.self, forKey: .smoothMovement) ?? true,
+            pointerScale: try container.decodeIfPresent(Double.self, forKey: .pointerScale) ?? 1,
+            pointerFillColor: try container.decodeIfPresent(RGBAColor.self, forKey: .pointerFillColor) ?? .white,
+            pointerStrokeColor: try container.decodeIfPresent(RGBAColor.self, forKey: .pointerStrokeColor) ?? .black,
+            hiddenRanges: try container.decodeIfPresent([EditTimeRange].self, forKey: .hiddenRanges) ?? [],
+            clickEffects: try container.decodeIfPresent(EditorClickEffectSettings.self, forKey: .clickEffects) ?? EditorClickEffectSettings(),
+            keyboardOverlay: try container.decodeIfPresent(EditorKeyboardOverlaySettings.self, forKey: .keyboardOverlay) ?? EditorKeyboardOverlaySettings()
+        )
+    }
+}
+
+public enum EditorCursorPointerStyle: String, Codable, CaseIterable, Identifiable, Sendable {
+    case macOS
+    case touchDot
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .macOS:
+            "macOS Pointer"
+        case .touchDot:
+            "Touch Dot"
+        }
+    }
+}
+
+public struct EditorClickEffectSettings: Codable, Equatable, Sendable {
+    public var rippleVisible: Bool
+    public var color: RGBAColor
+    public var scale: Double
+    public var opacity: Double
+    public var durationSeconds: Double
+    public var soundEnabled: Bool
+    public var soundVolume: Double
+
+    public init(
+        rippleVisible: Bool = true,
+        color: RGBAColor = .yellow,
+        scale: Double = 1,
+        opacity: Double = 0.85,
+        durationSeconds: Double = 0.42,
+        soundEnabled: Bool = false,
+        soundVolume: Double = 0.45
+    ) {
+        self.rippleVisible = rippleVisible
+        self.color = color
+        self.scale = min(4, max(0.25, scale.isFinite ? scale : 1))
+        self.opacity = min(1, max(0, opacity.isFinite ? opacity : 0.85))
+        self.durationSeconds = min(2, max(0.05, durationSeconds.isFinite ? durationSeconds : 0.42))
+        self.soundEnabled = soundEnabled
+        self.soundVolume = min(1, max(0, soundVolume.isFinite ? soundVolume : 0.45))
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case rippleVisible
+        case color
+        case scale
+        case opacity
+        case durationSeconds
+        case soundEnabled
+        case soundVolume
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            rippleVisible: try container.decodeIfPresent(Bool.self, forKey: .rippleVisible) ?? true,
+            color: try container.decodeIfPresent(RGBAColor.self, forKey: .color) ?? .yellow,
+            scale: try container.decodeIfPresent(Double.self, forKey: .scale) ?? 1,
+            opacity: try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 0.85,
+            durationSeconds: try container.decodeIfPresent(Double.self, forKey: .durationSeconds) ?? 0.42,
+            soundEnabled: try container.decodeIfPresent(Bool.self, forKey: .soundEnabled) ?? false,
+            soundVolume: try container.decodeIfPresent(Double.self, forKey: .soundVolume) ?? 0.45
+        )
+    }
+}
+
+public struct EditorKeyboardOverlaySettings: Codable, Equatable, Sendable {
+    public var isVisible: Bool
+    public var opacity: Double
+
+    public init(isVisible: Bool = true, opacity: Double = 0.9) {
+        self.isVisible = isVisible
+        self.opacity = min(1, max(0, opacity.isFinite ? opacity : 0.9))
     }
 }
