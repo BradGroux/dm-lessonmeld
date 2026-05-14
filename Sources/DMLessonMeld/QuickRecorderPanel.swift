@@ -1463,17 +1463,13 @@ final class QuickRecorderModel: ObservableObject {
     @Published var completionRenderProgress = 0.0
     @Published var cameraPreviewSession: CameraPreviewSessionBox?
 
+    private let recordingRuntime = QuickRecordingRuntime()
     private var controlBarWindow: QuickRecordingControlBarWindow?
     private var regionSelectionWindow: RegionSelectionWindow?
-    private var recordingTask: Task<Void, Never>?
     private var elapsedTimer: Timer?
     private var startedAt: Date?
     private var pauseStartedAt: Date?
     private var accumulatedPausedDuration: TimeInterval = 0
-    private var displayRecorder: DisplayScreenRecorder?
-    private var microphoneRecorder: MicrophoneRecorder?
-    private var cameraRecorder: CameraRecorder?
-    private var interactionMetadataCapture: InteractionMetadataCaptureSession?
     private var floatingWebcamPreviewWindow: FloatingWebcamPreviewWindow?
     private var recordingMarkers: [ProjectTimelineMarker] = []
     private var deleteAfterStop = false
@@ -1794,9 +1790,11 @@ final class QuickRecorderModel: ObservableObject {
                     self?.syncFloatingWebcamPreviewWindow()
                 }
             }
-            self.displayRecorder = displayRecorder
-            self.microphoneRecorder = microphoneRecorder
-            self.cameraRecorder = cameraRecorder
+            recordingRuntime.configure(
+                displayRecorder: displayRecorder,
+                microphoneRecorder: microphoneRecorder,
+                cameraRecorder: cameraRecorder
+            )
             lastStartPreferences = preferences
             deleteAfterStop = false
             restartAfterStop = false
@@ -1828,7 +1826,7 @@ final class QuickRecorderModel: ObservableObject {
             let captureSystemAudio = captureSystemAudio
             let captureInteractionMetadata = captureInteractionMetadata
 
-            recordingTask = Task {
+            let task = Task {
                 var metadataCapture: InteractionMetadataCaptureSession?
                 do {
                     if preferences.capture.countdownSeconds > 0 {
@@ -1853,7 +1851,7 @@ final class QuickRecorderModel: ObservableObject {
                             rendersCursorPointer: !preferences.capture.includeCursor
                         )
                         session.start()
-                        self.interactionMetadataCapture = session
+                        self.recordingRuntime.interactionMetadataCapture = session
                         return session
                     }
 
@@ -1875,7 +1873,7 @@ final class QuickRecorderModel: ObservableObject {
                     )
                     if let metadataCapture {
                         let document = await MainActor.run {
-                            self.interactionMetadataCapture = nil
+                            self.recordingRuntime.interactionMetadataCapture = nil
                             return metadataCapture.stop()
                         }
                         try Self.persistInteractionMetadata(document, to: result.projectURL, manifest: &result.manifest)
@@ -1891,7 +1889,7 @@ final class QuickRecorderModel: ObservableObject {
                 } catch {
                     if let metadataCapture {
                         await MainActor.run {
-                            self.interactionMetadataCapture = nil
+                            self.recordingRuntime.interactionMetadataCapture = nil
                             _ = metadataCapture.stop()
                         }
                     }
@@ -1900,6 +1898,7 @@ final class QuickRecorderModel: ObservableObject {
                     }
                 }
             }
+            recordingRuntime.recordingTask = task
         } catch {
             message = error.localizedDescription
         }
@@ -1918,10 +1917,7 @@ final class QuickRecorderModel: ObservableObject {
         guard isRecording, !isPaused else { return }
         isPaused = true
         pauseStartedAt = Date()
-        displayRecorder?.pauseRecording()
-        microphoneRecorder?.pauseRecording()
-        cameraRecorder?.pauseRecording()
-        interactionMetadataCapture?.pause()
+        recordingRuntime.pause()
         message = "Recording paused."
         publishStatus()
     }
@@ -1933,10 +1929,7 @@ final class QuickRecorderModel: ObservableObject {
         }
         pauseStartedAt = nil
         isPaused = false
-        displayRecorder?.resumeRecording()
-        microphoneRecorder?.resumeRecording()
-        cameraRecorder?.resumeRecording()
-        interactionMetadataCapture?.resume()
+        recordingRuntime.resume()
         message = "Recording resumed."
         publishStatus()
     }
@@ -1947,7 +1940,7 @@ final class QuickRecorderModel: ObservableObject {
         isPaused = false
         message = "Stopping recording and writing the project bundle..."
         publishStatus()
-        recordingTask?.cancel()
+        recordingRuntime.requestStop()
     }
 
     func markRecording() {
@@ -1998,7 +1991,7 @@ final class QuickRecorderModel: ObservableObject {
         if let openProjectHandler {
             openProjectHandler(completion.projectURL)
         } else {
-            NotificationCenter.default.post(name: .lessonMeldOpenProject, object: completion.projectURL)
+            ProjectOpenRouter.shared.publish(completion.projectURL)
         }
         NSApplication.shared.activate()
         message = "Opened \(completion.projectName) in the editor."
@@ -2134,11 +2127,7 @@ final class QuickRecorderModel: ObservableObject {
         startedAt = nil
         pauseStartedAt = nil
         accumulatedPausedDuration = 0
-        recordingTask = nil
-        displayRecorder = nil
-        microphoneRecorder = nil
-        cameraRecorder = nil
-        interactionMetadataCapture = nil
+        recordingRuntime.clear()
         cameraPreviewSession = nil
         closeFloatingWebcamPreviewWindow()
         recordingMarkers = []
@@ -2821,6 +2810,53 @@ final class QuickRecorderModel: ObservableObject {
     private static let manualStopDurationSeconds = 12 * 60 * 60
 }
 
+@MainActor
+private final class QuickRecordingRuntime {
+    var recordingTask: Task<Void, Never>?
+    var interactionMetadataCapture: InteractionMetadataCaptureSession?
+
+    private var displayRecorder: DisplayScreenRecorder?
+    private var microphoneRecorder: MicrophoneRecorder?
+    private var cameraRecorder: CameraRecorder?
+
+    func configure(
+        displayRecorder: DisplayScreenRecorder,
+        microphoneRecorder: MicrophoneRecorder?,
+        cameraRecorder: CameraRecorder?
+    ) {
+        self.displayRecorder = displayRecorder
+        self.microphoneRecorder = microphoneRecorder
+        self.cameraRecorder = cameraRecorder
+    }
+
+    func pause() {
+        displayRecorder?.pauseRecording()
+        microphoneRecorder?.pauseRecording()
+        cameraRecorder?.pauseRecording()
+        interactionMetadataCapture?.pause()
+    }
+
+    func resume() {
+        displayRecorder?.resumeRecording()
+        microphoneRecorder?.resumeRecording()
+        cameraRecorder?.resumeRecording()
+        interactionMetadataCapture?.resume()
+    }
+
+    func requestStop() {
+        recordingTask?.cancel()
+        cameraRecorder?.stopRecording()
+    }
+
+    func clear() {
+        recordingTask = nil
+        displayRecorder = nil
+        microphoneRecorder = nil
+        cameraRecorder = nil
+        interactionMetadataCapture = nil
+    }
+}
+
 struct QuickRecordingCompletion: Equatable {
     var projectURL: URL
 
@@ -2860,10 +2896,6 @@ private final class ScreenStartSignal: @unchecked Sendable {
         defer { lock.unlock() }
         return didStart
     }
-}
-
-extension Notification.Name {
-    static let lessonMeldOpenProject = Notification.Name("io.digitalmeld.dm-lessonmeld.open-project")
 }
 
 private final class QuickRecordingControlBarWindow: NSPanel, NSWindowDelegate {

@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct DMLessonMeldApp: App {
     @NSApplicationDelegateAdaptor(LessonMeldAppDelegate.self) private var appDelegate
+    @StateObject private var appRouter = LessonMeldAppRouter()
     @StateObject private var annotationOverlay = AnnotationOverlayCoordinator()
     @StateObject private var preferences = AppPreferencesController()
     @StateObject private var quickRecorder = QuickRecorderModel()
@@ -15,19 +16,32 @@ struct DMLessonMeldApp: App {
     var body: some Scene {
         Window(AppBrand.shortName, id: "main") {
             ProjectEditorView(
+                appRouter: appRouter,
                 preferences: preferences,
                 annotationOverlay: annotationOverlay,
-                quickRecorder: quickRecorder
+                quickRecorder: quickRecorder,
+                fallbackAnnotationOverlayHandler: { preferences in
+                    annotationOverlay.open(preferences: preferences, forceToolbarVisible: true)
+                }
             )
                 .frame(minWidth: 960, idealWidth: 1180, minHeight: 680, idealHeight: 780)
                 .disablesWindowRestoration()
                 .hidesWindowTitle()
-                .handlesLessonMeldAppEvents()
+                .handlesLessonMeldAppEvents(appRouter: appRouter)
+                .onAppear {
+                    annotationOverlay.openSettingsHandler = { section in
+                        appRouter.openSettings(section)
+                    }
+                    quickRecorder.annotationOverlayHandler = { preferences in
+                        annotationOverlay.open(preferences: preferences, forceToolbarVisible: true)
+                    }
+                }
         }
         .defaultLaunchBehavior(.presented)
         .windowResizability(.contentMinSize)
         .commands {
             LessonMeldAppCommands(
+                appRouter: appRouter,
                 annotationOverlay: annotationOverlay,
                 quickRecorder: quickRecorder,
                 preferences: preferences
@@ -36,6 +50,7 @@ struct DMLessonMeldApp: App {
 
         MenuBarExtra {
             MenuBarStatusView(
+                appRouter: appRouter,
                 annotationOverlay: annotationOverlay,
                 preferences: preferences,
                 quickRecorder: quickRecorder
@@ -46,47 +61,34 @@ struct DMLessonMeldApp: App {
         .menuBarExtraStyle(.menu)
 
         Window(AppBrand.settingsTitle, id: "settings") {
-            LessonMeldSettingsView(preferences: preferences)
+            LessonMeldSettingsView(appRouter: appRouter, preferences: preferences)
                 .disablesWindowRestoration()
-                .handlesLessonMeldAppEvents()
+                .handlesLessonMeldAppEvents(appRouter: appRouter)
         }
         .windowResizability(.contentMinSize)
 
         Window(AppBrand.commandPaletteTitle, id: "command-palette") {
-            CommandPaletteWindowContent(annotationOverlay: annotationOverlay, preferences: preferences)
+            CommandPaletteWindowContent(appRouter: appRouter, annotationOverlay: annotationOverlay, preferences: preferences)
                 .disablesWindowRestoration()
-                .handlesLessonMeldAppEvents()
+                .handlesLessonMeldAppEvents(appRouter: appRouter)
         }
         .windowResizability(.contentMinSize)
 
         Window(AppBrand.onboardingTitle, id: "onboarding") {
-            OnboardingWindowContent(preferences: preferences)
+            OnboardingWindowContent(appRouter: appRouter, preferences: preferences)
                 .disablesWindowRestoration()
-                .handlesLessonMeldAppEvents()
+                .handlesLessonMeldAppEvents(appRouter: appRouter)
         }
         .windowResizability(.contentMinSize)
     }
 }
 
-extension Notification.Name {
-    static let lessonMeldOpenSettingsRequested = Notification.Name("io.digitalmeld.lessonmeld.openSettingsRequested")
-}
-
-@MainActor
-enum LessonMeldSettingsRequest {
-    static let sectionUserInfoKey = "section"
-    static let annotationsSection = "annotations"
-    static var pendingSectionRawValue: String?
-}
-
 private struct LessonMeldAppEventBridge: ViewModifier {
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject var appRouter: LessonMeldAppRouter
 
     func body(content: Content) -> some View {
-        content.onReceive(NotificationCenter.default.publisher(for: .lessonMeldOpenSettingsRequested)) { notification in
-            if let section = notification.userInfo?[LessonMeldSettingsRequest.sectionUserInfoKey] as? String {
-                LessonMeldSettingsRequest.pendingSectionRawValue = section
-            }
+        content.onReceive(appRouter.$settingsRequest.compactMap(\.self)) { _ in
             openWindow(id: "settings")
             NSApplication.shared.activate()
         }
@@ -94,13 +96,14 @@ private struct LessonMeldAppEventBridge: ViewModifier {
 }
 
 private extension View {
-    func handlesLessonMeldAppEvents() -> some View {
-        modifier(LessonMeldAppEventBridge())
+    func handlesLessonMeldAppEvents(appRouter: LessonMeldAppRouter) -> some View {
+        modifier(LessonMeldAppEventBridge(appRouter: appRouter))
     }
 }
 
 private struct LessonMeldAppCommands: Commands {
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject var appRouter: LessonMeldAppRouter
     @ObservedObject var annotationOverlay: AnnotationOverlayCoordinator
     @ObservedObject var quickRecorder: QuickRecorderModel
     @ObservedObject var preferences: AppPreferencesController
@@ -108,8 +111,7 @@ private struct LessonMeldAppCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
             Button("Settings...") {
-                openWindow(id: "settings")
-                NSApplication.shared.activate()
+                appRouter.openSettings()
             }
             .keyboardShortcut(",", modifiers: .command)
         }
@@ -164,6 +166,7 @@ private struct LessonMeldAppCommands: Commands {
 
 private struct CommandPaletteWindowContent: View {
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject var appRouter: LessonMeldAppRouter
     @ObservedObject var annotationOverlay: AnnotationOverlayCoordinator
     @ObservedObject var preferences: AppPreferencesController
 
@@ -188,8 +191,7 @@ private struct CommandPaletteWindowContent: View {
                 shortcut: preferences.snapshot.shortcuts[.showSettings],
                 keywords: ["preferences", "config"]
             ) {
-                openWindow(id: "settings")
-                NSApplication.shared.activate()
+                appRouter.openSettings()
             },
             CommandPaletteCommand(
                 id: "onboarding",
@@ -228,19 +230,19 @@ private struct CommandPaletteWindowContent: View {
 }
 
 private struct OnboardingWindowContent: View {
-    @Environment(\.openWindow) private var openWindow
+    @ObservedObject var appRouter: LessonMeldAppRouter
     @ObservedObject var preferences: AppPreferencesController
 
     var body: some View {
         OnboardingView(preferences: preferences) {
-            openWindow(id: "settings")
-            NSApplication.shared.activate()
+            appRouter.openSettings(.capture)
         }
     }
 }
 
 private struct MenuBarStatusView: View {
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject var appRouter: LessonMeldAppRouter
     @ObservedObject var annotationOverlay: AnnotationOverlayCoordinator
     @ObservedObject var preferences: AppPreferencesController
     @ObservedObject var quickRecorder: QuickRecorderModel
@@ -288,8 +290,7 @@ private struct MenuBarStatusView: View {
             .keyboardShortcut("p", modifiers: [.option, .command])
 
             Button("Settings...") {
-                openWindow(id: "settings")
-                NSApplication.shared.activate()
+                appRouter.openSettings()
             }
             .keyboardShortcut(",", modifiers: .command)
 
