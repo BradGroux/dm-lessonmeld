@@ -23,17 +23,20 @@ struct CommandPaletteView: View {
                 LazyVStack(spacing: 6) {
                     ForEach(filteredCommands) { command in
                         Button {
+                            guard command.isEnabled else { return }
                             command.action()
                             dismiss()
                         } label: {
                             LessonMeldCommandRow(
                                 title: command.title,
-                                subtitle: command.subtitle,
+                                subtitle: command.disabledReason ?? command.subtitle,
                                 systemImage: command.systemImage,
                                 shortcut: command.shortcut
                             )
                         }
                         .buttonStyle(.plain)
+                        .disabled(!command.isEnabled)
+                        .opacity(command.isEnabled ? 1 : 0.62)
                     }
                 }
                 .padding(10)
@@ -62,5 +65,43 @@ struct CommandPaletteCommand: Identifiable {
     var systemImage: String
     var shortcut: String?
     var keywords: [String]
+    var isEnabled = true
+    var disabledReason: String?
     var action: () -> Void
+
+    init(
+        id: String,
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        shortcut: String?,
+        keywords: [String],
+        isEnabled: Bool = true,
+        disabledReason: String? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.shortcut = shortcut
+        self.keywords = keywords
+        self.isEnabled = isEnabled
+        self.disabledReason = disabledReason
+        self.action = action
+    }
+
+    init(command: LessonMeldAppCommand) {
+        self.init(
+            id: command.id.rawValue,
+            title: command.title,
+            subtitle: command.subtitle,
+            systemImage: command.systemImage,
+            shortcut: command.shortcut,
+            keywords: command.keywords,
+            isEnabled: command.isEnabled,
+            disabledReason: command.disabledReason,
+            action: command.action
+        )
+    }
 }
