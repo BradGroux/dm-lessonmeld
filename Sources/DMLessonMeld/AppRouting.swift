@@ -4,6 +4,8 @@ import Foundation
 final class LessonMeldAppRouter: ObservableObject {
     @Published private(set) var settingsRequest: LessonMeldSettingsWindowRequest?
     @Published private(set) var importVideoRequest: UUID?
+    @Published private(set) var projectCommandRequest: LessonMeldProjectCommandRequest?
+    @Published private(set) var projectCommandState = LessonMeldProjectCommandState.empty
 
     func openSettings(_ section: LessonMeldSettingsSection? = nil) {
         settingsRequest = LessonMeldSettingsWindowRequest(section: section)
@@ -12,11 +14,25 @@ final class LessonMeldAppRouter: ObservableObject {
     func importVideoForEditing() {
         importVideoRequest = UUID()
     }
+
+    func runProjectCommand(_ command: LessonMeldProjectCommand) {
+        projectCommandRequest = LessonMeldProjectCommandRequest(command: command)
+    }
+
+    func updateProjectCommandState(_ state: LessonMeldProjectCommandState) {
+        guard projectCommandState != state else { return }
+        projectCommandState = state
+    }
 }
 
 struct LessonMeldSettingsWindowRequest: Identifiable, Equatable {
     let id = UUID()
     var section: LessonMeldSettingsSection?
+}
+
+struct LessonMeldProjectCommandRequest: Identifiable, Equatable {
+    let id = UUID()
+    var command: LessonMeldProjectCommand
 }
 
 enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {

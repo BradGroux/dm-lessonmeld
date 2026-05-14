@@ -68,7 +68,12 @@ struct DMLessonMeldApp: App {
         .windowResizability(.contentMinSize)
 
         Window(AppBrand.commandPaletteTitle, id: "command-palette") {
-            CommandPaletteWindowContent(appRouter: appRouter, annotationOverlay: annotationOverlay, preferences: preferences)
+            CommandPaletteWindowContent(
+                appRouter: appRouter,
+                annotationOverlay: annotationOverlay,
+                preferences: preferences,
+                quickRecorder: quickRecorder
+            )
                 .disablesWindowRestoration()
                 .handlesLessonMeldAppEvents(appRouter: appRouter)
         }
@@ -110,71 +115,166 @@ private struct LessonMeldAppCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
-            Button("Settings...") {
-                appRouter.openSettings()
+            Button(commandTitle(.settings)) {
+                runCommand(.settings)
             }
             .keyboardShortcut(",", modifiers: .command)
         }
 
-        CommandGroup(after: .newItem) {
-            Button("Create Project from Video...") {
-                openWindow(id: "main")
-                appRouter.importVideoForEditing()
-                NSApplication.shared.activate()
+        CommandGroup(replacing: .newItem) {
+            Button(commandTitle(.newProject)) {
+                runCommand(.newProject)
+            }
+            .keyboardShortcut("n", modifiers: .command)
+
+            Button(commandTitle(.openProject)) {
+                runCommand(.openProject)
+            }
+            .keyboardShortcut("o", modifiers: .command)
+
+            Button(commandTitle(.importVideo)) {
+                runCommand(.importVideo)
             }
             .keyboardShortcut("i", modifiers: .command)
         }
 
+        CommandGroup(replacing: .saveItem) {
+            Button(commandTitle(.saveEdits)) {
+                runCommand(.saveEdits)
+            }
+            .keyboardShortcut("s", modifiers: .command)
+            .disabled(!command(.saveEdits).isEnabled)
+        }
+
+        CommandGroup(after: .saveItem) {
+            Button(commandTitle(.revealProject)) {
+                runCommand(.revealProject)
+            }
+            .keyboardShortcut("r", modifiers: [.shift, .command])
+            .disabled(!command(.revealProject).isEnabled)
+
+            Button(commandTitle(.exportVideo)) {
+                runCommand(.exportVideo)
+            }
+            .keyboardShortcut("e", modifiers: [.shift, .command])
+            .disabled(!command(.exportVideo).isEnabled)
+        }
+
         CommandMenu("Tools") {
-            Button("New Recording...") {
-                quickRecorder.presentControlBar(preferences: preferences)
-                NSApplication.shared.activate()
+            Button(commandTitle(.newRecording)) {
+                runCommand(.newRecording)
             }
             .keyboardShortcut(.return, modifiers: [.option, .command])
+            .disabled(!command(.newRecording).isEnabled)
 
-            Button(quickRecorder.isRecording ? "Show Recording Controls" : "Open Recording Controls") {
-                quickRecorder.presentControlBar(preferences: preferences)
-                NSApplication.shared.activate()
+            Button(commandTitle(.recordingControls)) {
+                runCommand(.recordingControls)
             }
             .keyboardShortcut("r", modifiers: [.option, .command])
 
-            Button(annotationOverlay.isPresented ? "Close Annotation Overlay" : "Open Annotation Overlay") {
-                annotationOverlay.toggle(preferences: preferences.snapshot, forceToolbarVisible: true)
-                NSApplication.shared.activate()
+            Button(commandTitle(.pauseRecording)) {
+                runCommand(.pauseRecording)
+            }
+            .disabled(!command(.pauseRecording).isEnabled)
+
+            Button(commandTitle(.stopRecording)) {
+                runCommand(.stopRecording)
+            }
+            .keyboardShortcut(.escape)
+            .disabled(!command(.stopRecording).isEnabled)
+
+            Button(commandTitle(.toggleAnnotationOverlay)) {
+                runCommand(.toggleAnnotationOverlay)
             }
             .keyboardShortcut("a", modifiers: [.option, .command])
 
             Divider()
 
-            Button("Show Main Window") {
-                openWindow(id: "main")
-                NSApplication.shared.activate()
+            Button(commandTitle(.showMainWindow)) {
+                runCommand(.showMainWindow)
             }
             .keyboardShortcut("0", modifiers: .command)
 
-            Button("Open Editor...") {
-                openWindow(id: "main")
-                NSApplication.shared.activate()
-            }
-            .keyboardShortcut("e", modifiers: .command)
-
-            Button("Import Video for Editing...") {
-                openWindow(id: "main")
-                appRouter.importVideoForEditing()
-                NSApplication.shared.activate()
-            }
-
-            Button("Onboarding...") {
-                openWindow(id: "onboarding")
-                NSApplication.shared.activate()
+            Button(commandTitle(.onboarding)) {
+                runCommand(.onboarding)
             }
             .keyboardShortcut("p", modifiers: [.option, .command])
 
-            Button("Command Palette...") {
-                openWindow(id: "command-palette")
-                NSApplication.shared.activate()
+            Button(commandTitle(.commandPalette)) {
+                runCommand(.commandPalette)
             }
             .keyboardShortcut("k", modifiers: .command)
+        }
+    }
+
+    private var commandContext: LessonMeldCommandContext {
+        LessonMeldCommandContext(
+            preferences: preferences.snapshot,
+            project: appRouter.projectCommandState,
+            recorder: LessonMeldRecorderCommandState(
+                isRecording: quickRecorder.isRecording,
+                isPaused: quickRecorder.isPaused,
+                isStopping: quickRecorder.isStopping
+            ),
+            isAnnotationPresented: annotationOverlay.isPresented
+        )
+    }
+
+    private func command(_ id: LessonMeldAppCommandID) -> LessonMeldAppCommand {
+        LessonMeldCommandRegistry.command(id, context: commandContext) { commandID in
+            perform(commandID)
+        }
+    }
+
+    private func commandTitle(_ id: LessonMeldAppCommandID) -> String {
+        command(id).title
+    }
+
+    private func runCommand(_ id: LessonMeldAppCommandID) {
+        command(id).action()
+    }
+
+    private func perform(_ id: LessonMeldAppCommandID) {
+        switch id {
+        case .showMainWindow:
+            openWindow(id: "main")
+            NSApplication.shared.activate()
+        case .newProject:
+            openWindow(id: "main")
+            appRouter.runProjectCommand(.newProject)
+            NSApplication.shared.activate()
+        case .openProject:
+            openWindow(id: "main")
+            appRouter.runProjectCommand(.openProject)
+            NSApplication.shared.activate()
+        case .importVideo:
+            openWindow(id: "main")
+            appRouter.runProjectCommand(.importVideo)
+            NSApplication.shared.activate()
+        case .revealProject:
+            appRouter.runProjectCommand(.revealProject)
+        case .saveEdits:
+            appRouter.runProjectCommand(.saveEdits)
+        case .exportVideo:
+            appRouter.runProjectCommand(.exportVideo)
+        case .newRecording, .recordingControls:
+            quickRecorder.presentControlBar(preferences: preferences)
+            NSApplication.shared.activate()
+        case .pauseRecording:
+            quickRecorder.togglePause()
+        case .stopRecording:
+            quickRecorder.stopRecording()
+        case .toggleAnnotationOverlay:
+            annotationOverlay.toggle(preferences: preferences.snapshot, forceToolbarVisible: true)
+            NSApplication.shared.activate()
+        case .settings:
+            appRouter.openSettings()
+        case .onboarding:
+            openWindow(id: "onboarding")
+            NSApplication.shared.activate()
+        case .commandPalette:
+            openWindow(id: "command-palette")
+            NSApplication.shared.activate()
         }
     }
 }
@@ -184,86 +284,73 @@ private struct CommandPaletteWindowContent: View {
     @ObservedObject var appRouter: LessonMeldAppRouter
     @ObservedObject var annotationOverlay: AnnotationOverlayCoordinator
     @ObservedObject var preferences: AppPreferencesController
+    @ObservedObject var quickRecorder: QuickRecorderModel
 
     var body: some View {
-        CommandPaletteView(commands: [
-            CommandPaletteCommand(
-                id: "main",
-                title: "Show Main Window",
-                subtitle: "Open the recorder and project editor workspace.",
-                systemImage: "rectangle.stack.badge.play",
-                shortcut: nil,
-                keywords: ["home", "record", "editor", "project"]
-            ) {
-                openWindow(id: "main")
-                NSApplication.shared.activate()
-            },
-            CommandPaletteCommand(
-                id: "settings",
-                title: "Settings",
-                subtitle: "Capture, annotation, export, privacy, diagnostics, and shortcuts.",
-                systemImage: "gearshape",
-                shortcut: preferences.snapshot.shortcuts[.showSettings],
-                keywords: ["preferences", "config"]
-            ) {
-                appRouter.openSettings()
-            },
-            CommandPaletteCommand(
-                id: "onboarding",
-                title: "Onboarding",
-                subtitle: "Review permissions and first-run teaching defaults.",
-                systemImage: "checklist",
-                shortcut: preferences.snapshot.shortcuts[.showOnboarding],
-                keywords: ["permissions", "setup"]
-            ) {
-                openWindow(id: "onboarding")
-                NSApplication.shared.activate()
-            },
-            CommandPaletteCommand(
-                id: "annotations",
-                title: annotationOverlay.isPresented ? "Close Annotation Overlay" : "Open Annotation Overlay",
-                subtitle: "Toggle the live local drawing overlay.",
-                systemImage: "pencil.tip",
-                shortcut: preferences.snapshot.shortcuts[.openAnnotationOverlay],
-                keywords: ["draw", "overlay", "annotate"]
-            ) {
-                annotationOverlay.toggle(preferences: preferences.snapshot, forceToolbarVisible: true)
-            },
-            CommandPaletteCommand(
-                id: "import-video",
-                title: "Create Project from Video",
-                subtitle: "Import an existing MP4 or MOV and open it in the editor.",
-                systemImage: "film",
-                shortcut: nil,
-                keywords: ["import", "video", "edit", "project", "mp4", "mov"]
-            ) {
-                openWindow(id: "main")
-                appRouter.importVideoForEditing()
-                NSApplication.shared.activate()
-            },
-            CommandPaletteCommand(
-                id: "timeline-shortcuts",
-                title: "Timeline Editing Shortcuts",
-                subtitle: "Space plays, arrows nudge, B cuts, Z adds zoom, Delete removes the selected edit.",
-                systemImage: "keyboard",
-                shortcut: "B  Z  Delete",
-                keywords: ["timeline", "shortcut", "cut", "zoom", "delete", "nudge", "keyboard"]
-            ) {
-                openWindow(id: "main")
-                NSApplication.shared.activate()
-            },
-            CommandPaletteCommand(
-                id: "permissions",
-                title: "Open Capture Permissions",
-                subtitle: "Open onboarding for Screen Recording, Microphone, and Camera.",
-                systemImage: "lock.shield",
-                shortcut: nil,
-                keywords: ["privacy", "camera", "microphone", "screen"]
-            ) {
-                openWindow(id: "onboarding")
-                NSApplication.shared.activate()
-            }
-        ])
+        CommandPaletteView(commands: commands.map(CommandPaletteCommand.init(command:)))
+    }
+
+    private var commands: [LessonMeldAppCommand] {
+        LessonMeldCommandRegistry.commands(context: commandContext) { commandID in
+            perform(commandID)
+        }
+    }
+
+    private var commandContext: LessonMeldCommandContext {
+        LessonMeldCommandContext(
+            preferences: preferences.snapshot,
+            project: appRouter.projectCommandState,
+            recorder: LessonMeldRecorderCommandState(
+                isRecording: quickRecorder.isRecording,
+                isPaused: quickRecorder.isPaused,
+                isStopping: quickRecorder.isStopping
+            ),
+            isAnnotationPresented: annotationOverlay.isPresented
+        )
+    }
+
+    private func perform(_ id: LessonMeldAppCommandID) {
+        switch id {
+        case .showMainWindow:
+            openWindow(id: "main")
+            NSApplication.shared.activate()
+        case .newProject:
+            openWindow(id: "main")
+            appRouter.runProjectCommand(.newProject)
+            NSApplication.shared.activate()
+        case .openProject:
+            openWindow(id: "main")
+            appRouter.runProjectCommand(.openProject)
+            NSApplication.shared.activate()
+        case .importVideo:
+            openWindow(id: "main")
+            appRouter.runProjectCommand(.importVideo)
+            NSApplication.shared.activate()
+        case .revealProject:
+            appRouter.runProjectCommand(.revealProject)
+        case .saveEdits:
+            appRouter.runProjectCommand(.saveEdits)
+        case .exportVideo:
+            appRouter.runProjectCommand(.exportVideo)
+        case .newRecording, .recordingControls:
+            quickRecorder.presentControlBar(preferences: preferences)
+            NSApplication.shared.activate()
+        case .pauseRecording:
+            quickRecorder.togglePause()
+        case .stopRecording:
+            quickRecorder.stopRecording()
+        case .toggleAnnotationOverlay:
+            annotationOverlay.toggle(preferences: preferences.snapshot, forceToolbarVisible: true)
+            NSApplication.shared.activate()
+        case .settings:
+            appRouter.openSettings()
+        case .onboarding:
+            openWindow(id: "onboarding")
+            NSApplication.shared.activate()
+        case .commandPalette:
+            openWindow(id: "command-palette")
+            NSApplication.shared.activate()
+        }
     }
 }
 
@@ -297,61 +384,49 @@ private struct MenuBarStatusView: View {
 
             Divider()
 
-            Button(quickRecorder.isRecording ? "Show Recording Controls" : "New Recording...") {
-                quickRecorder.presentControlBar(preferences: preferences)
-                NSApplication.shared.activate()
+            Button(commandTitle(primaryRecordingCommandID)) {
+                runCommand(primaryRecordingCommandID)
             }
             .keyboardShortcut("r", modifiers: [.option, .command])
 
             if quickRecorder.isRecording {
-                Button(quickRecorder.isPaused ? "Resume Recording" : "Pause Recording") {
-                    quickRecorder.togglePause()
+                Button(commandTitle(.pauseRecording)) {
+                    runCommand(.pauseRecording)
                 }
 
-                Button("Stop Recording") {
-                    quickRecorder.stopRecording()
+                Button(commandTitle(.stopRecording)) {
+                    runCommand(.stopRecording)
                 }
                 .keyboardShortcut(.escape)
 
                 Divider()
             }
 
-            Button("Show Main Window") {
-                openWindow(id: "main")
-                NSApplication.shared.activate()
+            Button(commandTitle(.showMainWindow)) {
+                runCommand(.showMainWindow)
             }
 
-            Button("Import Video for Editing...") {
-                openWindow(id: "main")
-                appRouter.importVideoForEditing()
-                NSApplication.shared.activate()
+            Button(commandTitle(.importVideo)) {
+                runCommand(.importVideo)
             }
 
-            Button("Onboarding...") {
-                openWindow(id: "onboarding")
-                NSApplication.shared.activate()
+            Button(commandTitle(.onboarding)) {
+                runCommand(.onboarding)
             }
             .keyboardShortcut("p", modifiers: [.option, .command])
 
-            Button("Settings...") {
-                appRouter.openSettings()
+            Button(commandTitle(.settings)) {
+                runCommand(.settings)
             }
             .keyboardShortcut(",", modifiers: .command)
 
-            Button("Editor...") {
-                openWindow(id: "main")
-                NSApplication.shared.activate()
-            }
-            .keyboardShortcut("e", modifiers: .command)
-
-            Button("Command Palette...") {
-                openWindow(id: "command-palette")
-                NSApplication.shared.activate()
+            Button(commandTitle(.commandPalette)) {
+                runCommand(.commandPalette)
             }
             .keyboardShortcut("k", modifiers: .command)
 
-            Button(annotationOverlay.isPresented ? "Close Annotation Overlay" : "Open Annotation Overlay") {
-                annotationOverlay.toggle(preferences: preferences.snapshot, forceToolbarVisible: true)
+            Button(commandTitle(.toggleAnnotationOverlay)) {
+                runCommand(.toggleAnnotationOverlay)
             }
             .keyboardShortcut("a", modifiers: [.option, .command])
 
@@ -361,5 +436,80 @@ private struct MenuBarStatusView: View {
             .keyboardShortcut("q")
         }
         .padding(.vertical, 4)
+    }
+
+    private var primaryRecordingCommandID: LessonMeldAppCommandID {
+        quickRecorder.isRecording ? .recordingControls : .newRecording
+    }
+
+    private var commandContext: LessonMeldCommandContext {
+        LessonMeldCommandContext(
+            preferences: preferences.snapshot,
+            project: appRouter.projectCommandState,
+            recorder: LessonMeldRecorderCommandState(
+                isRecording: quickRecorder.isRecording,
+                isPaused: quickRecorder.isPaused,
+                isStopping: quickRecorder.isStopping
+            ),
+            isAnnotationPresented: annotationOverlay.isPresented
+        )
+    }
+
+    private func command(_ id: LessonMeldAppCommandID) -> LessonMeldAppCommand {
+        LessonMeldCommandRegistry.command(id, context: commandContext) { commandID in
+            perform(commandID)
+        }
+    }
+
+    private func commandTitle(_ id: LessonMeldAppCommandID) -> String {
+        command(id).title
+    }
+
+    private func runCommand(_ id: LessonMeldAppCommandID) {
+        command(id).action()
+    }
+
+    private func perform(_ id: LessonMeldAppCommandID) {
+        switch id {
+        case .showMainWindow:
+            openWindow(id: "main")
+            NSApplication.shared.activate()
+        case .newProject:
+            openWindow(id: "main")
+            appRouter.runProjectCommand(.newProject)
+            NSApplication.shared.activate()
+        case .openProject:
+            openWindow(id: "main")
+            appRouter.runProjectCommand(.openProject)
+            NSApplication.shared.activate()
+        case .importVideo:
+            openWindow(id: "main")
+            appRouter.runProjectCommand(.importVideo)
+            NSApplication.shared.activate()
+        case .revealProject:
+            appRouter.runProjectCommand(.revealProject)
+        case .saveEdits:
+            appRouter.runProjectCommand(.saveEdits)
+        case .exportVideo:
+            appRouter.runProjectCommand(.exportVideo)
+        case .newRecording, .recordingControls:
+            quickRecorder.presentControlBar(preferences: preferences)
+            NSApplication.shared.activate()
+        case .pauseRecording:
+            quickRecorder.togglePause()
+        case .stopRecording:
+            quickRecorder.stopRecording()
+        case .toggleAnnotationOverlay:
+            annotationOverlay.toggle(preferences: preferences.snapshot, forceToolbarVisible: true)
+            NSApplication.shared.activate()
+        case .settings:
+            appRouter.openSettings()
+        case .onboarding:
+            openWindow(id: "onboarding")
+            NSApplication.shared.activate()
+        case .commandPalette:
+            openWindow(id: "command-palette")
+            NSApplication.shared.activate()
+        }
     }
 }

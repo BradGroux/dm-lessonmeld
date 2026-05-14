@@ -39,7 +39,7 @@ When you press **Stop**, LessonMeld opens the saved lesson in the editor. The `.
 
 ## Edit an Existing Video
 
-Use **Edit Video** in the sidebar, **File > Create Project from Video...**, the command palette, or the menu bar extra to import an existing MP4 or MOV.
+Use **Import Video** in the sidebar, **File > Import Video**, the command palette, or the menu bar extra to import an existing MP4 or MOV.
 
 LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the timeline editor immediately. Imported videos use the full editing workspace: a large preview canvas, custom playback controls, trim in/out points, cut blocks, zoom blocks, overlays, markers, annotation controls, export controls, and a bottom timeline. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle.
 

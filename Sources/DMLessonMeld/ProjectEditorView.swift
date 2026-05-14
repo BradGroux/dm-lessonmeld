@@ -48,6 +48,7 @@ struct ProjectEditorView: View {
             ProjectOpenRouter.shared.registerConsumer { [weak model] projectURL in
                 model?.loadProject(projectURL)
             }
+            syncProjectCommandState()
             if preferences.shouldUseRecoveryLaunch, !didShowRecoveryNoticeThisLaunch {
                 showRecoveryNotice = true
                 didShowRecoveryNoticeThisLaunch = true
@@ -59,6 +60,7 @@ struct ProjectEditorView: View {
             quickRecorder.annotationOverlayHandler = fallbackAnnotationOverlayHandler
             ProjectOpenRouter.shared.unregisterConsumer()
             model.closeProject()
+            appRouter.updateProjectCommandState(.empty)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             quickRecorder.refreshPermissions(updateMessage: false)
@@ -66,6 +68,12 @@ struct ProjectEditorView: View {
         .onReceive(appRouter.$importVideoRequest.compactMap(\.self)) { _ in
             model.importVideoForEditing(preferences.snapshot)
         }
+        .onReceive(appRouter.$projectCommandRequest.compactMap(\.self)) { request in
+            handleProjectCommand(request.command)
+        }
+        .onReceive(model.$projectURL) { _ in syncProjectCommandState() }
+        .onReceive(model.$manifest) { _ in syncProjectCommandState() }
+        .onReceive(model.$isRendering) { _ in syncProjectCommandState() }
     }
 
     private func applyLaunchPreferences() {
@@ -87,6 +95,35 @@ struct ProjectEditorView: View {
                 preferences.didPresentOnboardingThisLaunch = true
                 openWindow(id: "onboarding")
             }
+        }
+    }
+
+    private func syncProjectCommandState() {
+        appRouter.updateProjectCommandState(
+            LessonMeldProjectCommandState(
+                hasProject: model.projectURL != nil,
+                hasScreenVideo: model.manifest?.media.screen != nil,
+                isRendering: model.isRendering
+            )
+        )
+    }
+
+    private func handleProjectCommand(_ command: LessonMeldProjectCommand) {
+        switch command {
+        case .newProject:
+            model.newProject(preferences.snapshot)
+        case .openProject:
+            model.openProject()
+        case .importVideo:
+            model.importVideoForEditing(preferences.snapshot)
+        case .revealProject:
+            model.revealProject()
+        case .saveEdits:
+            model.saveEditDecisions()
+            model.saveMarkers()
+            model.saveEditorSettings()
+        case .exportVideo:
+            model.exportRender(preferences.snapshot)
         }
     }
 
@@ -136,10 +173,12 @@ struct ProjectEditorView: View {
             .buttonStyle(.plain)
 
             Button {
-                model.importVideoForEditing(preferences.snapshot)
+                if model.manifest?.media.screen == nil {
+                    model.importVideoForEditing(preferences.snapshot)
+                }
             } label: {
                 LessonMeldSidebarItem(
-                    title: "Edit Video",
+                    title: model.manifest?.media.screen == nil ? "Import Video" : "Edit Video",
                     systemImage: "film",
                     isSelected: model.manifest?.media.screen != nil
                 )
@@ -3179,7 +3218,7 @@ struct ProjectEditorView: View {
                             Button {
                                 model.importVideoForEditing(preferences.snapshot)
                             } label: {
-                                Label("Import Video", systemImage: "film")
+                                Label("Import Video", systemImage: "film.badge.plus")
                             }
 
                             Button {
@@ -3504,19 +3543,19 @@ struct ProjectEditorView: View {
                 Button {
                     model.importVideoForEditing(preferences.snapshot)
                 } label: {
-                    Label("Edit Video", systemImage: "film")
+                    Label("Import Video", systemImage: "film.badge.plus")
                 }
 
                 Button {
                     model.newProject(preferences.snapshot)
                 } label: {
-                    Label("New Project...", systemImage: "doc.badge.plus")
+                    Label("New Project", systemImage: "doc.badge.plus")
                 }
 
                 Button {
                     model.openProject()
                 } label: {
-                    Label("Open Lesson", systemImage: "folder")
+                    Label("Open Project", systemImage: "folder")
                 }
 
                 if quickRecorder.isRecording {
@@ -3552,7 +3591,7 @@ struct ProjectEditorView: View {
                         .truncationMode(.middle)
                 }
             } else {
-                Text("Edit Video imports an MP4 or MOV into a local lesson bundle and opens the editor for preview, cuts, zooms, trims, annotations, and export.")
+                Text("Import Video creates a local lesson project from an MP4 or MOV and opens the editor for preview, cuts, zooms, trims, annotations, and export.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -3569,7 +3608,7 @@ struct ProjectEditorView: View {
                 workflowRow("Record", "Screen, webcam, mic, and optional system audio", systemImage: "record.circle") {
                     quickRecorder.presentControlBar(preferences: preferences)
                 }
-                workflowRow("Edit Video", "Import or open media, then cut, trim, zoom, annotate, and export", systemImage: "film") {
+                workflowRow("Edit Video", "Open a recorded or imported source video, then cut, trim, zoom, annotate, and export", systemImage: "film") {
                     model.importVideoForEditing(preferences.snapshot)
                 }
                 workflowRow("Review", "Preview playback and check the lesson before export", systemImage: "film.stack") {
@@ -3680,19 +3719,19 @@ struct ProjectEditorView: View {
                 Button {
                     model.importVideoForEditing(preferences.snapshot)
                 } label: {
-                    Label("Edit Video...", systemImage: "film")
+                    Label("Import Video", systemImage: "film.badge.plus")
                 }
 
                 Button {
                     model.newProject(preferences.snapshot)
                 } label: {
-                    Label("New Project...", systemImage: "doc.badge.plus")
+                    Label("New Project", systemImage: "doc.badge.plus")
                 }
 
                 Button {
                     model.openProject()
                 } label: {
-                    Label("Open Lesson...", systemImage: "folder")
+                    Label("Open Project", systemImage: "folder")
                 }
             }
             Text("Importing a video creates a local lesson bundle with the media ready for preview, cuts, zooms, trims, annotations, and export.")
