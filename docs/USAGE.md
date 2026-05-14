@@ -59,6 +59,8 @@ Open a `.dmlm` lesson bundle from the sidebar or Finder. The project editor lets
 
 Use **Assets** in the editor inspector, or **Project Assets** on the project dashboard, to inspect the editable `.dmlm` lesson project separately from source videos, audio sidecars, captions, overlays, annotations, edit decisions, and export destinations. Asset rows show status, size when available, validation issues, and Finder actions for opening or revealing the underlying file.
 
+LessonMeld tracks unsaved metadata, marker, timeline, editor setting, overlay, and caption edits at the project level. The dashboard and video editor show **Save Changes** and **Revert** when local edits differ from the saved bundle. Opening another project, importing a video, or closing the window prompts before unsaved editor work is discarded.
+
 Technical bundle details are kept in advanced sections so normal review work stays readable.
 
 ## Style the Video Canvas

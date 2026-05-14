@@ -37,16 +37,20 @@ struct ProjectEditorView: View {
         .onAppear {
             model.apply(preferences.snapshot)
             quickRecorder.refreshPermissions(updateMessage: false)
-            quickRecorder.openProjectHandler = { [weak model] projectURL in
-                model?.loadProject(projectURL)
+            quickRecorder.openProjectHandler = { projectURL in
+                confirmProjectTransition("open the recorded lesson") {
+                    model.loadProject(projectURL)
+                }
             }
             quickRecorder.annotationOverlayHandler = { [annotationOverlay, weak model] preferences in
                 let storeURL = model?.projectURL == nil ? nil : model?.prepareAnnotationSidecarForOverlay()
                 annotationOverlay.open(preferences: preferences, annotationStoreURL: storeURL, forceToolbarVisible: true)
             }
             LocalAppControlBridge.shared.configure(quickRecorder: quickRecorder, preferences: preferences)
-            ProjectOpenRouter.shared.registerConsumer { [weak model] projectURL in
-                model?.loadProject(projectURL)
+            ProjectOpenRouter.shared.registerConsumer { projectURL in
+                confirmProjectTransition("open another project") {
+                    model.loadProject(projectURL)
+                }
             }
             syncProjectCommandState()
             if preferences.shouldUseRecoveryLaunch, !didShowRecoveryNoticeThisLaunch {
@@ -66,7 +70,9 @@ struct ProjectEditorView: View {
             quickRecorder.refreshPermissions(updateMessage: false)
         }
         .onReceive(appRouter.$importVideoRequest.compactMap(\.self)) { _ in
-            model.importVideoForEditing(preferences.snapshot)
+            confirmProjectTransition("import a video") {
+                model.importVideoForEditing(preferences.snapshot)
+            }
         }
         .onReceive(appRouter.$projectCommandRequest.compactMap(\.self)) { request in
             handleProjectCommand(request.command)
@@ -74,6 +80,14 @@ struct ProjectEditorView: View {
         .onReceive(model.$projectURL) { _ in syncProjectCommandState() }
         .onReceive(model.$manifest) { _ in syncProjectCommandState() }
         .onReceive(model.$isRendering) { _ in syncProjectCommandState() }
+        .onReceive(model.$dirtyAreas) { _ in syncProjectCommandState() }
+        .onChange(of: model.metadataDirtyFingerprint) { _, _ in model.refreshDirtyState(.metadata) }
+        .onChange(of: model.markerRows) { _, _ in model.refreshDirtyState(.markers) }
+        .onChange(of: model.editDecisionDirtyFingerprint) { _, _ in model.refreshDirtyState(.editDecisions) }
+        .onChange(of: model.editorSettingsDirtyFingerprint) { _, _ in model.refreshDirtyState(.editorSettings) }
+        .onChange(of: model.overlayRows) { _, _ in model.refreshDirtyState(.overlays) }
+        .onChange(of: model.captionDirtyFingerprint) { _, _ in model.refreshDirtyState(.captions) }
+        .confirmsWindowClose(confirmWindowClose)
     }
 
     private func applyLaunchPreferences() {
@@ -103,7 +117,8 @@ struct ProjectEditorView: View {
             LessonMeldProjectCommandState(
                 hasProject: model.projectURL != nil,
                 hasScreenVideo: model.manifest?.media.screen != nil,
-                isRendering: model.isRendering
+                isRendering: model.isRendering,
+                hasUnsavedChanges: model.hasUnsavedChanges
             )
         )
     }
@@ -111,20 +126,81 @@ struct ProjectEditorView: View {
     private func handleProjectCommand(_ command: LessonMeldProjectCommand) {
         switch command {
         case .newProject:
-            model.newProject(preferences.snapshot)
+            confirmProjectTransition("create a new project") {
+                model.newProject(preferences.snapshot)
+            }
         case .openProject:
-            model.openProject()
+            confirmProjectTransition("open another project") {
+                model.openProject()
+            }
         case .importVideo:
-            model.importVideoForEditing(preferences.snapshot)
+            confirmProjectTransition("import a video") {
+                model.importVideoForEditing(preferences.snapshot)
+            }
         case .revealProject:
             model.revealProject()
         case .saveEdits:
-            model.saveEditDecisions()
-            model.saveMarkers()
-            model.saveEditorSettings()
+            model.saveAllDirtyChanges()
         case .exportVideo:
             model.exportRender(preferences.snapshot)
         }
+    }
+
+    private func confirmProjectTransition(_ actionName: String, proceed: () -> Void) {
+        guard model.hasUnsavedChanges else {
+            proceed()
+            return
+        }
+
+        switch unsavedChangesAlert(actionName: actionName).runModal() {
+        case .alertFirstButtonReturn:
+            model.saveAllDirtyChanges()
+            if !model.hasUnsavedChanges {
+                proceed()
+            }
+        case .alertSecondButtonReturn:
+            proceed()
+        default:
+            return
+        }
+    }
+
+    private func confirmWindowClose() -> Bool {
+        guard model.hasUnsavedChanges else { return true }
+
+        switch unsavedChangesAlert(actionName: "close this project").runModal() {
+        case .alertFirstButtonReturn:
+            model.saveAllDirtyChanges()
+            return !model.hasUnsavedChanges
+        case .alertSecondButtonReturn:
+            model.clearAllDirtyChanges()
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func unsavedChangesAlert(actionName: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Save changes before you \(actionName)?"
+        alert.informativeText = "Unsaved areas: \(model.dirtySummary)."
+        alert.addButton(withTitle: "Save and Continue")
+        alert.addButton(withTitle: "Discard Changes")
+        alert.addButton(withTitle: "Cancel")
+        return alert
+    }
+
+    private func confirmRevertUnsavedChanges() {
+        guard model.hasUnsavedChanges else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Discard unsaved project changes?"
+        alert.informativeText = "This reloads the current lesson bundle from disk. Unsaved areas: \(model.dirtySummary)."
+        alert.addButton(withTitle: "Discard Changes")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        model.discardUnsavedChanges()
     }
 
     @ViewBuilder private var contentPane: some View {
@@ -174,7 +250,9 @@ struct ProjectEditorView: View {
 
             Button {
                 if model.manifest?.media.screen == nil {
-                    model.importVideoForEditing(preferences.snapshot)
+                    confirmProjectTransition("import a video") {
+                        model.importVideoForEditing(preferences.snapshot)
+                    }
                 }
             } label: {
                 LessonMeldSidebarItem(
@@ -205,14 +283,18 @@ struct ProjectEditorView: View {
             sidebarSection("Project")
 
             Button {
-                model.newProject(preferences.snapshot)
+                confirmProjectTransition("create a new project") {
+                    model.newProject(preferences.snapshot)
+                }
             } label: {
                 LessonMeldSidebarItem(title: "New Project", systemImage: "doc.badge.plus")
             }
             .buttonStyle(.plain)
 
             Button {
-                model.openProject()
+                confirmProjectTransition("open another project") {
+                    model.openProject()
+                }
             } label: {
                 LessonMeldSidebarItem(title: "Open Project", systemImage: "folder")
             }
@@ -349,6 +431,10 @@ struct ProjectEditorView: View {
                     Label("Edit Video", systemImage: "film")
                         .font(.headline)
                     statusPill(reviewStatus(manifest), systemImage: "timeline.selection", tint: hasBlockingIssues(summary) ? .red : .blue)
+                    if model.hasUnsavedChanges {
+                        statusPill("Unsaved", systemImage: "circle.dotted", tint: .orange)
+                            .help(model.dirtySummary)
+                    }
                 }
                 Text(manifest.metadata.lessonTitle)
                     .font(.title2.weight(.semibold))
@@ -367,17 +453,26 @@ struct ProjectEditorView: View {
             Spacer()
 
             Button {
-                model.importVideoForEditing(preferences.snapshot)
+                confirmProjectTransition("import a video") {
+                    model.importVideoForEditing(preferences.snapshot)
+                }
             } label: {
                 Label("Import", systemImage: "film.badge.plus")
             }
 
             Button {
-                model.saveEditDecisions()
+                model.saveAllDirtyChanges()
             } label: {
-                Label("Save Edits", systemImage: "checkmark.circle")
+                Label(model.hasUnsavedChanges ? "Save Changes" : "Saved", systemImage: "checkmark.circle")
             }
-            .disabled(model.projectURL == nil)
+            .disabled(model.projectURL == nil || !model.hasUnsavedChanges)
+
+            Button {
+                confirmRevertUnsavedChanges()
+            } label: {
+                Label("Revert", systemImage: "arrow.counterclockwise")
+            }
+            .disabled(model.projectURL == nil || !model.hasUnsavedChanges)
 
             Button {
                 model.exportRender(preferences.snapshot)
@@ -3143,6 +3238,10 @@ struct ProjectEditorView: View {
                 Spacer()
 
                 statusPill(status.title, systemImage: status.systemImage, tint: status.tint)
+                if model.hasUnsavedChanges {
+                    statusPill("Unsaved", systemImage: "circle.dotted", tint: .orange)
+                        .help(model.dirtySummary)
+                }
             }
 
             HStack(spacing: 10) {
@@ -3156,6 +3255,20 @@ struct ProjectEditorView: View {
                 }
 
                 Spacer(minLength: 0)
+
+                Button {
+                    model.saveAllDirtyChanges()
+                } label: {
+                    Label(model.hasUnsavedChanges ? "Save Changes" : "Saved", systemImage: "checkmark.circle")
+                }
+                .disabled(model.projectURL == nil || !model.hasUnsavedChanges)
+
+                Button {
+                    confirmRevertUnsavedChanges()
+                } label: {
+                    Label("Revert", systemImage: "arrow.counterclockwise")
+                }
+                .disabled(model.projectURL == nil || !model.hasUnsavedChanges)
 
                 Button {
                     model.revealProject()
@@ -3216,7 +3329,9 @@ struct ProjectEditorView: View {
                             .buttonStyle(.borderedProminent)
 
                             Button {
-                                model.importVideoForEditing(preferences.snapshot)
+                                confirmProjectTransition("import a video") {
+                                    model.importVideoForEditing(preferences.snapshot)
+                                }
                             } label: {
                                 Label("Import Video", systemImage: "film.badge.plus")
                             }
@@ -3541,19 +3656,25 @@ struct ProjectEditorView: View {
                 .buttonStyle(.borderedProminent)
 
                 Button {
-                    model.importVideoForEditing(preferences.snapshot)
+                    confirmProjectTransition("import a video") {
+                        model.importVideoForEditing(preferences.snapshot)
+                    }
                 } label: {
                     Label("Import Video", systemImage: "film.badge.plus")
                 }
 
                 Button {
-                    model.newProject(preferences.snapshot)
+                    confirmProjectTransition("create a new project") {
+                        model.newProject(preferences.snapshot)
+                    }
                 } label: {
                     Label("New Project", systemImage: "doc.badge.plus")
                 }
 
                 Button {
-                    model.openProject()
+                    confirmProjectTransition("open another project") {
+                        model.openProject()
+                    }
                 } label: {
                     Label("Open Project", systemImage: "folder")
                 }
@@ -3580,7 +3701,9 @@ struct ProjectEditorView: View {
             } else if let projectPath = quickRecorder.lastProjectPath {
                 HStack(spacing: 10) {
                     Button {
-                        model.loadProject(URL(fileURLWithPath: projectPath))
+                        confirmProjectTransition("open the last recorded lesson") {
+                            model.loadProject(URL(fileURLWithPath: projectPath))
+                        }
                     } label: {
                         Label("Review Last Lesson", systemImage: "film.stack")
                     }
@@ -3609,10 +3732,14 @@ struct ProjectEditorView: View {
                     quickRecorder.presentControlBar(preferences: preferences)
                 }
                 workflowRow("Edit Video", "Open a recorded or imported source video, then cut, trim, zoom, annotate, and export", systemImage: "film") {
-                    model.importVideoForEditing(preferences.snapshot)
+                    confirmProjectTransition("import a video") {
+                        model.importVideoForEditing(preferences.snapshot)
+                    }
                 }
                 workflowRow("Review", "Preview playback and check the lesson before export", systemImage: "film.stack") {
-                    model.openProject()
+                    confirmProjectTransition("open another project") {
+                        model.openProject()
+                    }
                 }
                 workflowRow("Render", "Export video or package for LearnHouse", systemImage: "shippingbox") {
                     appRouter.openSettings(.export)
@@ -3717,19 +3844,25 @@ struct ProjectEditorView: View {
         EditorPanel(title: "Create or Open a Lesson Project", subtitle: "The editor works directly against local lesson bundles.") {
             HStack {
                 Button {
-                    model.importVideoForEditing(preferences.snapshot)
+                    confirmProjectTransition("import a video") {
+                        model.importVideoForEditing(preferences.snapshot)
+                    }
                 } label: {
                     Label("Import Video", systemImage: "film.badge.plus")
                 }
 
                 Button {
-                    model.newProject(preferences.snapshot)
+                    confirmProjectTransition("create a new project") {
+                        model.newProject(preferences.snapshot)
+                    }
                 } label: {
                     Label("New Project", systemImage: "doc.badge.plus")
                 }
 
                 Button {
-                    model.openProject()
+                    confirmProjectTransition("open another project") {
+                        model.openProject()
+                    }
                 } label: {
                     Label("Open Project", systemImage: "folder")
                 }
@@ -3833,7 +3966,9 @@ struct ProjectEditorView: View {
                 Divider()
                 HStack(spacing: 10) {
                     Button {
-                        model.loadProject(URL(fileURLWithPath: projectPath))
+                        confirmProjectTransition("open the last recorded lesson") {
+                            model.loadProject(URL(fileURLWithPath: projectPath))
+                        }
                     } label: {
                         Label("Review Last Lesson", systemImage: "film.stack")
                     }
@@ -5075,6 +5210,19 @@ private struct ProjectAssetItem: Identifiable {
     let issues: [ProjectValidationIssue]
 }
 
+private enum ProjectDirtyArea: String, CaseIterable, Hashable {
+    case metadata = "Metadata"
+    case markers = "Markers"
+    case editDecisions = "Timeline edits"
+    case editorSettings = "Editor settings"
+    case overlays = "Overlays"
+    case captions = "Captions"
+
+    var sortOrder: Int {
+        Self.allCases.firstIndex(of: self) ?? 0
+    }
+}
+
 private enum TimelineSelection: Equatable {
     case cut(String)
     case speed(String)
@@ -5477,10 +5625,210 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var annotationDraftEnd = ""
     @Published var message = ""
     @Published var messageIsError = false
+    @Published private(set) var dirtyAreas: Set<ProjectDirtyArea> = []
     private var timeObserver: Any?
     private var lastEditDecisionList: EditDecisionList?
     private var renderTask: Task<Void, Never>?
+    private var isLoadingProject = false
+    private var savedDirtyFingerprints: [ProjectDirtyArea: String] = [:]
     private static let minimumTimelineRangeSeconds = 0.1
+
+    var hasUnsavedChanges: Bool {
+        !dirtyAreas.isEmpty
+    }
+
+    var dirtySummary: String {
+        let labels = dirtyAreas.sorted { $0.sortOrder < $1.sortOrder }.map(\.rawValue)
+        return labels.isEmpty ? "None" : labels.joined(separator: ", ")
+    }
+
+    var metadataDirtyFingerprint: String {
+        [
+            metadataLessonTitle,
+            metadataCourseTitle,
+            metadataModuleTitle,
+            metadataInstructor,
+            metadataSummary,
+            metadataTags
+        ].joined(separator: "||")
+    }
+
+    var editDecisionDirtyFingerprint: String {
+        [
+            trimStartSeconds,
+            trimEndSeconds,
+            sourceDurationSeconds,
+            cutRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.reason)|\($0.isEnabled)" }.joined(separator: "~~"),
+            speedRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.playbackRate)" }.joined(separator: "~~"),
+            zoomRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.scale)|\($0.centerX)|\($0.centerY)|\($0.size)|\($0.focusMode.rawValue)|\($0.easing.rawValue)|\($0.isEnabled)" }.joined(separator: "~~"),
+            cameraRegionRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.preset.rawValue)|\($0.layoutAnimation.rawValue)|\($0.transitionSeconds)|\($0.isEnabled)" }.joined(separator: "~~"),
+            cameraReactionRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.text)|\($0.isEnabled)" }.joined(separator: "~~"),
+            audioVolumeRows.map { "\($0.id)|\($0.track.rawValue)|\($0.startSeconds)|\($0.endSeconds)|\($0.gain)|\($0.fadeInSeconds)|\($0.fadeOutSeconds)|\($0.isEnabled)" }.joined(separator: "~~"),
+            cursorHiddenRangeRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)" }.joined(separator: "~~")
+        ].joined(separator: "||")
+    }
+
+    var editorSettingsDirtyFingerprint: String {
+        [
+            canvasAspectRatio.rawValue,
+            canvasCustomWidth,
+            canvasCustomHeight,
+            canvasBackgroundStyle.rawValue,
+            "\(canvasPrimaryColor)",
+            "\(canvasSecondaryColor)",
+            canvasBackgroundImagePath,
+            "\(canvasPaddingRatio)",
+            "\(canvasInsetRatio)",
+            "\(canvasCornerRadiusRatio)",
+            "\(canvasShadowEnabled)",
+            "\(canvasShadowOpacity)",
+            "\(canvasCropEnabled)",
+            canvasCropX,
+            canvasCropY,
+            canvasCropWidth,
+            canvasCropHeight,
+            cursorPointerStyle.rawValue,
+            "\(cursorPointerVisible)",
+            "\(cursorSmoothMovement)",
+            "\(cursorPointerScale)",
+            "\(cursorPointerFillColor)",
+            "\(cursorPointerStrokeColor)",
+            "\(cursorClickEffectsVisible)",
+            "\(cursorClickColor)",
+            "\(cursorClickScale)",
+            "\(cursorClickOpacity)",
+            "\(cursorClickDuration)",
+            "\(cursorClickSoundEnabled)",
+            "\(cursorClickSoundVolume)",
+            "\(cursorKeyboardVisible)",
+            "\(cursorKeyboardOpacity)",
+            cameraCorner.rawValue,
+            cameraWidthRatio,
+            cameraMarginRatio,
+            cameraAspectRatio.rawValue,
+            cameraFrameShape.rawValue,
+            cameraCornerRadius,
+            "\(cameraMirrored)",
+            "\(cameraBorderEnabled)",
+            "\(cameraShadowEnabled)",
+            screenAudioGain,
+            "\(screenAudioMuted)",
+            "\(screenAudioSoloed)",
+            microphoneAudioGain,
+            "\(microphoneAudioMuted)",
+            "\(microphoneAudioSoloed)",
+            systemAudioGain,
+            "\(systemAudioMuted)",
+            "\(systemAudioSoloed)",
+            backgroundMusicPath,
+            backgroundMusicStart,
+            backgroundMusicSourceStart,
+            backgroundMusicDuration,
+            backgroundMusicGain,
+            "\(backgroundMusicLoop)",
+            "\(backgroundMusicDuckUnderVoice)",
+            backgroundMusicDuckedGain,
+            backgroundMusicFadeIn,
+            backgroundMusicFadeOut,
+            renderQuality.rawValue,
+            renderFileType.rawValue,
+            renderResolution.rawValue,
+            renderFrameRate.rawValue,
+            renderCodec.rawValue,
+            "\(renderHardwareAccelerationEnabled)",
+            "\(renderMaxConcurrentExports)",
+            "\(renderAlphaChannelEnabled)",
+            "\(renderAnimatedGIFEnabled)",
+            "\(renderProResEnabled)"
+        ].joined(separator: "||")
+    }
+
+    var captionDirtyFingerprint: String {
+        [
+            captionRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.text)" }.joined(separator: "~~"),
+            "\(captionBurnInEnabled)",
+            captionPlacement.rawValue,
+            captionFontName,
+            captionFontSize,
+            "\(captionTextColor)",
+            "\(captionBackgroundColor)",
+            "\(captionMaxLineCount)",
+            captionSafeMargin
+        ].joined(separator: "||")
+    }
+
+    func refreshDirtyState(_ area: ProjectDirtyArea) {
+        guard projectURL != nil, !isLoadingProject else { return }
+        let current = dirtyFingerprint(for: area)
+        if savedDirtyFingerprints[area] == current {
+            dirtyAreas.remove(area)
+        } else {
+            dirtyAreas.insert(area)
+        }
+    }
+
+    func clearDirty(_ area: ProjectDirtyArea) {
+        updateSavedFingerprint(for: area)
+        dirtyAreas.remove(area)
+    }
+
+    func clearAllDirtyChanges() {
+        ProjectDirtyArea.allCases.forEach { updateSavedFingerprint(for: $0) }
+        dirtyAreas.removeAll()
+    }
+
+    func discardUnsavedChanges() {
+        guard let projectURL else { return }
+        loadProject(projectURL)
+        setMessage("Reverted unsaved project changes.")
+    }
+
+    func saveAllDirtyChanges() {
+        let areas = dirtyAreas
+        if areas.contains(.metadata) {
+            saveMetadata()
+        }
+        if areas.contains(.markers) {
+            saveMarkers()
+        }
+        if areas.contains(.editDecisions) {
+            saveEditDecisions()
+        }
+        if areas.contains(.editorSettings) {
+            saveEditorSettings()
+        }
+        if areas.contains(.overlays) {
+            saveOverlays()
+        }
+        if areas.contains(.captions) {
+            saveCaptions()
+        }
+    }
+
+    private func dirtyFingerprint(for area: ProjectDirtyArea) -> String {
+        switch area {
+        case .metadata:
+            return metadataDirtyFingerprint
+        case .markers:
+            return markerRows
+                .map { "\($0.id)|\($0.kind.rawValue)|\($0.timeSeconds)|\($0.title)|\($0.notes)" }
+                .joined(separator: "~~")
+        case .editDecisions:
+            return editDecisionDirtyFingerprint
+        case .editorSettings:
+            return editorSettingsDirtyFingerprint
+        case .overlays:
+            return overlayRows
+                .map { "\($0.id)|\($0.kind.rawValue)|\($0.startSeconds)|\($0.endSeconds)|\($0.text)|\($0.x)|\($0.y)|\($0.width)|\($0.height)|\($0.opacity)|\($0.fontSize)|\($0.fadeInSeconds)|\($0.fadeOutSeconds)|\($0.animationPreset.rawValue)|\($0.cornerRadius)|\($0.highlightMode.rawValue)|\($0.highlightShape.rawValue)|\($0.blurRadius)|\($0.featherRadius)|\($0.textColor)|\($0.fillColor)|\($0.strokeColor)|\($0.imagePath)|\($0.zIndex)|\($0.isEnabled)" }
+                .joined(separator: "~~")
+        case .captions:
+            return captionDirtyFingerprint
+        }
+    }
+
+    private func updateSavedFingerprint(for area: ProjectDirtyArea) {
+        savedDirtyFingerprints[area] = dirtyFingerprint(for: area)
+    }
 
     func apply(_ preferences: LessonMeldPreferences) {
         renderQuality = RenderQuality(rawValue: preferences.export.defaultRenderQuality.rawValue) ?? .highest
@@ -5507,6 +5855,7 @@ private final class ProjectEditorModel: ObservableObject {
         currentTimeSeconds = 0
         previewDurationSeconds = 0
         isPlaying = false
+        clearAllDirtyChanges()
         message = ""
         messageIsError = false
     }
@@ -6465,6 +6814,7 @@ private final class ProjectEditorModel: ObservableObject {
             summary = try ProjectBundle.inspect(at: projectURL)
             loadMarkerRows(updated.markers)
             loadEditDecisions(projectURL: projectURL, manifest: updated)
+            clearDirty(.markers)
             setMessage("Saved lesson markers.")
         } catch {
             setError(error.localizedDescription)
@@ -6483,6 +6833,7 @@ private final class ProjectEditorModel: ObservableObject {
             }
             try EditDecisionListFile.save(editDecisionList, toProject: projectURL)
             lastEditDecisionList = editDecisionList
+            clearDirty(.editDecisions)
             setMessage("Saved \(EditDecisionListFile.defaultFileName).")
         } catch {
             setError(error.localizedDescription)
@@ -6500,6 +6851,7 @@ private final class ProjectEditorModel: ObservableObject {
             manifest = updated
             summary = try ProjectBundle.inspect(at: projectURL)
             renderInspection = nil
+            clearDirty(.overlays)
             setMessage("Saved \(OverlayStoreFile.defaultFileName).")
         } catch {
             setError(error.localizedDescription)
@@ -6509,6 +6861,7 @@ private final class ProjectEditorModel: ObservableObject {
     func reloadOverlays() {
         guard let projectURL, let manifest else { return }
         loadOverlays(projectURL: projectURL, manifest: manifest)
+        clearDirty(.overlays)
         setMessage("Reloaded overlays.")
     }
 
@@ -6523,6 +6876,7 @@ private final class ProjectEditorModel: ObservableObject {
             manifest = updated
             summary = try ProjectBundle.inspect(at: projectURL)
             renderInspection = nil
+            clearDirty(.captions)
             setMessage("Saved captions.")
         } catch {
             setError(error.localizedDescription)
@@ -6628,6 +6982,7 @@ private final class ProjectEditorModel: ObservableObject {
     func reloadEditDecisions() {
         guard let projectURL, let manifest else { return }
         loadEditDecisions(projectURL: projectURL, manifest: manifest)
+        clearDirty(.editDecisions)
         setMessage("Reloaded edit decisions.")
     }
 
@@ -6639,6 +6994,7 @@ private final class ProjectEditorModel: ObservableObject {
             let settings = try currentEditorSettings()
             try EditorSettingsFile.save(settings, toProject: projectURL)
             renderInspection = nil
+            clearDirty(.editorSettings)
             setMessage("Saved \(EditorSettingsFile.defaultFileName).")
         } catch {
             setError(error.localizedDescription)
@@ -6790,6 +7146,7 @@ private final class ProjectEditorModel: ObservableObject {
 
             manifest = updated
             summary = try ProjectBundle.inspect(at: projectURL)
+            clearDirty(.metadata)
             setMessage("Saved lesson metadata.")
         } catch {
             setError(error.localizedDescription)
@@ -7299,6 +7656,11 @@ private final class ProjectEditorModel: ObservableObject {
     }
 
     private func applyLoadedProject(url: URL, manifest loadedManifest: ProjectManifest, messagePrefix: String) throws {
+        isLoadingProject = true
+        defer {
+            isLoadingProject = false
+            clearAllDirtyChanges()
+        }
         projectURL = url
         manifest = loadedManifest
         summary = try ProjectBundle.inspect(at: url)

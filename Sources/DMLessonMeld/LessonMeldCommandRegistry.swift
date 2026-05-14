@@ -36,6 +36,7 @@ struct LessonMeldProjectCommandState: Equatable {
     var hasProject = false
     var hasScreenVideo = false
     var isRendering = false
+    var hasUnsavedChanges = false
 
     static let empty = LessonMeldProjectCommandState()
 }
@@ -206,7 +207,10 @@ enum LessonMeldCommandRegistry {
         case .revealProject:
             return context.project.hasProject ? (true, nil) : (false, "Open or create a lesson project first.")
         case .saveEdits:
-            return context.project.hasProject ? (true, nil) : (false, "Open or create a lesson project before saving edits.")
+            if !context.project.hasProject {
+                return (false, "Open or create a lesson project before saving edits.")
+            }
+            return context.project.hasUnsavedChanges ? (true, nil) : (false, "No unsaved edits.")
         case .exportVideo:
             if context.project.isRendering {
                 return (false, "A render is already running.")
