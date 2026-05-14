@@ -31,7 +31,7 @@
 - Add a post-recording completion widget with Edit, Save Video, Copy Path, Open Project, Package LearnHouse, and caption/transcript export actions.
 - Extend cut-list export into the full render pipeline with webcam PiP/audio/cursor effects/zoom regions/annotations/captions, then add zoom/pan keyframes, webcam PiP controls, canvas styling, and richer render progress.
 - Expand annotation overlay polish: horizontal/vertical toolbar, pen, highlighter, eraser, line, arrow, box, ellipse, text, spotlight, whiteboard, blackboard, swatches, line weights, text sizes, undo/redo, clear, and frame capture.
-- Expand presets/templates to cover capture sources, webcam layout, annotations, zoom behavior, captions, canvas/background, export, and LearnHouse packaging.
+- Expand presets/templates to cover capture sources, webcam layout, annotations, zoom behavior, captions, canvas/background, export, and LearnHouse packaging. Project/app preset files are wired; additional bundled preset templates remain.
 - Add local transcription model handling.
 - Add Homebrew distribution and signed/notarized DMG. Homebrew cask mirror and release automation are in place; Developer ID signing/notarization and DMG packaging remain pending Apple developer account setup.
 - Expand CLI recording control and JSON automation output.

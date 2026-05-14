@@ -169,6 +169,31 @@ Recorded projects with cursor metadata can be adjusted from the **Cursor** inspe
 
 Imported videos without cursor metadata show the cursor controls as unavailable because there is no pointer, click, or keyboard sidecar to render.
 
+## Reuse Lesson Presets
+
+Use the **Presets** inspector tab in the video editor to save or apply a local `.dmlpreset` file. Presets are separate from `.dmlm` lesson bundles: a `.dmlm` is the editable project with media, while a `.dmlpreset` is a reusable style/settings file.
+
+Project presets include:
+
+- Canvas, crop, background, padding, corner, shadow, cursor, click, keyboard, camera, audio, caption, and other editor settings from `editor-settings.json`
+- Capture defaults from current app settings
+- Annotation defaults from current app settings
+- Export defaults from current app settings
+- Project export preset IDs
+
+Applying a preset writes project editor settings and may update capture settings or export preset IDs. It does not overwrite lesson metadata, media references, transcripts, captions, markers, or timeline tracks.
+
+The Settings window also has a **Presets** section for importing or exporting app-level capture, annotation, and export defaults without opening a project.
+
+CLI equivalents:
+
+```sh
+swift run dmlesson presets create-from-project /tmp/Intro.dmlm --output /tmp/workshop.dmlpreset --name "Workshop"
+swift run dmlesson presets inspect /tmp/workshop.dmlpreset
+swift run dmlesson presets preview /tmp/Other.dmlm --preset /tmp/workshop.dmlpreset
+swift run dmlesson presets apply /tmp/Other.dmlm --preset /tmp/workshop.dmlpreset
+```
+
 ## Annotate
 
 Open annotation tools from the sidebar, project editor, recorder bar, or command palette.

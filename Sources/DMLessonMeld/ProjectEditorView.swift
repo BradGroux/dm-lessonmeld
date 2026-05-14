@@ -475,6 +475,8 @@ struct ProjectEditorView: View {
                         editorAudioInspector(manifest: manifest)
                     case .captions:
                         editorCaptionsInspector(manifest: manifest)
+                    case .presets:
+                        editorPresetsInspector(manifest: manifest)
                     case .cursor:
                         editorCursorInspector(manifest: manifest)
                     case .export:
@@ -1400,6 +1402,63 @@ struct ProjectEditorView: View {
                 model.saveEditorSettings()
             }
             .disabled(manifest.media.cursorMetadata == nil)
+        }
+    }
+
+    private func editorPresetsInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            inspectorSectionTitle("Project Preset")
+            TextField("Preset name", text: $model.presetName)
+                .textFieldStyle(.roundedBorder)
+            TextField("Summary", text: $model.presetSummary, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...4)
+
+            HStack {
+                Button {
+                    model.exportProjectPreset(preferences.snapshot)
+                } label: {
+                    Label("Save Preset...", systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    model.previewProjectPreset()
+                } label: {
+                    Label("Preview Apply...", systemImage: "eye")
+                }
+                Button {
+                    model.applyProjectPreset()
+                } label: {
+                    Label("Apply Preset...", systemImage: "checkmark.circle")
+                }
+            }
+
+            if !model.presetPreviewSummary.isEmpty {
+                Text(model.presetPreviewSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+            }
+
+            Divider()
+
+            inspectorSectionTitle("Included")
+            valueLine("Canvas, cursor, effects", "Editor settings")
+            valueLine("Camera, audio, captions", "Editor settings")
+            valueLine("Capture defaults", "From app settings")
+            valueLine("Annotation defaults", "From app settings")
+            valueLine("Export defaults", "From app settings")
+            valueLine("Export preset IDs", manifest.exportPresets.isEmpty ? "None" : manifest.exportPresets.joined(separator: ", "))
+
+            Divider()
+
+            inspectorSectionTitle("Preserved On Apply")
+            valueLine("Lesson metadata", "Unchanged")
+            valueLine("Media files", "Unchanged")
+            valueLine("Transcripts and captions", "Unchanged")
+            valueLine("Markers and tracks", "Unchanged")
         }
     }
 
@@ -4323,6 +4382,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     case camera
     case audio
     case captions
+    case presets
     case cursor
     case export
 
@@ -4338,6 +4398,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
         case .camera: "Camera"
         case .audio: "Audio"
         case .captions: "Captions"
+        case .presets: "Presets"
         case .cursor: "Cursor"
         case .export: "Export"
         }
@@ -4735,6 +4796,9 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var captionBackgroundColor = RGBAColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.72)
     @Published var captionMaxLineCount = 3
     @Published var captionSafeMargin = "0.07"
+    @Published var presetName = "Lesson preset"
+    @Published var presetSummary = ""
+    @Published var presetPreviewSummary = ""
     @Published var annotationItemCount = 0
     @Published var annotationSidecarStatus = "Not initialized"
     @Published var annotationDraftText = "Annotation note"
@@ -5892,6 +5956,77 @@ private final class ProjectEditorModel: ObservableObject {
             try EditorSettingsFile.save(settings, toProject: projectURL)
             renderInspection = nil
             setMessage("Saved \(EditorSettingsFile.defaultFileName).")
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    func exportProjectPreset(_ preferences: LessonMeldPreferences) {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            let name = presetName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else {
+                throw ProjectEditorError.invalidMetadata("Preset name is required.")
+            }
+            let settings = try currentEditorSettings()
+            let manifest = try ProjectBundle.loadManifest(at: projectURL)
+            let preset = LessonPreset(
+                name: name,
+                summary: presetSummary,
+                editorSettings: settings,
+                capturePreferences: preferences.capture,
+                annotationPreferences: preferences.annotation,
+                exportPreferences: preferences.export,
+                exportPresetIDs: manifest.exportPresets
+            )
+
+            let panel = NSSavePanel()
+            panel.title = "Save Lesson Preset"
+            panel.nameFieldStringValue = Self.fileSlug(name).isEmpty
+                ? "lesson-preset.\(LessonPresetFile.fileExtension)"
+                : "\(Self.fileSlug(name)).\(LessonPresetFile.fileExtension)"
+            if let contentType = Self.lessonPresetContentType {
+                panel.allowedContentTypes = [contentType]
+            }
+            panel.canCreateDirectories = true
+            panel.directoryURL = projectURL.deletingLastPathComponent()
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+
+            let destinationURL = Self.presetURLWithExtension(url)
+            try LessonPresetFile.save(preset, to: destinationURL)
+            presetPreviewSummary = Self.presetPreviewSummary(LessonPresetApplier.preview(preset))
+            setMessage("Saved preset \(destinationURL.path).")
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    func previewProjectPreset() {
+        do {
+            guard let preset = try chooseLessonPreset(title: "Preview Lesson Preset") else { return }
+            presetPreviewSummary = Self.presetPreviewSummary(LessonPresetApplier.preview(preset))
+            setMessage("Previewed preset \(preset.name).")
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    func applyProjectPreset() {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            guard let preset = try chooseLessonPreset(title: "Apply Lesson Preset") else { return }
+            let preview = try LessonPresetApplier.apply(preset, toProject: projectURL)
+            presetPreviewSummary = Self.presetPreviewSummary(preview)
+            let updated = try ProjectBundle.loadManifest(at: projectURL)
+            manifest = updated
+            summary = try ProjectBundle.inspect(at: projectURL)
+            renderInspection = nil
+            loadEditorSettings(projectURL: projectURL)
+            setMessage("Applied preset \(preset.name).")
         } catch {
             setError(error.localizedDescription)
         }
@@ -7280,6 +7415,22 @@ private final class ProjectEditorModel: ObservableObject {
         onChoose(url)
     }
 
+    private func chooseLessonPreset(title: String) throws -> LessonPreset? {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        if let contentType = Self.lessonPresetContentType {
+            panel.allowedContentTypes = [contentType]
+        }
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return nil
+        }
+        return try LessonPresetFile.load(from: url)
+    }
+
     private func refreshDefaultDestinations() {
         guard let projectURL else { return }
         let baseName = projectURL.deletingPathExtension().lastPathComponent
@@ -7309,12 +7460,32 @@ private final class ProjectEditorModel: ObservableObject {
         url.pathExtension.lowercased() == "dmlm" ? url : url.appendingPathExtension("dmlm")
     }
 
+    private static func presetURLWithExtension(_ url: URL) -> URL {
+        url.pathExtension.lowercased() == LessonPresetFile.fileExtension
+            ? url
+            : url.appendingPathExtension(LessonPresetFile.fileExtension)
+    }
+
     private static var editableVideoContentTypes: [UTType] {
         [.mpeg4Movie, .quickTimeMovie]
     }
 
+    private static var lessonPresetContentType: UTType? {
+        UTType(filenameExtension: LessonPresetFile.fileExtension) ?? .json
+    }
+
     private static var captionImportContentTypes: [UTType] {
         ["json", "vtt", "srt", "txt", "md"].compactMap { UTType(filenameExtension: $0) }
+    }
+
+    private static func presetPreviewSummary(_ preview: LessonPresetApplyPreview) -> String {
+        [
+            "Preset: \(preview.presetName)",
+            "Writes editor settings: \(preview.writesEditorSettings ? "yes" : "no")",
+            "Updates capture settings: \(preview.updatesCaptureSettings ? "yes" : "no")",
+            "Updates export preset IDs: \(preview.updatesExportPresets ? "yes" : "no")",
+            "Preserves: \(preview.preservedProjectFields.joined(separator: ", "))"
+        ].joined(separator: "\n")
     }
 
     private static let supportedEditableVideoExtensions: Set<String> = ["mp4", "mov"]
