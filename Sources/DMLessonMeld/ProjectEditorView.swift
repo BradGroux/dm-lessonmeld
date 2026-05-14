@@ -127,16 +127,24 @@ struct ProjectEditorView: View {
             Button {
                 quickRecorder.presentControlBar(preferences: preferences)
             } label: {
-                Label(quickRecorder.isRecording ? "Recording Controls" : "Record", systemImage: "record.circle")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                LessonMeldSidebarItem(
+                    title: quickRecorder.isRecording ? "Recording Controls" : "Record",
+                    systemImage: "record.circle",
+                    isSelected: model.manifest?.media.screen == nil
+                )
             }
+            .buttonStyle(.plain)
 
             Button {
                 model.importVideoForEditing(preferences.snapshot)
             } label: {
-                Label("Edit Video", systemImage: "film")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                LessonMeldSidebarItem(
+                    title: "Edit Video",
+                    systemImage: "film",
+                    isSelected: model.manifest?.media.screen != nil
+                )
             }
+            .buttonStyle(.plain)
 
             Button {
                 if annotationOverlay.isPresented {
@@ -145,9 +153,13 @@ struct ProjectEditorView: View {
                     openAnnotationOverlayFromEditor()
                 }
             } label: {
-                Label(annotationOverlay.isPresented ? "Close Tools" : "Annotate", systemImage: "paintpalette")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                LessonMeldSidebarItem(
+                    title: annotationOverlay.isPresented ? "Close Tools" : "Annotate",
+                    systemImage: "paintpalette",
+                    isSelected: annotationOverlay.isPresented
+                )
             }
+            .buttonStyle(.plain)
 
             Divider()
 
@@ -156,23 +168,23 @@ struct ProjectEditorView: View {
             Button {
                 model.newProject(preferences.snapshot)
             } label: {
-                Label("New Project", systemImage: "doc.badge.plus")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                LessonMeldSidebarItem(title: "New Project", systemImage: "doc.badge.plus")
             }
+            .buttonStyle(.plain)
 
             Button {
                 model.openProject()
             } label: {
-                Label("Open Project", systemImage: "folder")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                LessonMeldSidebarItem(title: "Open Project", systemImage: "folder")
             }
+            .buttonStyle(.plain)
 
             Button {
                 model.revealProject()
             } label: {
-                Label("Reveal Project", systemImage: "arrow.up.forward.app")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                LessonMeldSidebarItem(title: "Reveal Project", systemImage: "arrow.up.forward.app")
             }
+            .buttonStyle(.plain)
             .disabled(model.projectURL == nil)
 
             Divider()
@@ -182,25 +194,25 @@ struct ProjectEditorView: View {
             Button {
                 appRouter.openSettings()
             } label: {
-                Label("Settings", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                LessonMeldSidebarItem(title: "Settings", systemImage: "gearshape")
             }
+            .buttonStyle(.plain)
 
             Button {
                 openWindow(id: "onboarding")
                 NSApplication.shared.activate()
             } label: {
-                Label("Onboarding", systemImage: "checklist")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                LessonMeldSidebarItem(title: "Onboarding", systemImage: "checklist")
             }
+            .buttonStyle(.plain)
 
             Button {
                 openWindow(id: "command-palette")
                 NSApplication.shared.activate()
             } label: {
-                Label("Command Palette", systemImage: "command")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                LessonMeldSidebarItem(title: "Command Palette", systemImage: "command")
             }
+            .buttonStyle(.plain)
 
             Divider()
 
@@ -233,10 +245,7 @@ struct ProjectEditorView: View {
     }
 
     private func sidebarSection(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.top, 6)
+        LessonMeldSectionTitle(title: title, topPadding: 6)
     }
 
     private func projectDashboard(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
@@ -2602,9 +2611,7 @@ struct ProjectEditorView: View {
     private var timelineTrackInset: CGFloat { 76 }
 
     private func inspectorSectionTitle(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+        LessonMeldInspectorSectionTitle(title: title)
     }
 
     private func compactNumberField(_ title: String, text: Binding<String>) -> some View {
@@ -3262,13 +3269,7 @@ struct ProjectEditorView: View {
     }
 
     private func statusPill(_ title: String, systemImage: String, tint: Color) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .foregroundStyle(tint)
-            .background(tint.opacity(0.14), in: Capsule())
-            .overlay(Capsule().stroke(tint.opacity(0.22), lineWidth: 1))
+        LessonMeldStatusPill(title: title, systemImage: systemImage, tint: tint)
     }
 
     private func readinessLine(_ title: String, status: String, detail: String, systemImage: String, tint: Color) -> some View {
@@ -4617,14 +4618,9 @@ private struct DashboardCard<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        content
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.32), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            )
+        LessonMeldCard(padding: 18) {
+            content
+        }
     }
 }
 
@@ -4634,18 +4630,9 @@ private struct EditorPanel<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                Text(subtitle)
-                    .foregroundStyle(.secondary)
-            }
+        LessonMeldPanel(title: title, subtitle: subtitle) {
             content
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
