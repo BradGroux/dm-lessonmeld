@@ -265,6 +265,7 @@ struct ProjectEditorView: View {
                 trimPanel(manifest: manifest)
             }
 
+            projectAssetsPanel(summary: summary, manifest: manifest)
             lessonMarkersPanel(manifest: manifest)
             metadataPanel
             annotationProjectPanel(manifest: manifest)
@@ -468,6 +469,8 @@ struct ProjectEditorView: View {
                     switch editorInspectorTab {
                     case .edits:
                         editorEditsInspector(manifest: manifest)
+                    case .assets:
+                        editorAssetsInspector(summary: summary, manifest: manifest)
                     case .canvas:
                         editorCanvasInspector(manifest: manifest)
                     case .cuts:
@@ -4304,28 +4307,489 @@ struct ProjectEditorView: View {
         }
     }
 
-    private func mediaPanel(manifest: ProjectManifest) -> some View {
-        EditorPanel(title: "Media", subtitle: "Files referenced by the project manifest.") {
-            if manifest.media.allFiles.isEmpty {
-                Text("No media files are referenced yet.")
+    private func projectAssetsPanel(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
+        let groups = projectAssetGroups(summary: summary, manifest: manifest)
+
+        return EditorPanel(
+            title: "Project Assets",
+            subtitle: "The .dmlm item is the editable lesson project. Source media, edit sidecars, and rendered exports are separate files."
+        ) {
+            assetBrowserSummary(summary: summary, manifest: manifest)
+
+            ForEach(groups) { group in
+                assetGroupView(group)
+            }
+        }
+    }
+
+    private func editorAssetsInspector(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
+        let groups = projectAssetGroups(summary: summary, manifest: manifest)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            assetBrowserSummary(summary: summary, manifest: manifest)
+
+            ForEach(groups) { group in
+                assetGroupView(group)
+            }
+        }
+    }
+
+    private func assetBrowserSummary(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            valueLine("Editable project", model.projectURL?.lastPathComponent ?? "No project open")
+            valueLine("Project package", model.projectURL?.path ?? "Not created yet")
+            valueLine("Source video", manifest.media.screen?.relativePath ?? "Missing")
+            valueLine("Rendered output", renderDestinationPathLabel)
+
+            if !summary.issues.isEmpty {
+                Divider()
+                Label("\(countLabel(summary.issues.count, singular: "validation issue"))", systemImage: hasBlockingIssues(summary) ? "xmark.octagon" : "exclamationmark.triangle")
+                    .foregroundStyle(hasBlockingIssues(summary) ? .red : .orange)
+            }
+        }
+        .font(.subheadline)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(LessonMeldDesign.rowFill, in: RoundedRectangle(cornerRadius: LessonMeldDesign.Radius.card, style: .continuous))
+    }
+
+    private var renderDestinationPathLabel: String {
+        let trimmed = model.renderDestinationPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Choose an export destination" }
+        return URL(fileURLWithPath: trimmed).lastPathComponent
+    }
+
+    private func assetGroupView(_ group: ProjectAssetGroup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(group.title, systemImage: group.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                Text(group.subtitle)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-            } else {
-                ForEach(manifest.media.allFiles.indices, id: \.self) { index in
-                    let file = manifest.media.allFiles[index]
-                    HStack(alignment: .firstTextBaseline) {
-                        Label(file.role.rawValue, systemImage: icon(for: file.role))
-                            .frame(width: 180, alignment: .leading)
-                        Text(file.relativePath)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                        Spacer()
-                        if let byteCount = file.byteCount {
-                            Text(ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+            }
+
+            VStack(spacing: 8) {
+                ForEach(group.items) { item in
+                    assetRow(item)
                 }
             }
+        }
+    }
+
+    private func assetRow(_ item: ProjectAssetItem) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: item.systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(item.statusTint)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                    assetStatusBadge(item.status, tint: item.statusTint)
+                }
+
+                Text(item.detail)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+
+                ForEach(item.issues.indices, id: \.self) { index in
+                    let issue = item.issues[index]
+                    Label(issue.message, systemImage: issue.severity == .error ? "xmark.octagon" : "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(issue.severity == .error ? .red : .orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 6) {
+                if let byteCount = item.byteCount {
+                    Text(ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 6) {
+                    Button {
+                        openAsset(item)
+                    } label: {
+                        Label("Open", systemImage: "play.rectangle")
+                    }
+                    .disabled(!item.canOpen || !assetExists(item))
+
+                    Button {
+                        revealAsset(item)
+                    } label: {
+                        Label("Reveal", systemImage: "arrow.up.forward.app")
+                    }
+                    .disabled(item.url == nil)
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: LessonMeldDesign.Radius.card, style: .continuous))
+    }
+
+    private func assetStatusBadge(_ status: String, tint: Color) -> some View {
+        Text(status)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .foregroundStyle(tint)
+            .background(tint.opacity(0.14), in: Capsule())
+    }
+
+    private func projectAssetGroups(summary: ProjectBundleSummary, manifest: ProjectManifest) -> [ProjectAssetGroup] {
+        guard let projectURL = model.projectURL else { return [] }
+
+        return [
+            ProjectAssetGroup(
+                id: "project",
+                title: "Lesson Project",
+                subtitle: "Editable package and manifest",
+                systemImage: "shippingbox",
+                items: [
+                    projectBundleItem(projectURL: projectURL),
+                    projectManifestItem(projectURL: projectURL, summary: summary)
+                ]
+            ),
+            ProjectAssetGroup(
+                id: "source-media",
+                title: "Source Media",
+                subtitle: "Original captured or imported video",
+                systemImage: "film",
+                items: sourceMediaItems(projectURL: projectURL, summary: summary, manifest: manifest)
+            ),
+            ProjectAssetGroup(
+                id: "audio",
+                title: "Audio",
+                subtitle: "Voice and system tracks",
+                systemImage: "waveform",
+                items: audioAssetItems(projectURL: projectURL, summary: summary, manifest: manifest)
+            ),
+            ProjectAssetGroup(
+                id: "edit-sidecars",
+                title: "Edit Sidecars",
+                subtitle: "Timeline, style, overlay, annotation, cursor, and caption data",
+                systemImage: "slider.horizontal.3",
+                items: editSidecarItems(projectURL: projectURL, summary: summary, manifest: manifest)
+            ),
+            ProjectAssetGroup(
+                id: "outputs",
+                title: "Exports",
+                subtitle: "Rendered videos and package destinations",
+                systemImage: "square.and.arrow.up",
+                items: exportAssetItems()
+            )
+        ]
+    }
+
+    private func sourceMediaItems(projectURL: URL, summary: ProjectBundleSummary, manifest: ProjectManifest) -> [ProjectAssetItem] {
+        var items: [ProjectAssetItem] = [
+            manifest.media.screen.map {
+                assetItem(file: $0, title: "Primary screen video", projectURL: projectURL, summary: summary)
+            } ?? missingAssetItem(
+                id: "source-screen-missing",
+                title: "Primary screen video",
+                detail: "Record or import a video to create the editable source media.",
+                systemImage: "display",
+                status: "Missing",
+                statusTint: .orange
+            )
+        ]
+
+        items.append(
+            manifest.media.webcam.map {
+                assetItem(file: $0, title: "Webcam video", projectURL: projectURL, summary: summary)
+            } ?? missingAssetItem(
+                id: "source-webcam-optional",
+                title: "Webcam video",
+                detail: "Optional presenter camera track.",
+                systemImage: "video",
+                status: "Optional",
+                statusTint: .secondary
+            )
+        )
+
+        if let thumbnail = manifest.media.thumbnail {
+            items.append(assetItem(file: thumbnail, title: "Thumbnail", projectURL: projectURL, summary: summary))
+        }
+
+        return items
+    }
+
+    private func audioAssetItems(projectURL: URL, summary: ProjectBundleSummary, manifest: ProjectManifest) -> [ProjectAssetItem] {
+        [
+            manifest.media.microphoneAudio.map {
+                assetItem(file: $0, title: "Microphone audio", projectURL: projectURL, summary: summary)
+            } ?? missingAssetItem(
+                id: "audio-mic-optional",
+                title: "Microphone audio",
+                detail: "Optional voice sidecar.",
+                systemImage: "waveform",
+                status: "Optional",
+                statusTint: .secondary
+            ),
+            manifest.media.systemAudio.map {
+                assetItem(file: $0, title: "System audio", projectURL: projectURL, summary: summary)
+            } ?? missingAssetItem(
+                id: "audio-system-optional",
+                title: "System audio",
+                detail: "Optional app/system sound sidecar.",
+                systemImage: "speaker.wave.2",
+                status: "Optional",
+                statusTint: .secondary
+            )
+        ]
+    }
+
+    private func editSidecarItems(projectURL: URL, summary: ProjectBundleSummary, manifest: ProjectManifest) -> [ProjectAssetItem] {
+        var items = [
+            knownProjectFileItem(
+                fileName: EditorSettingsFile.defaultFileName,
+                title: "Editor settings",
+                systemImage: "slider.horizontal.3",
+                projectURL: projectURL,
+                summary: summary
+            ),
+            knownProjectFileItem(
+                fileName: EditDecisionListFile.defaultFileName,
+                title: "Timeline edit decisions",
+                systemImage: "timeline.selection",
+                projectURL: projectURL,
+                summary: summary
+            )
+        ]
+
+        if let cursorMetadata = manifest.media.cursorMetadata {
+            items.append(assetItem(file: cursorMetadata, title: "Cursor and input metadata", projectURL: projectURL, summary: summary))
+        }
+        if let overlays = manifest.media.overlays {
+            items.append(assetItem(file: overlays, title: "Timed overlays", projectURL: projectURL, summary: summary))
+        } else {
+            items.append(knownProjectFileItem(fileName: OverlayStoreFile.defaultFileName, title: "Timed overlays", systemImage: "square.on.square", projectURL: projectURL, summary: summary))
+        }
+        if let annotations = manifest.media.annotations {
+            items.append(assetItem(file: annotations, title: "Annotations", projectURL: projectURL, summary: summary))
+        }
+
+        items.append(contentsOf: manifest.media.captions.map {
+            assetItem(file: $0, title: assetTitle(for: $0.role), projectURL: projectURL, summary: summary)
+        })
+        items.append(contentsOf: manifest.media.transcripts.map {
+            assetItem(file: $0, title: assetTitle(for: $0.role), projectURL: projectURL, summary: summary)
+        })
+        items.append(contentsOf: manifest.exportPresets.map { presetID in
+            ProjectAssetItem(
+                id: "preset-\(presetID)",
+                title: "Export preset",
+                detail: presetID,
+                systemImage: "wand.and.stars",
+                status: "Referenced",
+                statusTint: .blue,
+                byteCount: nil,
+                url: nil,
+                canOpen: false,
+                issues: []
+            )
+        })
+        items.append(contentsOf: manifest.media.attachments.map {
+            assetItem(file: $0, title: "Attachment", projectURL: projectURL, summary: summary)
+        })
+
+        return items
+    }
+
+    private func exportAssetItems() -> [ProjectAssetItem] {
+        [
+            configuredOutputItem(id: "render-output", title: "Rendered video", path: model.renderDestinationPath, systemImage: "film.stack"),
+            configuredOutputItem(id: "trim-output", title: "Trim export", path: model.trimDestinationPath, systemImage: "scissors"),
+            configuredOutputItem(id: "share-package-output", title: "Local share packages", path: model.sharePackageDestinationPath, systemImage: "shippingbox"),
+            configuredOutputItem(id: "raw-assets-output", title: "Raw asset extraction", path: model.rawAssetDestinationPath, systemImage: "folder")
+        ]
+    }
+
+    private func projectBundleItem(projectURL: URL) -> ProjectAssetItem {
+        ProjectAssetItem(
+            id: "project-bundle",
+            title: "Editable lesson project (.dmlm)",
+            detail: projectURL.path,
+            systemImage: "shippingbox",
+            status: FileManager.default.fileExists(atPath: projectURL.path) ? "Project" : "Missing",
+            statusTint: FileManager.default.fileExists(atPath: projectURL.path) ? .blue : .red,
+            byteCount: nil,
+            url: projectURL,
+            canOpen: false,
+            issues: []
+        )
+    }
+
+    private func projectManifestItem(projectURL: URL, summary: ProjectBundleSummary) -> ProjectAssetItem {
+        let url = ProjectBundle.manifestURL(in: projectURL)
+        return fileURLAssetItem(
+            id: "project-manifest",
+            title: "Project manifest",
+            detail: ProjectBundle.manifestFileName,
+            systemImage: "doc.text",
+            url: url,
+            expected: true,
+            issues: issues(for: ProjectBundle.manifestFileName, summary: summary)
+        )
+    }
+
+    private func assetItem(file: ProjectFile, title: String, projectURL: URL, summary: ProjectBundleSummary) -> ProjectAssetItem {
+        let url = ProjectBundle.fileURL(for: file, in: projectURL)
+        return fileURLAssetItem(
+            id: "\(file.role.rawValue)-\(file.relativePath)",
+            title: title,
+            detail: file.relativePath,
+            systemImage: icon(for: file.role),
+            url: url,
+            expected: true,
+            fallbackByteCount: file.byteCount,
+            issues: issues(for: file.relativePath, summary: summary)
+        )
+    }
+
+    private func knownProjectFileItem(fileName: String, title: String, systemImage: String, projectURL: URL, summary: ProjectBundleSummary) -> ProjectAssetItem {
+        fileURLAssetItem(
+            id: "known-\(fileName)",
+            title: title,
+            detail: fileName,
+            systemImage: systemImage,
+            url: projectURL.appendingPathComponent(fileName),
+            expected: false,
+            issues: issues(for: fileName, summary: summary)
+        )
+    }
+
+    private func configuredOutputItem(id: String, title: String, path: String, systemImage: String) -> ProjectAssetItem {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return missingAssetItem(id: id, title: title, detail: "No destination selected.", systemImage: systemImage, status: "Not set", statusTint: .secondary)
+        }
+
+        let url = URL(fileURLWithPath: trimmed)
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        return ProjectAssetItem(
+            id: id,
+            title: title,
+            detail: url.path,
+            systemImage: systemImage,
+            status: exists ? "Exists" : "Configured",
+            statusTint: exists ? .green : .blue,
+            byteCount: byteCount(for: url, fallback: nil),
+            url: url,
+            canOpen: exists,
+            issues: []
+        )
+    }
+
+    private func fileURLAssetItem(
+        id: String,
+        title: String,
+        detail: String,
+        systemImage: String,
+        url: URL,
+        expected: Bool,
+        fallbackByteCount: Int64? = nil,
+        issues: [ProjectValidationIssue]
+    ) -> ProjectAssetItem {
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        let hasError = issues.contains { $0.severity == .error }
+        let status: String
+        let tint: Color
+
+        if hasError {
+            status = "Issue"
+            tint = .red
+        } else if !issues.isEmpty {
+            status = "Warning"
+            tint = .orange
+        } else if exists {
+            status = "Ready"
+            tint = .green
+        } else if expected {
+            status = "Missing"
+            tint = .red
+        } else {
+            status = "Not created"
+            tint = .secondary
+        }
+
+        return ProjectAssetItem(
+            id: id,
+            title: title,
+            detail: detail,
+            systemImage: systemImage,
+            status: status,
+            statusTint: tint,
+            byteCount: byteCount(for: url, fallback: fallbackByteCount),
+            url: url,
+            canOpen: exists,
+            issues: issues
+        )
+    }
+
+    private func missingAssetItem(id: String, title: String, detail: String, systemImage: String, status: String, statusTint: Color) -> ProjectAssetItem {
+        ProjectAssetItem(
+            id: id,
+            title: title,
+            detail: detail,
+            systemImage: systemImage,
+            status: status,
+            statusTint: statusTint,
+            byteCount: nil,
+            url: nil,
+            canOpen: false,
+            issues: []
+        )
+    }
+
+    private func issues(for relativePath: String, summary: ProjectBundleSummary) -> [ProjectValidationIssue] {
+        summary.issues.filter { issue in
+            issue.path == relativePath || issue.path == "./\(relativePath)"
+        }
+    }
+
+    private func byteCount(for url: URL, fallback: Int64?) -> Int64? {
+        if let fallback { return fallback }
+        guard let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber else {
+            return nil
+        }
+        return size.int64Value
+    }
+
+    private func assetExists(_ item: ProjectAssetItem) -> Bool {
+        guard let url = item.url else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    private func openAsset(_ item: ProjectAssetItem) {
+        guard let url = item.url, item.canOpen, FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func revealAsset(_ item: ProjectAssetItem) {
+        guard let url = item.url else { return }
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return
+        }
+
+        let parent = url.deletingLastPathComponent()
+        if FileManager.default.fileExists(atPath: parent.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([parent])
         }
     }
 
@@ -4380,7 +4844,7 @@ struct ProjectEditorView: View {
                         ForEach(manifest.media.allFiles.indices, id: \.self) { index in
                             let file = manifest.media.allFiles[index]
                             HStack(alignment: .firstTextBaseline) {
-                                Label(file.role.rawValue, systemImage: icon(for: file.role))
+                                Label(assetTitle(for: file.role), systemImage: icon(for: file.role))
                                     .frame(width: 180, alignment: .leading)
                                 Text(file.relativePath)
                                     .font(.system(.body, design: .monospaced))
@@ -4456,6 +4920,23 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func assetTitle(for role: ProjectFileRole) -> String {
+        switch role {
+        case .screenVideo: "Primary screen video"
+        case .webcamVideo: "Webcam video"
+        case .microphoneAudio: "Microphone audio"
+        case .systemAudio: "System audio"
+        case .cursorMetadata: "Cursor and input metadata"
+        case .annotations: "Annotations"
+        case .overlays: "Timed overlays"
+        case .captions: "Captions"
+        case .transcript: "Transcript"
+        case .thumbnail: "Thumbnail"
+        case .manifest: "Project manifest"
+        case .attachment: "Attachment"
+        }
+    }
+
     private func formatSeconds(_ seconds: Double) -> String {
         let minutes = Int(seconds) / 60
         let remainder = seconds - Double(minutes * 60)
@@ -4471,6 +4952,7 @@ struct ProjectEditorView: View {
 
 private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     case edits
+    case assets
     case canvas
     case cuts
     case zooms
@@ -4487,6 +4969,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .edits: "Edit"
+        case .assets: "Assets"
         case .canvas: "Canvas"
         case .cuts: "Cuts"
         case .zooms: "Zooms"
@@ -4503,6 +4986,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .edits: "slider.horizontal.3"
+        case .assets: "folder.badge.gearshape"
         case .canvas: "rectangle.inset.filled"
         case .cuts: "scissors"
         case .zooms: "plus.magnifyingglass"
@@ -4529,6 +5013,27 @@ private struct EditorInspectorAction: Identifiable {
         self.systemImage = systemImage
         self.handler = handler
     }
+}
+
+private struct ProjectAssetGroup: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let items: [ProjectAssetItem]
+}
+
+private struct ProjectAssetItem: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let systemImage: String
+    let status: String
+    let statusTint: Color
+    let byteCount: Int64?
+    let url: URL?
+    let canOpen: Bool
+    let issues: [ProjectValidationIssue]
 }
 
 private enum TimelineSelection: Equatable {
