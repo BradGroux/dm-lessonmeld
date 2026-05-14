@@ -81,6 +81,7 @@ public enum RenderPlanValidator {
         }
 
         validateZoomRegions(plan.zoomRegions, issues: &issues)
+        validateCameraSettings(plan.camera, issues: &issues)
         if let annotationSource = plan.annotationSource {
             validateAnnotations(annotationSource, issues: &issues, fileManager: fileManager)
         }
@@ -163,6 +164,56 @@ public enum RenderPlanValidator {
                     severity: .error,
                     message: "Zoom focus rect must have positive size and stay inside the normalized frame.",
                     path: "\(path).focusRect"
+                ))
+            }
+        }
+    }
+
+    private static func validateCameraSettings(
+        _ camera: EditorCameraSettings,
+        issues: inout [RenderValidationIssue]
+    ) {
+        validatePictureInPicture(camera.defaultPlacement, issues: &issues)
+        for (index, region) in camera.layoutRegions.enumerated() {
+            let path = "camera.layoutRegions[\(index)]"
+            if !region.range.startSeconds.isFinite ||
+                !region.range.durationSeconds.isFinite ||
+                region.range.startSeconds < 0 ||
+                region.range.durationSeconds <= 0 {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "Camera layout region range must be finite, non-negative, and positive.",
+                    path: "\(path).range"
+                ))
+            }
+            if !region.transitionSeconds.isFinite || region.transitionSeconds < 0 || region.transitionSeconds > 2 {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "Camera layout transition must be finite and between 0 and 2 seconds.",
+                    path: "\(path).transitionSeconds"
+                ))
+            }
+            if let placement = region.placement {
+                validatePictureInPicture(placement, issues: &issues)
+            }
+        }
+        for (index, reaction) in camera.reactions.enumerated() {
+            let path = "camera.reactions[\(index)]"
+            if !reaction.range.startSeconds.isFinite ||
+                !reaction.range.durationSeconds.isFinite ||
+                reaction.range.startSeconds < 0 ||
+                reaction.range.durationSeconds <= 0 {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "Camera reaction range must be finite, non-negative, and positive.",
+                    path: "\(path).range"
+                ))
+            }
+            if reaction.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "Camera reaction text is required.",
+                    path: "\(path).text"
                 ))
             }
         }

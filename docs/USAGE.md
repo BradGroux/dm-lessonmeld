@@ -103,6 +103,18 @@ Use the **Overlays** inspector tab or the overlay timeline lane to add project-l
 - Imported images are copied under `overlays/assets/` inside the `.dmlm` bundle.
 - Save overlays into `overlays.json` so render/export burns them into the final video.
 
+## Edit Camera Layouts
+
+Recorded projects with a webcam track show the **Camera** inspector tab.
+
+- Adjust the default camera corner, size, margin, aspect ratio, shape, mirroring, border, shadow, and corner radius.
+- Add timed camera layout regions for corner PiP, side-by-side, presenter focus, hidden camera, and full camera.
+- Drag or resize camera layout blocks in the **Camera** timeline lane.
+- Add simple reaction overlays at the playhead.
+- Save camera settings into `editor-settings.json` so render/export uses the same timed layouts.
+
+Imported videos without a webcam track keep camera controls unavailable until a camera source is added to the project.
+
 ## Add Zooms
 
 Use the **Zooms** inspector tab or the purple timeline lane to create and edit zoom regions.

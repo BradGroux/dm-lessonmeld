@@ -468,6 +468,8 @@ struct ProjectEditorView: View {
                         editorZoomsInspector(manifest: manifest)
                     case .overlays:
                         editorOverlaysInspector(manifest: manifest)
+                    case .camera:
+                        editorCameraInspector(manifest: manifest)
                     case .cursor:
                         editorCursorInspector(manifest: manifest)
                     case .export:
@@ -923,6 +925,122 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func editorCameraInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            inspectorSectionTitle("Camera")
+            if manifest.media.webcam == nil {
+                Text("Camera controls require a webcam track. Imported videos can still be edited, but camera layouts and reactions need a captured or added camera source.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Picker("Corner", selection: $model.cameraCorner) {
+                    ForEach(PictureInPictureCorner.allCases, id: \.self) { corner in
+                        Text(corner.title).tag(corner)
+                    }
+                }
+                Picker("Aspect", selection: $model.cameraAspectRatio) {
+                    ForEach(PictureInPictureAspectRatio.allCases, id: \.self) { aspect in
+                        Text(aspect.title).tag(aspect)
+                    }
+                }
+                Picker("Shape", selection: $model.cameraFrameShape) {
+                    ForEach(PictureInPictureFrameShape.allCases, id: \.self) { shape in
+                        Text(shape.title).tag(shape)
+                    }
+                }
+                numericStringSlider("Size", text: $model.cameraWidthRatio, range: 0.1...1, format: "%.2f")
+                numericStringSlider("Margin", text: $model.cameraMarginRatio, range: 0...0.2, format: "%.2f")
+                numericStringSlider("Corners", text: $model.cameraCornerRadius, range: 0...96, format: "%.0f")
+                HStack {
+                    Toggle("Mirror", isOn: $model.cameraMirrored)
+                        .toggleStyle(.checkbox)
+                    Toggle("Border", isOn: $model.cameraBorderEnabled)
+                        .toggleStyle(.checkbox)
+                    Toggle("Shadow", isOn: $model.cameraShadowEnabled)
+                        .toggleStyle(.checkbox)
+                }
+
+                Divider()
+                HStack {
+                    inspectorSectionTitle("Timed Layouts")
+                    Spacer()
+                    Button("PiP") { model.addCameraRegionAtPlayhead(preset: .cornerPip) }
+                    Button("Side") { model.addCameraRegionAtPlayhead(preset: .sideBySide) }
+                    Button("Full") { model.addCameraRegionAtPlayhead(preset: .fullCamera) }
+                    Button("Hide") { model.addCameraRegionAtPlayhead(preset: .hidden) }
+                }
+
+                if model.cameraRegionRows.isEmpty {
+                    Text("No timed camera layouts yet. Add a region, then drag it on the Camera timeline lane.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach($model.cameraRegionRows) { $region in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Toggle("Enabled", isOn: $region.isEnabled)
+                                    .toggleStyle(.checkbox)
+                                Picker("Preset", selection: $region.preset) {
+                                    ForEach(CameraLayoutPreset.allCases) { preset in
+                                        Text(preset.title).tag(preset)
+                                    }
+                                }
+                                Spacer()
+                                Button {
+                                    model.removeCameraRegion(id: region.id)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            HStack {
+                                compactNumberField("Start", text: $region.startSeconds)
+                                compactNumberField("End", text: $region.endSeconds)
+                            }
+                            HStack {
+                                Picker("Animation", selection: $region.layoutAnimation) {
+                                    ForEach(CameraLayoutAnimation.allCases) { animation in
+                                        Text(animation.title).tag(animation)
+                                    }
+                                }
+                                numericStringSlider("Transition", text: $region.transitionSeconds, range: 0...2, format: "%.2f")
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                    }
+                }
+
+                Divider()
+                HStack {
+                    inspectorSectionTitle("Reactions")
+                    Spacer()
+                    Button("Add Reaction") { model.addCameraReactionAtPlayhead() }
+                }
+                ForEach($model.cameraReactionRows) { $reaction in
+                    HStack {
+                        Toggle("", isOn: $reaction.isEnabled)
+                            .toggleStyle(.checkbox)
+                        TextField("Reaction", text: $reaction.text)
+                            .frame(width: 76)
+                        compactNumberField("Start", text: $reaction.startSeconds)
+                        compactNumberField("End", text: $reaction.endSeconds)
+                        Button {
+                            model.removeCameraReaction(id: reaction.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+
+                HStack {
+                    Button("Save Camera") { model.saveEditorSettings() }
+                }
+            }
+        }
+    }
+
     private func editorCursorInspector(manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             inspectorSectionTitle("Cursor Effects")
@@ -1199,6 +1317,15 @@ struct ProjectEditorView: View {
                             height: 30
                         ) {
                             overlayTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                        timelineLane(
+                            title: "Camera",
+                            tint: .orange,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 30
+                        ) {
+                            cameraTimelineContent(width: timelineWidth, duration: duration)
                         }
                         timelineLane(
                             title: "Cursor",
@@ -1484,6 +1611,53 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func cameraTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            ForEach(model.cameraRegionRows) { region in
+                if let start = secondsValue(region.startSeconds), let end = secondsValue(region.endSeconds), end > start {
+                    timelineBlock(
+                        title: region.preset.title,
+                        tint: .orange,
+                        start: start,
+                        end: end,
+                        width: width,
+                        duration: duration,
+                        height: 22,
+                        isEnabled: region.isEnabled,
+                        isSelected: selectedTimelineItem == .cameraRegion(region.id)
+                    )
+                    .onTapGesture {
+                        selectedTimelineItem = .cameraRegion(region.id)
+                        editorInspectorTab = .camera
+                    }
+                    .gesture(timelineDragGesture(action: .moveCameraRegion, id: region.id, start: start, end: end, width: width, duration: duration))
+                    .overlay(alignment: .leading) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeCameraRegionStart, id: region.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .overlay(alignment: .trailing) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeCameraRegionEnd, id: region.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .contextMenu {
+                        Button("Jump to Camera Region") {
+                            model.seek(to: start)
+                        }
+                        Button(region.isEnabled ? "Disable Region" : "Enable Region") {
+                            model.toggleCameraRegionEnabled(id: region.id)
+                            persistTimelineEditChanges(for: .moveCameraRegion)
+                        }
+                        Button("Remove Region", role: .destructive) {
+                            model.removeCameraRegion(id: region.id)
+                            selectedTimelineItem = nil
+                            persistTimelineEditChanges(for: .moveCameraRegion)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func cursorTimelineContent(width: CGFloat, duration: Double) -> some View {
         ZStack(alignment: .leading) {
             ForEach(model.cursorHiddenRangeRows) { range in
@@ -1697,6 +1871,12 @@ struct ProjectEditorView: View {
             model.resizeOverlay(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
         case .resizeOverlayEnd:
             model.resizeOverlay(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
+        case .moveCameraRegion:
+            model.moveCameraRegion(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
+        case .resizeCameraRegionStart:
+            model.resizeCameraRegion(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
+        case .resizeCameraRegionEnd:
+            model.resizeCameraRegion(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
         case .moveCursorHide:
             model.moveCursorHiddenRange(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
         case .resizeCursorHideStart:
@@ -1714,6 +1894,8 @@ struct ProjectEditorView: View {
             model.saveMarkers()
         case .moveOverlay, .resizeOverlayStart, .resizeOverlayEnd:
             model.saveOverlays()
+        case .moveCameraRegion, .resizeCameraRegionStart, .resizeCameraRegionEnd:
+            model.saveEditorSettings()
         case .moveCursorHide, .resizeCursorHideStart, .resizeCursorHideEnd:
             model.saveEditorSettings()
         default:
@@ -1733,6 +1915,9 @@ struct ProjectEditorView: View {
         case .overlay(let id):
             model.removeOverlay(id: id)
             persistTimelineEditChanges(for: .moveOverlay)
+        case .cameraRegion(let id):
+            model.removeCameraRegion(id: id)
+            persistTimelineEditChanges(for: .moveCameraRegion)
         case .cursorHide(let id):
             model.removeCursorHiddenRange(id: id)
             persistTimelineEditChanges(for: .moveCursorHide)
@@ -3602,6 +3787,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     case cuts
     case zooms
     case overlays
+    case camera
     case cursor
     case export
 
@@ -3614,6 +3800,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
         case .cuts: "Cuts"
         case .zooms: "Zooms"
         case .overlays: "Overlays"
+        case .camera: "Camera"
         case .cursor: "Cursor"
         case .export: "Export"
         }
@@ -3624,6 +3811,7 @@ private enum TimelineSelection: Equatable {
     case cut(String)
     case zoom(String)
     case overlay(String)
+    case cameraRegion(String)
     case cursorHide(String)
     case marker(String)
 }
@@ -3640,6 +3828,9 @@ private enum TimelineDragAction: Equatable {
     case moveOverlay
     case resizeOverlayStart
     case resizeOverlayEnd
+    case moveCameraRegion
+    case resizeCameraRegionStart
+    case resizeCameraRegionEnd
     case moveCursorHide
     case resizeCursorHideStart
     case resizeCursorHideEnd
@@ -3813,6 +4004,24 @@ private struct EditableOverlayRow: Identifiable, Equatable {
     var isEnabled: Bool
 }
 
+private struct EditableCameraRegionRow: Identifiable, Equatable {
+    var id: String
+    var startSeconds: String
+    var endSeconds: String
+    var preset: CameraLayoutPreset
+    var layoutAnimation: CameraLayoutAnimation
+    var transitionSeconds: String
+    var isEnabled: Bool
+}
+
+private struct EditableCameraReactionRow: Identifiable, Equatable {
+    var id: String
+    var startSeconds: String
+    var endSeconds: String
+    var text: String
+    var isEnabled: Bool
+}
+
 private protocol EditableTimelineRangeRow {
     var id: String { get }
     var startSeconds: String { get set }
@@ -3822,6 +4031,7 @@ private protocol EditableTimelineRangeRow {
 extension EditableCutRow: EditableTimelineRangeRow {}
 extension EditableZoomRow: EditableTimelineRangeRow {}
 extension EditableOverlayRow: EditableTimelineRangeRow {}
+extension EditableCameraRegionRow: EditableTimelineRangeRow {}
 extension EditableTimeRangeRow: EditableTimelineRangeRow {}
 
 private struct EditableMarkerRow: Identifiable, Equatable {
@@ -3907,6 +4117,17 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var cursorKeyboardVisible = true
     @Published var cursorKeyboardOpacity = 0.9
     @Published var cursorHiddenRangeRows: [EditableTimeRangeRow] = []
+    @Published var cameraCorner: PictureInPictureCorner = .bottomTrailing
+    @Published var cameraWidthRatio = "0.22"
+    @Published var cameraMarginRatio = "0.04"
+    @Published var cameraAspectRatio: PictureInPictureAspectRatio = .widescreen16x9
+    @Published var cameraFrameShape: PictureInPictureFrameShape = .roundedRectangle
+    @Published var cameraCornerRadius = "12"
+    @Published var cameraMirrored = false
+    @Published var cameraBorderEnabled = false
+    @Published var cameraShadowEnabled = true
+    @Published var cameraRegionRows: [EditableCameraRegionRow] = []
+    @Published var cameraReactionRows: [EditableCameraReactionRow] = []
     @Published var annotationItemCount = 0
     @Published var annotationSidecarStatus = "Not initialized"
     @Published var annotationDraftText = "Annotation note"
@@ -4532,6 +4753,60 @@ private final class ProjectEditorModel: ObservableObject {
         return NSImage(contentsOf: imageURL)
     }
 
+    func addCameraRegionAtPlayhead(preset: CameraLayoutPreset) {
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 4)
+        let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
+        let end = min(start + 4, max(duration, start + 0.5))
+        cameraRegionRows.append(EditableCameraRegionRow(
+            id: "camera-region-\(UUID().uuidString)",
+            startSeconds: Self.formatSecondsForEditing(start),
+            endSeconds: Self.formatSecondsForEditing(end),
+            preset: preset,
+            layoutAnimation: .fade,
+            transitionSeconds: "0.18",
+            isEnabled: true
+        ))
+        clearTimelineValidation()
+    }
+
+    func removeCameraRegion(id: String) {
+        cameraRegionRows.removeAll { $0.id == id }
+        clearTimelineValidation()
+    }
+
+    func moveCameraRegion(id: String, start: Double, end: Double, duration: Double) {
+        updateRangeRow(id: id, start: start, end: end, duration: duration, rows: &cameraRegionRows)
+    }
+
+    func resizeCameraRegion(id: String, start: Double, end: Double, duration: Double) {
+        resizeRangeRow(id: id, start: start, end: end, duration: duration, rows: &cameraRegionRows)
+    }
+
+    func toggleCameraRegionEnabled(id: String) {
+        guard let index = cameraRegionRows.firstIndex(where: { $0.id == id }) else { return }
+        cameraRegionRows[index].isEnabled.toggle()
+        clearTimelineValidation()
+    }
+
+    func addCameraReactionAtPlayhead() {
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 2)
+        let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
+        let end = min(start + 1.5, max(duration, start + 0.5))
+        cameraReactionRows.append(EditableCameraReactionRow(
+            id: "camera-reaction-\(UUID().uuidString)",
+            startSeconds: Self.formatSecondsForEditing(start),
+            endSeconds: Self.formatSecondsForEditing(end),
+            text: "👍",
+            isEnabled: true
+        ))
+        clearTimelineValidation()
+    }
+
+    func removeCameraReaction(id: String) {
+        cameraReactionRows.removeAll { $0.id == id }
+        clearTimelineValidation()
+    }
+
     func generateAutoZoomsFromClicks() {
         do {
             guard zoomAutoGenerationEnabled else {
@@ -5124,15 +5399,16 @@ private final class ProjectEditorModel: ObservableObject {
         let editDecisionList = EditDecisionListFile.exists(in: projectURL)
             ? try EditDecisionListFile.load(fromProject: projectURL)
             : nil
+        let editorSettings = try EditorSettingsFile.loadIfPresent(fromProject: projectURL)
         var plan = try RenderPlan.make(
             manifest: manifest,
             projectURL: projectURL,
             destinationURL: destinationURL,
             preset: RenderPreset(fileType: renderFileType, quality: renderQuality),
             editDecisionList: editDecisionList,
-            editorSettings: try EditorSettingsFile.loadIfPresent(fromProject: projectURL)
+            editorSettings: editorSettings
         )
-        if plan.webcamOverlay != nil, manifest.capture == nil {
+        if plan.webcamOverlay != nil, manifest.capture == nil, editorSettings?.camera == nil {
             plan.webcamOverlay?.placement = Self.webcamPlacement(from: preferences.capture)
         }
         return plan
@@ -5494,6 +5770,18 @@ private final class ProjectEditorModel: ObservableObject {
                 endSeconds: Self.formatSecondsForEditing(range.endSeconds)
             )
         }
+        let camera = settings.camera ?? EditorCameraSettings()
+        cameraCorner = camera.defaultPlacement.corner
+        cameraWidthRatio = Self.formatNormalized(camera.defaultPlacement.widthRatio)
+        cameraMarginRatio = Self.formatNormalized(camera.defaultPlacement.marginRatio)
+        cameraAspectRatio = camera.defaultPlacement.aspectRatio
+        cameraFrameShape = camera.defaultPlacement.frameShape
+        cameraCornerRadius = Self.formatSecondsForEditing(camera.defaultPlacement.cornerRadius)
+        cameraMirrored = camera.defaultPlacement.isMirrored
+        cameraBorderEnabled = camera.defaultPlacement.borderEnabled
+        cameraShadowEnabled = camera.defaultPlacement.shadowEnabled
+        cameraRegionRows = camera.layoutRegions.map(Self.editableCameraRegionRow(from:))
+        cameraReactionRows = camera.reactions.map(Self.editableCameraReactionRow(from:))
     }
 
     private func currentEditorSettings() throws -> EditorSettings {
@@ -5544,6 +5832,36 @@ private final class ProjectEditorModel: ObservableObject {
             return EditTimeRange(startSeconds: start, endSeconds: end)
         }
 
+        let cameraRegions = try cameraRegionRows.map { row in
+            let start = try parseSeconds(row.startSeconds, label: "Camera region start")
+            let end = try parseSeconds(row.endSeconds, label: "Camera region end")
+            guard end > start else {
+                throw ProjectEditorError.invalidNumber("Camera region end must be greater than camera region start.")
+            }
+            return CameraLayoutRegion(
+                id: row.id,
+                range: EditTimeRange(startSeconds: start, endSeconds: end),
+                preset: row.preset,
+                placement: row.preset == .custom ? try cameraPlacementFromFields() : nil,
+                animation: row.layoutAnimation,
+                transitionSeconds: try parseNonNegative(row.transitionSeconds, label: "Camera transition"),
+                isEnabled: row.isEnabled
+            )
+        }
+        let cameraReactions = try cameraReactionRows.map { row in
+            let start = try parseSeconds(row.startSeconds, label: "Camera reaction start")
+            let end = try parseSeconds(row.endSeconds, label: "Camera reaction end")
+            guard end > start else {
+                throw ProjectEditorError.invalidNumber("Camera reaction end must be greater than camera reaction start.")
+            }
+            return CameraReaction(
+                id: row.id,
+                range: EditTimeRange(startSeconds: start, endSeconds: end),
+                text: row.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "👍" : row.text,
+                isEnabled: row.isEnabled
+            )
+        }
+
         return EditorSettings(
             canvas: EditorCanvasSettings(
                 aspectRatio: canvasAspectRatio,
@@ -5585,7 +5903,26 @@ private final class ProjectEditorModel: ObservableObject {
                     isVisible: cursorKeyboardVisible,
                     opacity: cursorKeyboardOpacity
                 )
+            ),
+            camera: EditorCameraSettings(
+                defaultPlacement: try cameraPlacementFromFields(),
+                layoutRegions: cameraRegions,
+                reactions: cameraReactions
             )
+        )
+    }
+
+    private func cameraPlacementFromFields() throws -> PictureInPicturePlacement {
+        PictureInPicturePlacement(
+            corner: cameraCorner,
+            widthRatio: try parseUnitInterval(cameraWidthRatio, label: "Camera size"),
+            marginRatio: try parseUnitInterval(cameraMarginRatio, label: "Camera margin"),
+            aspectRatio: cameraAspectRatio,
+            frameShape: cameraFrameShape,
+            cornerRadius: try parseNonNegative(cameraCornerRadius, label: "Camera corners"),
+            isMirrored: cameraMirrored,
+            borderEnabled: cameraBorderEnabled,
+            shadowEnabled: cameraShadowEnabled
         )
     }
 
@@ -6200,6 +6537,28 @@ private final class ProjectEditorModel: ObservableObject {
         )
     }
 
+    private static func editableCameraRegionRow(from region: CameraLayoutRegion) -> EditableCameraRegionRow {
+        EditableCameraRegionRow(
+            id: region.id,
+            startSeconds: formatSecondsForEditing(region.range.startSeconds),
+            endSeconds: formatSecondsForEditing(region.range.endSeconds),
+            preset: region.preset,
+            layoutAnimation: region.animation,
+            transitionSeconds: formatSecondsForEditing(region.transitionSeconds),
+            isEnabled: region.isEnabled
+        )
+    }
+
+    private static func editableCameraReactionRow(from reaction: CameraReaction) -> EditableCameraReactionRow {
+        EditableCameraReactionRow(
+            id: reaction.id,
+            startSeconds: formatSecondsForEditing(reaction.range.startSeconds),
+            endSeconds: formatSecondsForEditing(reaction.range.endSeconds),
+            text: reaction.text,
+            isEnabled: reaction.isEnabled
+        )
+    }
+
     private static func keyboardLabel(for event: KeyboardMetadataEvent) -> String {
         var parts: [String] = []
         if event.modifiers.contains(.control) {
@@ -6253,6 +6612,39 @@ private final class ProjectEditorModel: ObservableObject {
             throw ProjectEditorError.invalidNumber("\(label) must be a non-negative number.")
         }
         return number
+    }
+}
+
+private extension PictureInPictureCorner {
+    var title: String {
+        switch self {
+        case .topLeading: "Top Left"
+        case .topTrailing: "Top Right"
+        case .bottomLeading: "Bottom Left"
+        case .bottomTrailing: "Bottom Right"
+        }
+    }
+}
+
+private extension PictureInPictureAspectRatio {
+    var title: String {
+        switch self {
+        case .original: "Original"
+        case .square1x1: "1:1"
+        case .portrait2x3: "2:3"
+        case .landscape3x2: "3:2"
+        case .widescreen16x9: "16:9"
+        }
+    }
+}
+
+private extension PictureInPictureFrameShape {
+    var title: String {
+        switch self {
+        case .roundedRectangle: "Rounded"
+        case .square: "Square"
+        case .circle: "Circle"
+        }
     }
 }
 

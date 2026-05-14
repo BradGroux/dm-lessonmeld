@@ -8,17 +8,20 @@ public struct EditorSettings: Codable, Equatable, Sendable {
     public var canvas: EditorCanvasSettings
     public var zoom: EditorZoomSettings?
     public var cursor: EditorCursorSettings?
+    public var camera: EditorCameraSettings?
 
     public init(
         schemaVersion: Int = Self.currentSchemaVersion,
         canvas: EditorCanvasSettings = EditorCanvasSettings(),
         zoom: EditorZoomSettings? = EditorZoomSettings(),
-        cursor: EditorCursorSettings? = EditorCursorSettings()
+        cursor: EditorCursorSettings? = EditorCursorSettings(),
+        camera: EditorCameraSettings? = EditorCameraSettings()
     ) {
         self.schemaVersion = schemaVersion
         self.canvas = canvas
         self.zoom = zoom
         self.cursor = cursor
+        self.camera = camera
     }
 }
 
@@ -278,6 +281,172 @@ public struct EditorZoomSettings: Codable, Equatable, Sendable {
 
     public init(automaticClickZoomsEnabled: Bool = true) {
         self.automaticClickZoomsEnabled = automaticClickZoomsEnabled
+    }
+}
+
+public struct EditorCameraSettings: Codable, Equatable, Sendable {
+    public var defaultPlacement: PictureInPicturePlacement
+    public var layoutRegions: [CameraLayoutRegion]
+    public var reactions: [CameraReaction]
+
+    public init(
+        defaultPlacement: PictureInPicturePlacement = .defaultBottomTrailing,
+        layoutRegions: [CameraLayoutRegion] = [],
+        reactions: [CameraReaction] = []
+    ) {
+        self.defaultPlacement = defaultPlacement
+        self.layoutRegions = layoutRegions
+        self.reactions = reactions
+    }
+
+    public var enabledLayoutRegions: [CameraLayoutRegion] {
+        layoutRegions.filter(\.isEnabled).sorted { $0.range.startSeconds < $1.range.startSeconds }
+    }
+
+    public var enabledReactions: [CameraReaction] {
+        reactions.filter(\.isEnabled).sorted { $0.range.startSeconds < $1.range.startSeconds }
+    }
+}
+
+public struct CameraLayoutRegion: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var range: EditTimeRange
+    public var preset: CameraLayoutPreset
+    public var placement: PictureInPicturePlacement?
+    public var animation: CameraLayoutAnimation
+    public var transitionSeconds: Double
+    public var isEnabled: Bool
+
+    public init(
+        id: String,
+        range: EditTimeRange,
+        preset: CameraLayoutPreset,
+        placement: PictureInPicturePlacement? = nil,
+        animation: CameraLayoutAnimation = .fade,
+        transitionSeconds: Double = 0.18,
+        isEnabled: Bool = true
+    ) {
+        self.id = id
+        self.range = range
+        self.preset = preset
+        self.placement = placement
+        self.animation = animation
+        self.transitionSeconds = min(2, max(0, transitionSeconds.isFinite ? transitionSeconds : 0.18))
+        self.isEnabled = isEnabled
+    }
+
+    public func resolvedPlacement(default defaultPlacement: PictureInPicturePlacement) -> PictureInPicturePlacement {
+        placement ?? preset.defaultPlacement(fallback: defaultPlacement)
+    }
+}
+
+public enum CameraLayoutPreset: String, Codable, CaseIterable, Identifiable, Sendable {
+    case cornerPip
+    case sideBySide
+    case presenterFocus
+    case hidden
+    case fullCamera
+    case custom
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .cornerPip:
+            "Corner PiP"
+        case .sideBySide:
+            "Side by Side"
+        case .presenterFocus:
+            "Presenter Focus"
+        case .hidden:
+            "Hidden"
+        case .fullCamera:
+            "Full Camera"
+        case .custom:
+            "Custom"
+        }
+    }
+
+    public func defaultPlacement(fallback: PictureInPicturePlacement) -> PictureInPicturePlacement {
+        switch self {
+        case .cornerPip:
+            .defaultBottomTrailing
+        case .sideBySide:
+            PictureInPicturePlacement(
+                corner: .bottomTrailing,
+                widthRatio: 0.46,
+                marginRatio: 0.025,
+                aspectRatio: .widescreen16x9,
+                frameShape: .roundedRectangle,
+                cornerRadius: 18,
+                borderEnabled: true,
+                shadowEnabled: true
+            )
+        case .presenterFocus:
+            PictureInPicturePlacement(
+                corner: .bottomLeading,
+                widthRatio: 0.34,
+                marginRatio: 0.035,
+                aspectRatio: .square1x1,
+                frameShape: .circle,
+                borderEnabled: true,
+                shadowEnabled: true
+            )
+        case .hidden:
+            fallback
+        case .fullCamera:
+            PictureInPicturePlacement(
+                corner: .bottomLeading,
+                widthRatio: 1,
+                marginRatio: 0,
+                aspectRatio: .widescreen16x9,
+                frameShape: .square,
+                cornerRadius: 0,
+                isMirrored: fallback.isMirrored,
+                borderEnabled: false,
+                shadowEnabled: false
+            )
+        case .custom:
+            fallback
+        }
+    }
+}
+
+public enum CameraLayoutAnimation: String, Codable, CaseIterable, Identifiable, Sendable {
+    case none
+    case fade
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .none:
+            "None"
+        case .fade:
+            "Fade"
+        }
+    }
+}
+
+public struct CameraReaction: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var range: EditTimeRange
+    public var text: String
+    public var frame: NormalizedEditRect
+    public var isEnabled: Bool
+
+    public init(
+        id: String,
+        range: EditTimeRange,
+        text: String,
+        frame: NormalizedEditRect = NormalizedEditRect(x: 0.74, y: 0.18, width: 0.12, height: 0.12),
+        isEnabled: Bool = true
+    ) {
+        self.id = id
+        self.range = range
+        self.text = text
+        self.frame = frame
+        self.isEnabled = isEnabled
     }
 }
 

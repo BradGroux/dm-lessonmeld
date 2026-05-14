@@ -41,6 +41,32 @@ struct EditorSettingsTests {
                     soundVolume: 0.6
                 ),
                 keyboardOverlay: EditorKeyboardOverlaySettings(isVisible: false)
+            ),
+            camera: EditorCameraSettings(
+                defaultPlacement: PictureInPicturePlacement(
+                    corner: .topLeading,
+                    widthRatio: 0.32,
+                    marginRatio: 0.03,
+                    aspectRatio: .square1x1,
+                    frameShape: .circle,
+                    isMirrored: true,
+                    borderEnabled: true
+                ),
+                layoutRegions: [
+                    CameraLayoutRegion(
+                        id: "camera-full",
+                        range: EditTimeRange(startSeconds: 2, endSeconds: 5),
+                        preset: .fullCamera,
+                        animation: .fade
+                    )
+                ],
+                reactions: [
+                    CameraReaction(
+                        id: "reaction-1",
+                        range: EditTimeRange(startSeconds: 3, endSeconds: 4),
+                        text: "👍"
+                    )
+                ]
             )
         )
 
@@ -71,6 +97,31 @@ struct EditorSettingsTests {
         #expect(geometry.videoFrame.height < geometry.renderSize.height)
         #expect(geometry.cornerRadius > 0)
         #expect(!settings.isDefault)
+    }
+
+    @Test("Legacy editor settings decode without camera settings")
+    func legacySettingsDecodeWithoutCameraSettings() throws {
+        let json = """
+        {
+          "schemaVersion": 1,
+          "canvas": {
+            "aspectRatio": "source",
+            "background": {
+              "style": "none",
+              "primaryColor": {"red": 0, "green": 0, "blue": 0, "alpha": 1},
+              "secondaryColor": {"red": 0.5, "green": 0.2, "blue": 0.9, "alpha": 1}
+            },
+            "paddingRatio": 0,
+            "insetRatio": 0,
+            "cornerRadiusRatio": 0,
+            "shadow": {"isEnabled": false, "opacity": 0.34, "radiusRatio": 0.02, "offsetYRatio": -0.008}
+          }
+        }
+        """
+
+        let settings = try DMLessonJSON.decoder().decode(EditorSettings.self, from: Data(json.utf8))
+
+        #expect(settings.camera == nil)
     }
 }
 
