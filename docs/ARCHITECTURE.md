@@ -15,7 +15,7 @@ Sources/
     AgentBridge/           Agent-readable manifests and command catalog
     Annotation/            Shared annotation model and undoable store
     Audio/                 Microphone capture, audio models, waveform peaks
-    Captions/              Transcript and caption sidecar exporters
+    Captions/              Transcript and caption import/export helpers
     Capture/               Screen, region, webcam, cursor/keystroke metadata
     ConfigSync/            Safe local Git config/template backup planning and commits
     Editor/                Edit decision lists, canvas/camera/audio settings, trim plans, AVFoundation trim export
@@ -23,7 +23,7 @@ Sources/
     LessonProject/         Project bundle manifest, validation, JSON helpers
     LessonSettings/        Preferences snapshot, onboarding state, safe defaults
     LessonTemplate/        Lesson templates, brand presets, export presets
-    Render/                AVFoundation render plans/export with styled canvases, webcam PiP, audio gain/music mixing, cursor/click/shortcut effects, zoom regions, annotations, and transcript captions
+    Render/                AVFoundation render plans/export with styled canvases, webcam PiP, audio gain/music mixing, cursor/click/shortcut effects, zoom regions, annotations, and styled transcript captions
 
 Tests/
   DMLessonMeldCoreTests/   Core regression suite, organized by the same internal folders

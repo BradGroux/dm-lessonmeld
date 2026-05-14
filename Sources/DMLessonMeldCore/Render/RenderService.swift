@@ -392,10 +392,10 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             }
         }
 
-        if let captionSource = plan.captionSource {
+        if let captionSource = plan.captionSource, plan.captions.burnInEnabled {
             let transcript = try loadTranscript(from: captionSource.url)
             layers.append(contentsOf: transcript.segments.compactMap {
-                captionLayer(for: $0, renderSize: renderSize)
+                captionLayer(for: $0, settings: plan.captions, renderSize: renderSize)
             })
         }
 
@@ -1056,20 +1056,34 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         }
     }
 
-    private func captionLayer(for segment: TranscriptSegment, renderSize: CGSize) -> CALayer? {
+    private func captionLayer(
+        for segment: TranscriptSegment,
+        settings: EditorCaptionSettings,
+        renderSize: CGSize
+    ) -> CALayer? {
         let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, segment.endSeconds > segment.startSeconds else {
             return nil
         }
 
         let maxWidth = min(renderSize.width * 0.82, 980)
-        let fontSize = max(18, min(renderSize.height * 0.045, 34))
+        let fontSize = min(max(settings.fontSize, 12), min(renderSize.height * 0.08, 96))
         let lineHeight = fontSize * 1.28
-        let estimatedLines = max(1, min(3, Int(ceil(Double(text.count) / 42.0))))
+        let estimatedLines = max(1, min(settings.maxLineCount, Int(ceil(Double(text.count) / 42.0))))
         let height = CGFloat(estimatedLines) * lineHeight + 22
+        let safeMargin = max(18, min(renderSize.width, renderSize.height) * CGFloat(settings.safeMarginRatio))
+        let y: CGFloat
+        switch settings.placement {
+        case .top:
+            y = renderSize.height - safeMargin - height
+        case .middle:
+            y = (renderSize.height - height) / 2
+        case .bottom:
+            y = safeMargin
+        }
         let frame = CGRect(
             x: (renderSize.width - maxWidth) / 2,
-            y: max(renderSize.height * 0.07, 28),
+            y: y,
             width: maxWidth,
             height: height
         )
@@ -1080,15 +1094,15 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
         let background = CALayer()
         background.frame = container.bounds
-        background.backgroundColor = CGColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.72)
+        background.backgroundColor = cgColor(settings.backgroundColor, opacity: 1)
         background.cornerRadius = 10
         container.addSublayer(background)
 
         let textLayer = CATextLayer()
         textLayer.string = text
-        textLayer.font = "Helvetica-Bold" as CFTypeRef
+        textLayer.font = settings.fontName as CFTypeRef
         textLayer.fontSize = fontSize
-        textLayer.foregroundColor = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        textLayer.foregroundColor = cgColor(settings.textColor, opacity: 1)
         textLayer.alignmentMode = .center
         textLayer.contentsScale = 2
         textLayer.isWrapped = true

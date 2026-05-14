@@ -406,6 +406,7 @@ struct ProjectEditorView: View {
                 }
                 zoomFocusOverlay
                 overlayPreviewOverlay
+                captionPreviewOverlay
                 cursorPreviewOverlay
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -472,6 +473,8 @@ struct ProjectEditorView: View {
                         editorCameraInspector(manifest: manifest)
                     case .audio:
                         editorAudioInspector(manifest: manifest)
+                    case .captions:
+                        editorCaptionsInspector(manifest: manifest)
                     case .cursor:
                         editorCursorInspector(manifest: manifest)
                     case .export:
@@ -551,6 +554,7 @@ struct ProjectEditorView: View {
             valueLine("Overlays", "\(model.overlayRows.filter(\.isEnabled).count) enabled / \(model.overlayRows.count)")
             valueLine("Speed", "\(model.speedRows.count)")
             valueLine("Audio", "\(model.audioVolumeRows.count) regions")
+            valueLine("Captions", "\(model.captionRows.count)")
             valueLine("Markers", "\(model.markerRows.count)")
             valueLine("Annotations", "\(model.annotationItemCount)")
         }
@@ -1227,6 +1231,84 @@ struct ProjectEditorView: View {
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
     }
 
+    private func editorCaptionsInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                inspectorSectionTitle("Captions")
+                Spacer()
+                Button {
+                    model.addCaptionAtPlayhead()
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                Button {
+                    model.importCaptions()
+                } label: {
+                    Label("Import", systemImage: "square.and.arrow.down")
+                }
+            }
+
+            if model.captionRows.isEmpty {
+                Text("No captions yet. Import VTT, SRT, JSON, or text, or add a caption manually at the playhead.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach($model.captionRows) { $caption in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            compactNumberField("Start", text: $caption.startSeconds)
+                            compactNumberField("End", text: $caption.endSeconds)
+                            Button {
+                                model.seek(to: secondsValue(caption.startSeconds) ?? 0)
+                            } label: {
+                                Image(systemName: "playhead.left")
+                            }
+                            .buttonStyle(.borderless)
+                            Button {
+                                model.removeCaption(id: caption.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        TextField("Caption text", text: $caption.text, axis: .vertical)
+                            .lineLimit(2...4)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+
+            Divider()
+            inspectorSectionTitle("Burn-in Style")
+            Toggle("Burn captions into rendered video", isOn: $model.captionBurnInEnabled)
+                .toggleStyle(.checkbox)
+            Picker("Placement", selection: $model.captionPlacement) {
+                ForEach(EditorCaptionPlacement.allCases) { placement in
+                    Text(placement.title).tag(placement)
+                }
+            }
+            TextField("Font", text: $model.captionFontName)
+                .textFieldStyle(.roundedBorder)
+            numericStringSlider("Font size", text: $model.captionFontSize, range: 12...96, format: "%.0f")
+            numericStringSlider("Safe margin", text: $model.captionSafeMargin, range: 0...0.25, format: "%.2f")
+            Stepper("Max lines \(model.captionMaxLineCount)", value: $model.captionMaxLineCount, in: 1...5)
+            colorPickerRow("Text", selection: $model.captionTextColor)
+            colorPickerRow("Background", selection: $model.captionBackgroundColor)
+
+            HStack {
+                Button("Save Captions") { model.saveCaptions() }
+                Button("Export Sidecars") { model.exportCaptionSidecars() }
+                Button("Save Style") { model.saveEditorSettings() }
+            }
+            Text("Captions are stored as project-local JSON and exported as VTT, SRT, and text sidecars for packages.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private func editorCursorInspector(manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             inspectorSectionTitle("Cursor Effects")
@@ -1445,6 +1527,13 @@ struct ProjectEditorView: View {
                     Label("Overlay", systemImage: "textformat")
                 }
                 Button {
+                    model.addCaptionAtPlayhead()
+                    persistTimelineEditChanges(for: .moveCaption)
+                    editorInspectorTab = .captions
+                } label: {
+                    Label("Caption", systemImage: "captions.bubble")
+                }
+                Button {
                     model.addCursorHiddenRangeAtPlayhead()
                     persistTimelineEditChanges(for: .moveCursorHide)
                     editorInspectorTab = .cursor
@@ -1535,6 +1624,15 @@ struct ProjectEditorView: View {
                             height: 30
                         ) {
                             overlayTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                        timelineLane(
+                            title: "Captions",
+                            tint: .mint,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 30
+                        ) {
+                            captionTimelineContent(width: timelineWidth, duration: duration)
                         }
                         timelineLane(
                             title: "Camera",
@@ -1937,6 +2035,49 @@ struct ProjectEditorView: View {
         }
     }
 
+    private func captionTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            ForEach(model.captionRows) { caption in
+                if let start = secondsValue(caption.startSeconds), let end = secondsValue(caption.endSeconds), end > start {
+                    timelineBlock(
+                        title: caption.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Caption" : caption.text,
+                        tint: .mint,
+                        start: start,
+                        end: end,
+                        width: width,
+                        duration: duration,
+                        height: 22,
+                        isEnabled: true,
+                        isSelected: selectedTimelineItem == .caption(caption.id)
+                    )
+                    .onTapGesture {
+                        selectedTimelineItem = .caption(caption.id)
+                        editorInspectorTab = .captions
+                    }
+                    .gesture(timelineDragGesture(action: .moveCaption, id: caption.id, start: start, end: end, width: width, duration: duration))
+                    .overlay(alignment: .leading) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeCaptionStart, id: caption.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .overlay(alignment: .trailing) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeCaptionEnd, id: caption.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .contextMenu {
+                        Button("Jump to Caption") {
+                            model.seek(to: start)
+                        }
+                        Button("Remove Caption", role: .destructive) {
+                            model.removeCaption(id: caption.id)
+                            selectedTimelineItem = nil
+                            persistTimelineEditChanges(for: .moveCaption)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func cameraTimelineContent(width: CGFloat, duration: Double) -> some View {
         ZStack(alignment: .leading) {
             ForEach(model.cameraRegionRows) { region in
@@ -2209,6 +2350,12 @@ struct ProjectEditorView: View {
             model.resizeOverlay(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
         case .resizeOverlayEnd:
             model.resizeOverlay(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
+        case .moveCaption:
+            model.moveCaption(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
+        case .resizeCaptionStart:
+            model.resizeCaption(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
+        case .resizeCaptionEnd:
+            model.resizeCaption(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
         case .moveCameraRegion:
             model.moveCameraRegion(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
         case .resizeCameraRegionStart:
@@ -2232,6 +2379,8 @@ struct ProjectEditorView: View {
             model.saveMarkers()
         case .moveOverlay, .resizeOverlayStart, .resizeOverlayEnd:
             model.saveOverlays()
+        case .moveCaption, .resizeCaptionStart, .resizeCaptionEnd:
+            model.saveCaptions()
         case .moveAudioVolume, .resizeAudioVolumeStart, .resizeAudioVolumeEnd:
             model.saveEditorSettings()
         case .moveCameraRegion, .resizeCameraRegionStart, .resizeCameraRegionEnd:
@@ -2263,6 +2412,9 @@ struct ProjectEditorView: View {
         case .overlay(let id):
             model.removeOverlay(id: id)
             persistTimelineEditChanges(for: .moveOverlay)
+        case .caption(let id):
+            model.removeCaption(id: id)
+            persistTimelineEditChanges(for: .moveCaption)
         case .cameraRegion(let id):
             model.removeCameraRegion(id: id)
             persistTimelineEditChanges(for: .moveCameraRegion)
@@ -2515,6 +2667,39 @@ struct ProjectEditorView: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder private var captionPreviewOverlay: some View {
+        if model.captionBurnInEnabled, let caption = model.activeCaption(at: model.currentTimeSeconds) {
+            VStack {
+                if model.captionPlacement == .bottom || model.captionPlacement == .middle {
+                    Spacer()
+                }
+                Text(caption.text)
+                    .font(.system(size: CGFloat(secondsValue(model.captionFontSize) ?? 34), weight: .bold))
+                    .foregroundStyle(Color(rgba: model.captionTextColor))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(model.captionMaxLineCount)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(Color(rgba: model.captionBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                    .frame(maxWidth: 760)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, max(18, CGFloat((secondsValue(model.captionSafeMargin) ?? 0.07) * 360)))
+                    .onTapGesture {
+                        selectedTimelineItem = .caption(caption.id)
+                        editorInspectorTab = .captions
+                    }
+                if model.captionPlacement == .top {
+                    Spacer()
+                }
+                if model.captionPlacement == .middle {
+                    Spacer()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(true)
         }
     }
 
@@ -4137,6 +4322,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     case overlays
     case camera
     case audio
+    case captions
     case cursor
     case export
 
@@ -4151,6 +4337,7 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
         case .overlays: "Overlays"
         case .camera: "Camera"
         case .audio: "Audio"
+        case .captions: "Captions"
         case .cursor: "Cursor"
         case .export: "Export"
         }
@@ -4163,6 +4350,7 @@ private enum TimelineSelection: Equatable {
     case audioVolume(String)
     case zoom(String)
     case overlay(String)
+    case caption(String)
     case cameraRegion(String)
     case cursorHide(String)
     case marker(String)
@@ -4186,6 +4374,9 @@ private enum TimelineDragAction: Equatable {
     case moveOverlay
     case resizeOverlayStart
     case resizeOverlayEnd
+    case moveCaption
+    case resizeCaptionStart
+    case resizeCaptionEnd
     case moveCameraRegion
     case resizeCameraRegionStart
     case resizeCameraRegionEnd
@@ -4339,6 +4530,13 @@ private struct EditableAudioVolumeRegionRow: Identifiable, Equatable {
     var isEnabled: Bool
 }
 
+private struct EditableCaptionRow: Identifiable, Equatable {
+    var id: String
+    var startSeconds: String
+    var endSeconds: String
+    var text: String
+}
+
 private struct EditableZoomRow: Identifiable, Equatable {
     var id: String
     var startSeconds: String
@@ -4407,6 +4605,7 @@ private protocol EditableTimelineRangeRow {
 extension EditableCutRow: EditableTimelineRangeRow {}
 extension EditableSpeedRow: EditableTimelineRangeRow {}
 extension EditableAudioVolumeRegionRow: EditableTimelineRangeRow {}
+extension EditableCaptionRow: EditableTimelineRangeRow {}
 extension EditableZoomRow: EditableTimelineRangeRow {}
 extension EditableOverlayRow: EditableTimelineRangeRow {}
 extension EditableCameraRegionRow: EditableTimelineRangeRow {}
@@ -4527,6 +4726,15 @@ private final class ProjectEditorModel: ObservableObject {
     @Published var backgroundMusicFadeIn = "0.5"
     @Published var backgroundMusicFadeOut = "0.5"
     @Published var audioVolumeRows: [EditableAudioVolumeRegionRow] = []
+    @Published var captionRows: [EditableCaptionRow] = []
+    @Published var captionBurnInEnabled = true
+    @Published var captionPlacement: EditorCaptionPlacement = .bottom
+    @Published var captionFontName = "Helvetica-Bold"
+    @Published var captionFontSize = "34"
+    @Published var captionTextColor: RGBAColor = .white
+    @Published var captionBackgroundColor = RGBAColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.72)
+    @Published var captionMaxLineCount = 3
+    @Published var captionSafeMargin = "0.07"
     @Published var annotationItemCount = 0
     @Published var annotationSidecarStatus = "Not initialized"
     @Published var annotationDraftText = "Annotation note"
@@ -5264,6 +5472,47 @@ private final class ProjectEditorModel: ObservableObject {
         clearTimelineValidation()
     }
 
+    func addCaptionAtPlayhead() {
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 3)
+        let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
+        let end = min(start + 3, max(duration, start + 0.5))
+        captionRows.append(
+            EditableCaptionRow(
+                id: "caption-\(UUID().uuidString)",
+                startSeconds: Self.formatSecondsForEditing(start),
+                endSeconds: Self.formatSecondsForEditing(end),
+                text: "Caption text"
+            )
+        )
+        clearTimelineValidation()
+    }
+
+    func removeCaption(id: String) {
+        captionRows.removeAll { $0.id == id }
+        clearTimelineValidation()
+    }
+
+    func moveCaption(id: String, start: Double, end: Double, duration: Double) {
+        updateRangeRow(id: id, start: start, end: end, duration: duration, rows: &captionRows)
+    }
+
+    func resizeCaption(id: String, start: Double, end: Double, duration: Double) {
+        resizeRangeRow(id: id, start: start, end: end, duration: duration, rows: &captionRows)
+    }
+
+    func activeCaption(at seconds: Double) -> EditableCaptionRow? {
+        captionRows
+            .filter { row in
+                guard let start = optionalTimelineSeconds(row.startSeconds),
+                      let end = optionalTimelineSeconds(row.endSeconds) else {
+                    return false
+                }
+                return seconds >= start && seconds <= end
+            }
+            .sorted { ($0.startSeconds, $0.id) < ($1.startSeconds, $1.id) }
+            .last
+    }
+
     func addCameraRegionAtPlayhead(preset: CameraLayoutPreset) {
         let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 4)
         let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
@@ -5513,6 +5762,69 @@ private final class ProjectEditorModel: ObservableObject {
         guard let projectURL, let manifest else { return }
         loadOverlays(projectURL: projectURL, manifest: manifest)
         setMessage("Reloaded overlays.")
+    }
+
+    func saveCaptions() {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            let transcript = try makeTranscriptDocument()
+            try writeCaptionSidecars(transcript, projectURL: projectURL)
+            let updated = try attachCaptionSidecars(projectURL: projectURL)
+            manifest = updated
+            summary = try ProjectBundle.inspect(at: projectURL)
+            renderInspection = nil
+            setMessage("Saved captions.")
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    func importCaptions() {
+        do {
+            guard projectURL != nil else {
+                throw ProjectEditorError.projectRequired
+            }
+            let panel = NSOpenPanel()
+            panel.title = "Import Captions"
+            panel.canChooseDirectories = false
+            panel.canChooseFiles = true
+            panel.allowsMultipleSelection = false
+            panel.allowedContentTypes = Self.captionImportContentTypes
+            panel.prompt = "Import"
+            guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
+
+            let didAccess = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let data = try Data(contentsOf: sourceURL)
+            let transcript = try TranscriptImporter.transcript(from: data, fileName: sourceURL.lastPathComponent)
+            captionRows = transcript.segments.map(Self.editableCaptionRow(from:))
+            saveCaptions()
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    func exportCaptionSidecars() {
+        do {
+            guard let projectURL else {
+                throw ProjectEditorError.projectRequired
+            }
+            let transcript = try makeTranscriptDocument()
+            try writeCaptionSidecars(transcript, projectURL: projectURL)
+            let updated = try attachCaptionSidecars(projectURL: projectURL)
+            manifest = updated
+            summary = try ProjectBundle.inspect(at: projectURL)
+            setMessage("Exported caption sidecars.")
+        } catch {
+            setError(error.localizedDescription)
+        }
     }
 
     func exportEditDecisions() {
@@ -6079,6 +6391,7 @@ private final class ProjectEditorModel: ObservableObject {
         loadEditorSettings(projectURL: url)
         loadCursorPreviewMetadata(projectURL: url, manifest: loadedManifest)
         loadOverlays(projectURL: url, manifest: loadedManifest)
+        loadCaptions(projectURL: url, manifest: loadedManifest)
         refreshDefaultDestinations()
         configurePreview(projectURL: url, manifest: loadedManifest)
         loadEditDecisions(projectURL: url, manifest: loadedManifest)
@@ -6124,6 +6437,31 @@ private final class ProjectEditorModel: ObservableObject {
         } catch {
             overlayRows = []
             setError("Could not load overlays: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadCaptions(projectURL: URL, manifest: ProjectManifest) {
+        do {
+            guard let source = Self.captionSourceFile(in: manifest) else {
+                captionRows = []
+                return
+            }
+            let url = ProjectBundle.fileURL(for: source, in: projectURL)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                captionRows = []
+                return
+            }
+            let data = try Data(contentsOf: url)
+            let transcript: TranscriptDocument
+            if source.mimeType == "application/json" || source.relativePath.lowercased().hasSuffix(".json") {
+                transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
+            } else {
+                transcript = try TranscriptImporter.transcript(from: data, fileName: source.relativePath)
+            }
+            captionRows = transcript.segments.map(Self.editableCaptionRow(from:))
+        } catch {
+            captionRows = []
+            setError("Could not load captions: \(error.localizedDescription)")
         }
     }
 
@@ -6329,6 +6667,15 @@ private final class ProjectEditorModel: ObservableObject {
             backgroundMusicFadeOut = "0.5"
         }
         audioVolumeRows = audio.volumeRegions.map(Self.editableAudioVolumeRegionRow(from:))
+        let captions = settings.captions ?? EditorCaptionSettings()
+        captionBurnInEnabled = captions.burnInEnabled
+        captionPlacement = captions.placement
+        captionFontName = captions.fontName
+        captionFontSize = Self.formatSecondsForEditing(captions.fontSize)
+        captionTextColor = captions.textColor
+        captionBackgroundColor = captions.backgroundColor
+        captionMaxLineCount = captions.maxLineCount
+        captionSafeMargin = Self.formatNormalized(captions.safeMarginRatio)
     }
 
     private func currentEditorSettings() throws -> EditorSettings {
@@ -6510,6 +6857,16 @@ private final class ProjectEditorModel: ObservableObject {
                 ),
                 backgroundMusic: backgroundMusic,
                 volumeRegions: audioVolumeRegions
+            ),
+            captions: EditorCaptionSettings(
+                burnInEnabled: captionBurnInEnabled,
+                placement: captionPlacement,
+                fontName: captionFontName,
+                fontSize: try parsePositive(captionFontSize, label: "Caption font size"),
+                textColor: captionTextColor,
+                backgroundColor: captionBackgroundColor,
+                maxLineCount: captionMaxLineCount,
+                safeMarginRatio: try parseUnitInterval(captionSafeMargin, label: "Caption safe margin")
             )
         )
     }
@@ -6682,6 +7039,39 @@ private final class ProjectEditorModel: ObservableObject {
         return OverlayStore(overlays: overlays)
     }
 
+    private func makeTranscriptDocument() throws -> TranscriptDocument {
+        let segments = try captionRows.map { row in
+            let start = try parseSeconds(row.startSeconds, label: "Caption start")
+            let end = try parseSeconds(row.endSeconds, label: "Caption end")
+            let text = row.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard end > start else {
+                throw ProjectEditorError.invalidNumber("Caption end must be greater than caption start.")
+            }
+            guard !text.isEmpty else {
+                throw ProjectEditorError.invalidMetadata("Caption text is required.")
+            }
+            return TranscriptSegment(
+                id: row.id,
+                startSeconds: start,
+                endSeconds: end,
+                text: text
+            )
+        }
+        .sorted { $0.startSeconds < $1.startSeconds }
+        return TranscriptDocument(title: metadataLessonTitle.trimmingCharacters(in: .whitespacesAndNewlines), segments: segments)
+    }
+
+    private func writeCaptionSidecars(_ transcript: TranscriptDocument, projectURL: URL) throws {
+        let jsonURL = projectURL.appendingPathComponent("transcript.json")
+        let vttURL = projectURL.appendingPathComponent("captions.vtt")
+        let srtURL = projectURL.appendingPathComponent("captions.srt")
+        let txtURL = projectURL.appendingPathComponent("transcript.txt")
+        try DMLessonJSON.encoder().encode(transcript).write(to: jsonURL, options: [.atomic])
+        try TranscriptExporter.vtt(transcript).data(using: .utf8)?.write(to: vttURL, options: [.atomic])
+        try TranscriptExporter.srt(transcript).data(using: .utf8)?.write(to: srtURL, options: [.atomic])
+        try TranscriptExporter.plainText(transcript).data(using: .utf8)?.write(to: txtURL, options: [.atomic])
+    }
+
     private func attachOverlayStore(projectURL: URL) throws -> ProjectManifest {
         try ProjectBundle.updateManifest(at: projectURL) { manifest in
             let storeURL = OverlayStoreFile.url(inProject: projectURL)
@@ -6693,6 +7083,40 @@ private final class ProjectEditorModel: ObservableObject {
             )
             if !manifest.tracks.contains(where: { $0.id == "overlays" }) {
                 manifest.tracks.append(TimelineTrack(id: "overlays", kind: .overlays, displayName: "Overlays"))
+            }
+        }
+    }
+
+    private func attachCaptionSidecars(projectURL: URL) throws -> ProjectManifest {
+        try ProjectBundle.updateManifest(at: projectURL) { manifest in
+            manifest.media.transcripts.removeAll { ["transcript.json", "transcript.txt"].contains($0.relativePath) }
+            manifest.media.transcripts.append(Self.projectFile(
+                for: projectURL.appendingPathComponent("transcript.json"),
+                role: .transcript,
+                projectURL: projectURL,
+                mimeType: "application/json"
+            ))
+            manifest.media.transcripts.append(Self.projectFile(
+                for: projectURL.appendingPathComponent("transcript.txt"),
+                role: .transcript,
+                projectURL: projectURL,
+                mimeType: "text/plain"
+            ))
+            manifest.media.captions.removeAll { ["captions.vtt", "captions.srt"].contains($0.relativePath) }
+            manifest.media.captions.append(Self.projectFile(
+                for: projectURL.appendingPathComponent("captions.vtt"),
+                role: .captions,
+                projectURL: projectURL,
+                mimeType: "text/vtt"
+            ))
+            manifest.media.captions.append(Self.projectFile(
+                for: projectURL.appendingPathComponent("captions.srt"),
+                role: .captions,
+                projectURL: projectURL,
+                mimeType: "application/x-subrip"
+            ))
+            if !manifest.tracks.contains(where: { $0.id == "captions" }) {
+                manifest.tracks.append(TimelineTrack(id: "captions", kind: .captions, displayName: "Captions"))
             }
         }
     }
@@ -6889,6 +7313,10 @@ private final class ProjectEditorModel: ObservableObject {
         [.mpeg4Movie, .quickTimeMovie]
     }
 
+    private static var captionImportContentTypes: [UTType] {
+        ["json", "vtt", "srt", "txt", "md"].compactMap { UTType(filenameExtension: $0) }
+    }
+
     private static let supportedEditableVideoExtensions: Set<String> = ["mp4", "mov"]
 
     private static func makeImportedVideoProjectURL(for sourceURL: URL, in root: URL) throws -> URL {
@@ -7045,6 +7473,20 @@ private final class ProjectEditorModel: ObservableObject {
         return !editDecisionList.enabledZoomRegions.isEmpty
     }
 
+    private static func captionSourceFile(in manifest: ProjectManifest) -> ProjectFile? {
+        if let transcript = manifest.media.transcripts.first(where: {
+            $0.mimeType == "application/json" || $0.relativePath.lowercased().hasSuffix(".json")
+        }) {
+            return transcript
+        }
+        if let caption = manifest.media.captions.first(where: {
+            $0.mimeType == "application/json" || $0.relativePath.lowercased().hasSuffix(".json")
+        }) {
+            return caption
+        }
+        return manifest.media.captions.first ?? manifest.media.transcripts.first
+    }
+
     private func parseSeconds(_ value: String, label: String) throws -> Double {
         guard let seconds = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)), seconds >= 0 else {
             throw ProjectEditorError.invalidNumber("\(label) must be a non-negative number.")
@@ -7196,6 +7638,15 @@ private final class ProjectEditorModel: ObservableObject {
             fadeInSeconds: formatSecondsForEditing(region.fadeInSeconds),
             fadeOutSeconds: formatSecondsForEditing(region.fadeOutSeconds),
             isEnabled: region.isEnabled
+        )
+    }
+
+    private static func editableCaptionRow(from segment: TranscriptSegment) -> EditableCaptionRow {
+        EditableCaptionRow(
+            id: segment.id,
+            startSeconds: formatSecondsForEditing(segment.startSeconds),
+            endSeconds: formatSecondsForEditing(segment.endSeconds),
+            text: segment.text
         )
     }
 

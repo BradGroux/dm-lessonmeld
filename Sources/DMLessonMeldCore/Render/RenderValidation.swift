@@ -84,8 +84,12 @@ public enum RenderPlanValidator {
         validateSpeedRegions(plan.speedRegions, issues: &issues)
         validateCameraSettings(plan.camera, issues: &issues)
         validateAudioSettings(plan.audio, projectURL: plan.projectURL, issues: &issues, fileManager: fileManager, checkFileExistence: options.checkFileExistence)
+        validateCaptionSettings(plan.captions, issues: &issues)
         if let annotationSource = plan.annotationSource {
             validateAnnotations(annotationSource, issues: &issues, fileManager: fileManager)
+        }
+        if let captionSource = plan.captionSource {
+            validateCaptions(captionSource, issues: &issues, fileManager: fileManager)
         }
         if let overlaySource = plan.overlaySource {
             validateOverlays(overlaySource, projectURL: plan.projectURL, issues: &issues, fileManager: fileManager)
@@ -417,6 +421,78 @@ public enum RenderPlanValidator {
             issues.append(RenderValidationIssue(
                 severity: .error,
                 message: "Annotation sidecar could not be decoded.",
+                path: source.relativePath
+            ))
+        }
+    }
+
+    private static func validateCaptionSettings(
+        _ settings: EditorCaptionSettings,
+        issues: inout [RenderValidationIssue]
+    ) {
+        if settings.fontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Caption font name is required.",
+                path: "captions.fontName"
+            ))
+        }
+        if !settings.fontSize.isFinite || settings.fontSize < 12 || settings.fontSize > 96 {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Caption font size must be finite and between 12 and 96.",
+                path: "captions.fontSize"
+            ))
+        }
+        if settings.maxLineCount < 1 || settings.maxLineCount > 5 {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Caption line count must be between 1 and 5.",
+                path: "captions.maxLineCount"
+            ))
+        }
+        if !settings.safeMarginRatio.isFinite || settings.safeMarginRatio < 0 || settings.safeMarginRatio > 0.25 {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Caption safe margin must be finite and between 0 and 0.25.",
+                path: "captions.safeMarginRatio"
+            ))
+        }
+    }
+
+    private static func validateCaptions(
+        _ source: RenderMediaSource,
+        issues: inout [RenderValidationIssue],
+        fileManager: FileManager
+    ) {
+        guard fileManager.fileExists(atPath: source.url.path) else { return }
+        do {
+            let data = try Data(contentsOf: source.url)
+            let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
+            for (index, segment) in transcript.segments.enumerated() {
+                let path = "captions[\(index)]"
+                if !segment.startSeconds.isFinite ||
+                    !segment.endSeconds.isFinite ||
+                    segment.startSeconds < 0 ||
+                    segment.endSeconds <= segment.startSeconds {
+                    issues.append(RenderValidationIssue(
+                        severity: .error,
+                        message: "Caption timing must be finite, non-negative, and end after start.",
+                        path: "\(path).range"
+                    ))
+                }
+                if segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    issues.append(RenderValidationIssue(
+                        severity: .error,
+                        message: "Caption text is required.",
+                        path: "\(path).text"
+                    ))
+                }
+            }
+        } catch {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Caption sidecar could not be decoded.",
                 path: source.relativePath
             ))
         }

@@ -103,6 +103,19 @@ Use the **Audio** inspector tab to adjust captured sound and lesson pacing.
 
 Volume and music settings are saved in `editor-settings.json` and are applied by the full render exporter. Speed regions are saved in `edit-decisions.json`; render inspection blocks export while speed regions exist until AV retiming support is implemented, so the unsupported state is explicit instead of silently producing the wrong video.
 
+## Edit Captions
+
+Use the **Captions** inspector tab to review, retime, style, and export caption sidecars.
+
+- Import JSON transcript, VTT, SRT, plain text, or Markdown files.
+- Add manual captions at the playhead when no transcription runtime is available.
+- Edit caption text in sync with preview playback.
+- Drag or resize caption blocks in the **Captions** timeline lane.
+- Choose burn-in placement, font, size, text color, background color, max line count, and safe margin.
+- Save captions to project-local `transcript.json`, `captions.vtt`, `captions.srt`, and `transcript.txt` sidecars.
+
+Render/export uses the JSON transcript source for styled burned-in captions. LearnHouse packaging includes the project-local caption and transcript sidecars because they are attached to the lesson manifest.
+
 ## Add Video Overlays
 
 Use the **Overlays** inspector tab or the overlay timeline lane to add project-local text, shapes, callouts, arrows, images, masks, and highlights.
