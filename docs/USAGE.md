@@ -49,13 +49,15 @@ Open a `.dmlm` lesson bundle from the sidebar or Finder. The project editor lets
 
 - Edit lesson title, course, module, instructor, tags, and summary
 - Style the final video canvas with aspect ratio, custom dimensions, crop, background, padding, inset, rounded corners, and shadow controls
-- Review media readiness
+- Review media readiness and project assets
 - Add and edit markers
 - Save timeline cuts, zoom regions, and timed video overlays
 - Scrub through a bottom timeline with clip, cut, zoom, overlay, cursor, and marker lanes
 - Open annotation tools
 - Render local video files
 - Package course exports
+
+Use **Assets** in the editor inspector, or **Project Assets** on the project dashboard, to inspect the editable `.dmlm` lesson project separately from source videos, audio sidecars, captions, overlays, annotations, edit decisions, and export destinations. Asset rows show status, size when available, validation issues, and Finder actions for opening or revealing the underlying file.
 
 Technical bundle details are kept in advanced sections so normal review work stays readable.
 
