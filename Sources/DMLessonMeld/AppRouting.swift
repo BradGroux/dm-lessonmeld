@@ -3,9 +3,14 @@ import Foundation
 @MainActor
 final class LessonMeldAppRouter: ObservableObject {
     @Published private(set) var settingsRequest: LessonMeldSettingsWindowRequest?
+    @Published private(set) var importVideoRequest: UUID?
 
     func openSettings(_ section: LessonMeldSettingsSection? = nil) {
         settingsRequest = LessonMeldSettingsWindowRequest(section: section)
+    }
+
+    func importVideoForEditing() {
+        importVideoRequest = UUID()
     }
 }
 

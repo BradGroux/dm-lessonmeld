@@ -168,7 +168,9 @@ public final class CameraRecorder: @unchecked Sendable {
         lock.lock()
         let output = activeOutput
         lock.unlock()
-        output?.stopRecording()
+        if let output {
+            Self.stopOutputIfRecording(output)
+        }
     }
 
     public func record(_ request: CameraRecordingRequest) async throws -> CameraRecordingResult {
@@ -222,23 +224,28 @@ public final class CameraRecorder: @unchecked Sendable {
 
         do {
             try await Task.sleep(nanoseconds: UInt64(request.durationSeconds * 1_000_000_000))
-            output.stopRecording()
+            Self.stopOutputIfRecording(output)
             let result = try await delegate.waitForFinish()
             session.stopRunning()
             clearActiveCapture()
             return result
         } catch is CancellationError {
-            output.stopRecording()
+            Self.stopOutputIfRecording(output)
             let result = try await delegate.waitForFinish()
             session.stopRunning()
             clearActiveCapture()
             return result
         } catch {
-            output.stopRecording()
+            Self.stopOutputIfRecording(output)
             session.stopRunning()
             clearActiveCapture()
             throw error
         }
+    }
+
+    private static func stopOutputIfRecording(_ output: AVCaptureMovieFileOutput) {
+        guard output.isRecording else { return }
+        output.stopRecording()
     }
 
     private func clearActiveCapture() {

@@ -68,9 +68,15 @@ struct QuickRecorderPanel: View {
 
             if let lastProjectPath = model.lastProjectPath {
                 Button {
+                    model.openLastProjectInEditor()
+                } label: {
+                    Label("Review Last Lesson", systemImage: "film.stack")
+                }
+
+                Button {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: lastProjectPath)])
                 } label: {
-                    Label("Reveal Recording", systemImage: "arrow.up.forward.app")
+                    Label("Reveal Bundle", systemImage: "arrow.up.forward.app")
                 }
             }
         }
@@ -109,9 +115,14 @@ private struct QuickRecordingControlBar: View {
         .onAppear {
             model.applyPreferences(preferences.snapshot)
             model.refreshCaptureChoices()
+            model.refitControlBar()
         }
         .onChange(of: preferences.snapshot) { _, snapshot in
             model.applyPreferences(snapshot)
+            model.refitControlBar()
+        }
+        .onChange(of: model.controlBarLayoutSignature) { _, _ in
+            model.refitControlBar()
         }
     }
 
@@ -124,7 +135,7 @@ private struct QuickRecordingControlBar: View {
             ControlBarDivider()
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.isRenderingCompletion ? "Saving Video" : "Recording Saved")
+                Text(model.isRenderingCompletion ? "Exporting Video" : "Lesson Project Saved")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(ControlBarPalette.primaryText)
                 Text(model.isRenderingCompletion ? model.formattedCompletionRenderProgress : completion.projectName)
@@ -137,16 +148,16 @@ private struct QuickRecordingControlBar: View {
 
             ControlBarDivider()
 
-            ControlBarButton(icon: "film.stack", title: "Edit") {
+            ControlBarButton(icon: "film.stack", title: "Review") {
                 model.openCompletionInEditor()
             }
 
-            ControlBarButton(icon: "square.and.arrow.down", title: model.isRenderingCompletion ? "Saving" : "Save") {
+            ControlBarButton(icon: "square.and.arrow.down", title: model.isRenderingCompletion ? "Exporting" : "Export") {
                 model.saveCompletionVideo(preferences.snapshot)
             }
             .disabled(model.isRenderingCompletion)
 
-            ControlBarButton(icon: "folder", title: "Reveal") {
+            ControlBarButton(icon: "folder", title: "Reveal Project") {
                 model.revealCompletion()
             }
 
@@ -161,7 +172,7 @@ private struct QuickRecordingControlBar: View {
 
             ControlBarDivider()
 
-            PrimaryControlBarButton(icon: "record.circle.fill", title: "New") {
+            PrimaryControlBarButton(icon: "record.circle.fill", title: "New Recording") {
                 model.dismissCompletion()
                 model.startRecording(preferences.snapshot)
             }
@@ -1537,6 +1548,22 @@ final class QuickRecorderModel: ObservableObject {
         !isRecording && !isStopping
     }
 
+    var controlBarLayoutSignature: String {
+        [
+            isRecording ? "recording" : "idle",
+            isPaused ? "paused" : "active",
+            isStopping ? "stopping" : "running",
+            completion == nil ? "setup" : "completion",
+            captureWebcam ? "webcam" : "no-webcam",
+            captureMicrophone ? "microphone" : "no-microphone",
+            captureSystemAudio ? "system-audio" : "no-system-audio",
+            recordTarget.rawValue,
+            "\(recordingMarkerCount)",
+            isRenderingCompletion ? "rendering" : "not-rendering",
+            isPackagingCompletion ? "packaging" : "not-packaging"
+        ].joined(separator: "|")
+    }
+
     var startHelpText: String {
         if !screenGranted {
             return "Grant Screen Recording permission first."
@@ -1584,6 +1611,7 @@ final class QuickRecorderModel: ObservableObject {
 
         if let controlBarWindow {
             controlBarWindow.orderFrontRegardless()
+            refitControlBar()
             return
         }
 
@@ -1597,6 +1625,12 @@ final class QuickRecorderModel: ObservableObject {
         window.orderFrontRegardless()
         message = "Choose capture target and inputs, then start recording from the control bar."
         publishStatus()
+    }
+
+    func refitControlBar() {
+        Task { @MainActor in
+            controlBarWindow?.refitToContent()
+        }
     }
 
     func setHideRecorderControlsFromCapture(_ hide: Bool) {
@@ -1817,6 +1851,7 @@ final class QuickRecorderModel: ObservableObject {
             let captureWebcam = captureWebcam
             let captureSystemAudio = captureSystemAudio
             let captureInteractionMetadata = captureInteractionMetadata
+            let taskRegistry = recordingRuntime.taskRegistry
 
             let task = Task {
                 var metadataCapture: InteractionMetadataCaptureSession?
@@ -1860,7 +1895,8 @@ final class QuickRecorderModel: ObservableObject {
                         cameraDeviceID: cameraDeviceID,
                         displayRecorder: displayRecorder,
                         microphoneRecorder: microphoneRecorder,
-                        cameraRecorder: cameraRecorder
+                        cameraRecorder: cameraRecorder,
+                        taskRegistry: taskRegistry
                     )
                     if let metadataCapture {
                         let document = await MainActor.run {
@@ -1889,7 +1925,7 @@ final class QuickRecorderModel: ObservableObject {
                     }
                 }
             }
-            recordingRuntime.recordingTask = task
+            recordingRuntime.setRecordingTask(task)
         } catch {
             message = error.localizedDescription
         }
@@ -1973,13 +2009,25 @@ final class QuickRecorderModel: ObservableObject {
 
     func openCompletionInEditor() {
         guard let completion else { return }
+        openProjectInEditor(completion.projectURL, projectName: completion.projectName)
+    }
+
+    func openLastProjectInEditor() {
+        guard let lastProjectPath else { return }
+        let projectURL = URL(fileURLWithPath: lastProjectPath)
+        openProjectInEditor(projectURL, projectName: projectURL.lastPathComponent)
+    }
+
+    private func openProjectInEditor(_ projectURL: URL, projectName: String, updateMessage: Bool = true) {
         if let openProjectHandler {
-            openProjectHandler(completion.projectURL)
+            openProjectHandler(projectURL)
         } else {
-            ProjectOpenRouter.shared.publish(completion.projectURL)
+            ProjectOpenRouter.shared.publish(projectURL)
         }
         NSApplication.shared.activate()
-        message = "Opened \(completion.projectName) in the editor."
+        if updateMessage {
+            message = "Opened \(projectName) in the editor."
+        }
     }
 
     func revealCompletion() {
@@ -2079,11 +2127,13 @@ final class QuickRecorderModel: ObservableObject {
         } else {
             persistMarkers(markers, to: projectURL)
             lastProjectPath = projectURL.path
-            completion = QuickRecordingCompletion(projectURL: projectURL)
+            let savedCompletion = QuickRecordingCompletion(projectURL: projectURL)
+            completion = savedCompletion
+            openProjectInEditor(savedCompletion.projectURL, projectName: savedCompletion.projectName, updateMessage: false)
             if warnings.isEmpty {
-                message = "Recorded \(Int(screenSize.width))x\(Int(screenSize.height)) \(recordTarget.displayName.lowercased()) lesson bundle."
+                message = "Ready to review \(savedCompletion.projectName) in the editor."
             } else {
-                message = "Recorded screen bundle. \(warnings.joined(separator: " "))"
+                message = "Ready to review \(savedCompletion.projectName). \(warnings.joined(separator: " "))"
             }
         }
 
@@ -2257,7 +2307,8 @@ final class QuickRecorderModel: ObservableObject {
         cameraDeviceID: String?,
         displayRecorder: DisplayScreenRecorder,
         microphoneRecorder: MicrophoneRecorder?,
-        cameraRecorder: CameraRecorder?
+        cameraRecorder: CameraRecorder?,
+        taskRegistry: QuickRecordingTaskRegistry
     ) async throws -> ProjectRecordingResult {
         let projectURL = try makeProjectURL(preferences: preferences)
         let microphoneURL = projectURL.appendingPathComponent("microphone.m4a")
@@ -2348,6 +2399,11 @@ final class QuickRecorderModel: ObservableObject {
             } else {
                 nil
             }
+            taskRegistry.setTrackTasks(
+                screenTask: screenTask,
+                microphoneTask: microphoneTask,
+                webcamTask: webcamTask
+            )
 
             let screenResult = try await screenTask!.value
             if Task.isCancelled {
@@ -2479,7 +2535,7 @@ final class QuickRecorderModel: ObservableObject {
         let root = expandedPath(preferences.general.defaultProjectDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
-        let baseName = "recording-\(formatter.string(from: Date()))"
+        let baseName = "lesson-\(formatter.string(from: Date()))"
         for attempt in 0..<20 {
             let suffix = attempt == 0 ? "" : "-\(String(UUID().uuidString.prefix(8)).lowercased())"
             let projectURL = root.appendingPathComponent("\(baseName)\(suffix).dmlm", isDirectory: true)
@@ -2796,7 +2852,7 @@ final class QuickRecorderModel: ObservableObject {
 
 @MainActor
 private final class QuickRecordingRuntime {
-    var recordingTask: Task<Void, Never>?
+    let taskRegistry = QuickRecordingTaskRegistry()
     var interactionMetadataCapture: InteractionMetadataCaptureSession?
 
     private var displayRecorder: DisplayScreenRecorder?
@@ -2811,6 +2867,11 @@ private final class QuickRecordingRuntime {
         self.displayRecorder = displayRecorder
         self.microphoneRecorder = microphoneRecorder
         self.cameraRecorder = cameraRecorder
+        taskRegistry.configure(cameraRecorder: cameraRecorder)
+    }
+
+    func setRecordingTask(_ task: Task<Void, Never>) {
+        taskRegistry.setRecordingTask(task)
     }
 
     func pause() {
@@ -2828,16 +2889,98 @@ private final class QuickRecordingRuntime {
     }
 
     func requestStop() {
-        recordingTask?.cancel()
-        cameraRecorder?.stopRecording()
+        taskRegistry.requestStop()
     }
 
     func clear() {
-        recordingTask = nil
+        taskRegistry.clear()
         displayRecorder = nil
         microphoneRecorder = nil
         cameraRecorder = nil
         interactionMetadataCapture = nil
+    }
+}
+
+private final class QuickRecordingTaskRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordingTask: Task<Void, Never>?
+    private var screenTask: Task<RecordingResult, Error>?
+    private var microphoneTask: Task<AudioRecordingResult, Error>?
+    private var webcamTask: Task<CameraRecordingResult, Error>?
+    private var cameraRecorder: CameraRecorder?
+
+    func configure(cameraRecorder: CameraRecorder?) {
+        lock.lock()
+        screenTask = nil
+        microphoneTask = nil
+        webcamTask = nil
+        self.cameraRecorder = cameraRecorder
+        lock.unlock()
+    }
+
+    func setRecordingTask(_ task: Task<Void, Never>) {
+        lock.lock()
+        recordingTask = task
+        lock.unlock()
+    }
+
+    func setTrackTasks(
+        screenTask: Task<RecordingResult, Error>?,
+        microphoneTask: Task<AudioRecordingResult, Error>?,
+        webcamTask: Task<CameraRecordingResult, Error>?
+    ) {
+        lock.lock()
+        self.screenTask = screenTask
+        self.microphoneTask = microphoneTask
+        self.webcamTask = webcamTask
+        lock.unlock()
+    }
+
+    func requestStop() {
+        let snapshot = snapshot()
+        if snapshot.hasTrackTasks {
+            snapshot.screenTask?.cancel()
+            snapshot.microphoneTask?.cancel()
+            snapshot.webcamTask?.cancel()
+            snapshot.cameraRecorder?.stopRecording()
+        } else {
+            snapshot.recordingTask?.cancel()
+            snapshot.cameraRecorder?.stopRecording()
+        }
+    }
+
+    func clear() {
+        lock.lock()
+        recordingTask = nil
+        screenTask = nil
+        microphoneTask = nil
+        webcamTask = nil
+        cameraRecorder = nil
+        lock.unlock()
+    }
+
+    private func snapshot() -> TaskSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return TaskSnapshot(
+            recordingTask: recordingTask,
+            screenTask: screenTask,
+            microphoneTask: microphoneTask,
+            webcamTask: webcamTask,
+            cameraRecorder: cameraRecorder
+        )
+    }
+
+    private struct TaskSnapshot {
+        var recordingTask: Task<Void, Never>?
+        var screenTask: Task<RecordingResult, Error>?
+        var microphoneTask: Task<AudioRecordingResult, Error>?
+        var webcamTask: Task<CameraRecordingResult, Error>?
+        var cameraRecorder: CameraRecorder?
+
+        var hasTrackTasks: Bool {
+            screenTask != nil || microphoneTask != nil || webcamTask != nil
+        }
     }
 }
 
@@ -2916,6 +3059,12 @@ private final class QuickRecordingControlBarWindow: NSPanel, NSWindowDelegate {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    func refitToContent() {
+        guard let contentView else { return }
+        contentView.layoutSubtreeIfNeeded()
+        refit(size: contentView.fittingSize)
+    }
+
     func setHiddenFromCapture(_ isHidden: Bool) {
         sharingType = isHidden ? .none : .readOnly
     }
@@ -2949,6 +3098,17 @@ private final class QuickRecordingControlBarWindow: NSPanel, NSWindowDelegate {
         let x = min(max(origin.x, visible.minX), max(visible.minX, visible.maxX - size.width))
         let y = min(max(origin.y, visible.minY), max(visible.minY, visible.maxY - size.height))
         return NSRect(origin: NSPoint(x: x, y: y), size: size)
+    }
+
+    private func refit(size: NSSize) {
+        let nextSize = Self.clampedSize(size)
+        guard nextSize.width > 0, nextSize.height > 0 else { return }
+        let currentFrame = frame
+        let origin = currentFrame.width > 1 && currentFrame.height > 1
+            ? NSPoint(x: currentFrame.midX - nextSize.width / 2, y: currentFrame.minY)
+            : Self.defaultOrigin(for: nextSize)
+        setFrame(Self.clampedFrame(origin: origin, size: nextSize), display: true, animate: false)
+        contentView?.frame = NSRect(origin: .zero, size: nextSize)
     }
 }
 

@@ -10,10 +10,11 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 
 - Native macOS app with standard menu, main window, settings, onboarding, command palette, diagnostics, and local project editor
 - Floating recording control bar for display, window, and area capture with microphone, webcam, and system audio controls
+- Existing MP4/MOV import that creates a lesson project and opens a preview-first timeline editor immediately
 - Local `.dmlm` lesson bundles with screen media, audio/video sidecars, edit decisions, annotations, markers, transcripts, render settings, and export metadata
 - Live annotation overlay with cursor, pen, highlighter, eraser, line, box, ellipse, arrow, text, laser pointer, whiteboard, blackboard, colors, line weights, text sizes, undo/redo, copy, and clear controls
 - Webcam picture-in-picture settings for aspect ratio, shape, corners, mirroring, border, shadow, resolution, and FPS
-- Edit-decision sidecars for cuts and zoom regions
+- Timeline edit-decision sidecars for trims, cuts, markers, and zoom regions
 - Render planning/export with webcam PiP, cursor/click/shortcut effects, zooms, annotations, and captions
 - Caption and transcript sidecar exporters
 - Local package export for course publishing workflows

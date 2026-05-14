@@ -29,22 +29,29 @@ You can continue without optional permissions and enable them later from **Setti
 ## Record a Lesson
 
 1. Open LessonMeld.
-2. Click **Record** in the sidebar.
+2. Click **Record** in the sidebar to capture immediately.
 3. Choose the capture target from the floating recorder.
 4. Confirm camera, microphone, annotation, and audio choices.
 5. Press the record button.
 6. Use the floating controls to pause, stop, mark moments, or open settings.
 
-Recordings are saved into local `.dmlm` project bundles.
+When you press **Stop**, LessonMeld opens the saved lesson in the editor. The `.dmlm` item is a macOS package directory: it is the lesson project, not the final video file. It contains `screen.mp4`, optional webcam/audio tracks, and the local sidecars used for review, cuts, zooms, annotations, rendering, and course packaging.
+
+## Edit an Existing Video
+
+Use **Edit Video** in the sidebar, **File > Create Project from Video...**, the command palette, or the menu bar extra to import an existing MP4 or MOV.
+
+LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the timeline editor immediately. Imported videos use the full editing workspace: a large preview canvas, custom playback controls, trim in/out points, cut blocks, zoom blocks, markers, annotation controls, export controls, and a bottom timeline. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle.
 
 ## Review a Project
 
-Open a `.dmlm` bundle from the sidebar or Finder. The project editor lets you:
+Open a `.dmlm` lesson bundle from the sidebar or Finder. The project editor lets you:
 
 - Edit lesson title, course, module, instructor, tags, and summary
 - Review media readiness
 - Add and edit markers
-- Save cuts and zoom regions
+- Save timeline cuts and zoom regions
+- Scrub through a bottom timeline with clip, cut, zoom, and marker lanes
 - Open annotation tools
 - Render local video files
 - Package course exports

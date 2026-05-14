@@ -17,6 +17,8 @@ struct ProjectEditorView: View {
     @State private var didShowRecoveryNoticeThisLaunch = false
     @State private var showTechnicalDetails = false
     @State private var showLessonMarkers = true
+    @State private var editorInspectorTab: EditorInspectorTab = .edits
+    @State private var timelineZoom = 1.0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -56,6 +58,9 @@ struct ProjectEditorView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             quickRecorder.refreshPermissions(updateMessage: false)
         }
+        .onReceive(appRouter.$importVideoRequest.compactMap(\.self)) { _ in
+            model.importVideoForEditing(preferences.snapshot)
+        }
     }
 
     private func applyLaunchPreferences() {
@@ -82,9 +87,17 @@ struct ProjectEditorView: View {
 
     @ViewBuilder private var contentPane: some View {
         if model.projectURL != nil, let manifest = model.manifest, let summary = model.summary {
-            ScrollView {
-                projectDashboard(summary: summary, manifest: manifest)
-                    .contentPadding(top: 44)
+            if manifest.media.screen != nil {
+                mediaEditorWorkspace(summary: summary, manifest: manifest)
+                    .padding(.top, 44)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    projectDashboard(summary: summary, manifest: manifest)
+                        .contentPadding(top: 44)
+                }
             }
         } else {
             firstRunDashboard
@@ -110,6 +123,13 @@ struct ProjectEditorView: View {
                 quickRecorder.presentControlBar(preferences: preferences)
             } label: {
                 Label(quickRecorder.isRecording ? "Recording Controls" : "Record", systemImage: "record.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button {
+                model.importVideoForEditing(preferences.snapshot)
+            } label: {
+                Label("Edit Video", systemImage: "film")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -186,7 +206,7 @@ struct ProjectEditorView: View {
                     .textSelection(.enabled)
                     .lineLimit(8)
             } else {
-                Text("Create or open a `.dmlm` bundle to record media, review readiness, render cuts, and package a teaching-ready lesson.")
+                Text("Record a new lesson, import an existing video, or open a lesson bundle to review media, render cuts, and package a teaching-ready lesson.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -236,6 +256,760 @@ struct ProjectEditorView: View {
             annotationProjectPanel(manifest: manifest)
             technicalDetailsPanel(summary: summary, manifest: manifest)
         }
+    }
+
+    private func mediaEditorWorkspace(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
+        VStack(spacing: 0) {
+            mediaEditorTopBar(summary: summary, manifest: manifest)
+                .padding(.bottom, 12)
+
+            Divider()
+
+            HStack(spacing: 0) {
+                mediaEditorStage(manifest: manifest)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+
+                Divider()
+
+                mediaEditorInspector(summary: summary, manifest: manifest)
+                    .frame(width: 360)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            mediaTimelineEditor(manifest: manifest)
+                .frame(height: 236)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func mediaEditorTopBar(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Label("Edit Video", systemImage: "film")
+                        .font(.headline)
+                    statusPill(reviewStatus(manifest), systemImage: "timeline.selection", tint: hasBlockingIssues(summary) ? .red : .blue)
+                }
+                Text(manifest.metadata.lessonTitle)
+                    .font(.title2.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let projectURL = model.projectURL {
+                    Label(projectURL.path, systemImage: "folder")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+            }
+
+            Spacer()
+
+            Button {
+                model.importVideoForEditing(preferences.snapshot)
+            } label: {
+                Label("Import", systemImage: "film.badge.plus")
+            }
+
+            Button {
+                model.saveEditDecisions()
+            } label: {
+                Label("Save Edits", systemImage: "checkmark.circle")
+            }
+            .disabled(model.projectURL == nil)
+
+            Button {
+                model.exportRender(preferences.snapshot)
+            } label: {
+                Label(model.isRendering ? "Rendering..." : "Export", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(model.isRendering || model.projectURL == nil)
+        }
+    }
+
+    private func mediaEditorStage(manifest: ProjectManifest) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Button {
+                    model.togglePlayback()
+                } label: {
+                    Label(model.isPlaying ? "Pause" : "Play", systemImage: model.isPlaying ? "pause.fill" : "play.fill")
+                }
+                .keyboardShortcut(.space, modifiers: [])
+
+                Text("\(model.formattedCurrentTime) / \(model.formattedDuration)")
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 148, alignment: .leading)
+
+                Slider(
+                    value: Binding(
+                        get: { model.currentTimeSeconds },
+                        set: { model.seek(to: $0) }
+                    ),
+                    in: 0...max(model.previewDurationSeconds, 1)
+                )
+
+                Button {
+                    model.setTrimStartToPlayhead()
+                } label: {
+                    Label("Trim In", systemImage: "timeline.selection")
+                }
+
+                Button {
+                    model.setTrimEndToPlayhead()
+                } label: {
+                    Label("Trim Out", systemImage: "timeline.selection")
+                }
+
+                Button {
+                    model.addCutAtPlayhead()
+                    editorInspectorTab = .cuts
+                } label: {
+                    Label("Cut", systemImage: "scissors")
+                }
+
+                Button {
+                    model.addZoomAtPlayhead()
+                    editorInspectorTab = .zooms
+                } label: {
+                    Label("Zoom", systemImage: "plus.magnifyingglass")
+                }
+            }
+
+            ZStack {
+                Color.black
+
+                if let player = model.player {
+                    ProjectVideoPlayer(player: player, controlsStyle: .none)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Text("Preview will load after the project screen video is available.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            HStack(spacing: 10) {
+                Button {
+                    model.copyCurrentFrame()
+                } label: {
+                    Label("Copy Frame", systemImage: "doc.on.doc")
+                }
+                Button {
+                    model.exportCurrentFrame()
+                } label: {
+                    Label("Export Frame...", systemImage: "photo")
+                }
+                Button {
+                    openAnnotationOverlayFromEditor()
+                } label: {
+                    Label("Annotate", systemImage: "paintpalette")
+                }
+                Spacer()
+                if model.isRendering {
+                    ProgressView(value: model.renderProgress)
+                        .frame(width: 160)
+                    Text("\(Int((model.renderProgress * 100).rounded()))%")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.trailing, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func mediaEditorInspector(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Inspector", selection: $editorInspectorTab) {
+                ForEach(EditorInspectorTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    switch editorInspectorTab {
+                    case .edits:
+                        editorEditsInspector(manifest: manifest)
+                    case .cuts:
+                        editorCutsInspector(manifest: manifest)
+                    case .zooms:
+                        editorZoomsInspector(manifest: manifest)
+                    case .export:
+                        editorExportInspector(summary: summary, manifest: manifest)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 12)
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func editorEditsInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            inspectorSectionTitle("Trim")
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
+                GridRow {
+                    Text("Start").foregroundStyle(.secondary)
+                    TextField("0", text: $model.trimStartSeconds)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+                GridRow {
+                    Text("End").foregroundStyle(.secondary)
+                    TextField("End", text: $model.trimEndSeconds)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+                GridRow {
+                    Text("Duration").foregroundStyle(.secondary)
+                    TextField("Duration", text: $model.sourceDurationSeconds)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+            }
+
+            HStack {
+                Button("Set In") { model.setTrimStartToPlayhead() }
+                Button("Set Out") { model.setTrimEndToPlayhead() }
+                Button(model.isTrimming ? "Exporting..." : "Export Trim") { model.exportTrim() }
+                    .disabled(model.isTrimming || model.projectURL == nil)
+            }
+
+            Divider()
+
+            inspectorSectionTitle("Quick Actions")
+            HStack {
+                Button("Add Cut") {
+                    model.addCutAtPlayhead()
+                    editorInspectorTab = .cuts
+                }
+                Button("Add Zoom") {
+                    model.addZoomAtPlayhead()
+                    editorInspectorTab = .zooms
+                }
+            }
+            HStack {
+                Button("Add Marker") {
+                    model.addMarkerAtPlayhead()
+                }
+                Button("Save Markers") {
+                    model.saveMarkers()
+                }
+            }
+
+            Divider()
+
+            inspectorSectionTitle("Counts")
+            valueLine("Cuts", "\(model.cutRows.filter(\.isEnabled).count) enabled / \(model.cutRows.count)")
+            valueLine("Zooms", "\(model.zoomRows.filter(\.isEnabled).count) enabled / \(model.zoomRows.count)")
+            valueLine("Markers", "\(model.markerRows.count)")
+            valueLine("Annotations", "\(model.annotationItemCount)")
+        }
+    }
+
+    private func editorCutsInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                inspectorSectionTitle("Cuts")
+                Spacer()
+                Button {
+                    model.addCutAtPlayhead()
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+            }
+
+            if model.cutRows.isEmpty {
+                Text("No cuts yet. Seek on the timeline, then add a cut for retakes or dead air.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach($model.cutRows) { $cut in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Toggle("Enabled", isOn: $cut.isEnabled)
+                                .toggleStyle(.checkbox)
+                            Spacer()
+                            Button {
+                                model.seek(to: secondsValue(cut.startSeconds) ?? 0)
+                            } label: {
+                                Image(systemName: "playhead.left")
+                            }
+                            .buttonStyle(.borderless)
+                            Button {
+                                model.removeCut(id: cut.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        HStack {
+                            compactNumberField("Start", text: $cut.startSeconds)
+                            compactNumberField("End", text: $cut.endSeconds)
+                        }
+                        TextField("Reason", text: $cut.reason)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+
+            HStack {
+                Button("Save") { model.saveEditDecisions() }
+                Button(model.isTrimming ? "Exporting..." : "Export Cut List") { model.exportEditDecisions() }
+                    .disabled(model.isTrimming || model.projectURL == nil)
+                Button("Reload") { model.reloadEditDecisions() }
+            }
+
+            validationIssuesList
+        }
+    }
+
+    private func editorZoomsInspector(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                inspectorSectionTitle("Zooms")
+                Spacer()
+                Button {
+                    model.addZoomAtPlayhead()
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+            }
+
+            if model.zoomRows.isEmpty {
+                Text("No zooms yet. Seek to an important moment and add a zoom region.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach($model.zoomRows) { $zoom in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Toggle("Enabled", isOn: $zoom.isEnabled)
+                                .toggleStyle(.checkbox)
+                            Spacer()
+                            Button {
+                                model.seek(to: secondsValue(zoom.startSeconds) ?? 0)
+                            } label: {
+                                Image(systemName: "playhead.left")
+                            }
+                            .buttonStyle(.borderless)
+                            Button {
+                                model.removeZoom(id: zoom.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        HStack {
+                            compactNumberField("Start", text: $zoom.startSeconds)
+                            compactNumberField("End", text: $zoom.endSeconds)
+                        }
+                        HStack {
+                            compactNumberField("Scale", text: $zoom.scale)
+                            compactNumberField("Size", text: $zoom.size)
+                        }
+                        HStack {
+                            compactNumberField("X", text: $zoom.centerX)
+                            compactNumberField("Y", text: $zoom.centerY)
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+
+            HStack {
+                Button("Save") { model.saveEditDecisions() }
+                Button("Reload") { model.reloadEditDecisions() }
+            }
+
+            validationIssuesList
+        }
+    }
+
+    private func editorExportInspector(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            inspectorSectionTitle("Export")
+            Picker("Quality", selection: $model.renderQuality) {
+                ForEach(RenderQuality.allCases, id: \.self) { quality in
+                    Text(quality.rawValue.capitalized).tag(quality)
+                }
+            }
+            Picker("File", selection: $model.renderFileType) {
+                ForEach(RenderFileType.allCases, id: \.self) { fileType in
+                    Text(fileType.rawValue.uppercased()).tag(fileType)
+                }
+            }
+
+            TextField("Destination", text: $model.renderDestinationPath)
+                .font(.system(.caption, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Choose...") { model.chooseRenderDestination() }
+                Button("Check") { model.inspectRender(preferences.snapshot) }
+                Button(model.isRendering ? "Rendering..." : "Export") { model.exportRender(preferences.snapshot) }
+                    .disabled(model.isRendering || model.projectURL == nil)
+            }
+
+            Button(model.isPackagingLearnHouse ? "Packaging..." : "Package LearnHouse") {
+                model.packageLearnHouse(preferences.snapshot)
+            }
+            .disabled(model.isPackagingLearnHouse || manifest.media.screen == nil)
+
+            Divider()
+
+            inspectorSectionTitle("Readiness")
+            valueLine("Screen video", manifest.media.screen?.relativePath ?? "Missing")
+            valueLine("Voice", audioStatus(manifest))
+            valueLine("Webcam", manifest.media.webcam == nil ? "Optional" : "Captured")
+            valueLine("Warnings", summary.issues.isEmpty ? "None" : "\(summary.issues.count)")
+
+            if let inspection = model.renderInspection {
+                Divider()
+                inspectorSectionTitle("Render Plan")
+                valueLine("Webcam PiP", inspection.hasWebcamOverlay ? "Yes" : "No")
+                valueLine("Cursor Effects", inspection.hasCursorEffects ? "Yes" : "No")
+                valueLine("Annotations", inspection.hasAnnotations ? "Yes" : "No")
+                valueLine("Captions", inspection.hasCaptions ? "Yes" : "No")
+                valueLine("Zoom Regions", inspection.hasZoomRegions ? "Yes" : "No")
+                valueLine("Audio Sources", "\(inspection.audioSourceCount)")
+            }
+        }
+    }
+
+    private var validationIssuesList: some View {
+        Group {
+            if !model.editValidationIssues.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    inspectorSectionTitle("Validation")
+                    ForEach(model.editValidationIssues.indices, id: \.self) { index in
+                        let issue = model.editValidationIssues[index]
+                        issueRow(issue.severity.rawValue, issue.message, path: issue.path)
+                    }
+                }
+            }
+        }
+    }
+
+    private func mediaTimelineEditor(manifest: ProjectManifest) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Label("Timeline", systemImage: "timeline.selection")
+                    .font(.headline)
+                Text(model.formattedCurrentTime)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    model.addCutAtPlayhead()
+                    editorInspectorTab = .cuts
+                } label: {
+                    Label("Cut", systemImage: "scissors")
+                }
+                Button {
+                    model.addZoomAtPlayhead()
+                    editorInspectorTab = .zooms
+                } label: {
+                    Label("Zoom", systemImage: "plus.magnifyingglass")
+                }
+                Button {
+                    model.saveEditDecisions()
+                } label: {
+                    Label("Save", systemImage: "checkmark.circle")
+                }
+                Label("Scale", systemImage: "arrow.left.and.right")
+                    .foregroundStyle(.secondary)
+                Slider(value: $timelineZoom, in: 1...6)
+                    .frame(width: 120)
+            }
+
+            GeometryReader { proxy in
+                let duration = editorTimelineDuration
+                let timelineWidth = max(proxy.size.width, proxy.size.width * CGFloat(timelineZoom))
+                ScrollView(.horizontal) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        timelineRuler(width: timelineWidth, duration: duration)
+                        timelineLane(
+                            title: "Clip",
+                            tint: .yellow,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 38
+                        ) {
+                            clipTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                        timelineLane(
+                            title: "Cuts",
+                            tint: .red,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 30
+                        ) {
+                            cutTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                        timelineLane(
+                            title: "Zooms",
+                            tint: .purple,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 30
+                        ) {
+                            zoomTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                        timelineLane(
+                            title: "Markers",
+                            tint: .blue,
+                            width: timelineWidth,
+                            duration: duration,
+                            height: 26
+                        ) {
+                            markerTimelineContent(width: timelineWidth, duration: duration)
+                        }
+                    }
+                    .frame(width: timelineWidth, alignment: .leading)
+                    .overlay(alignment: .topLeading) {
+                        playheadLine(width: timelineWidth, duration: duration)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                let x = min(max(value.location.x, 0), timelineWidth)
+                                model.seek(to: Double(x / timelineWidth) * duration)
+                            }
+                    )
+                }
+            }
+        }
+        .padding(.top, 12)
+    }
+
+    private var editorTimelineDuration: Double {
+        max(model.previewDurationSeconds, secondsValue(model.sourceDurationSeconds) ?? 0, 1)
+    }
+
+    private func timelineRuler(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(0...6, id: \.self) { tick in
+                let ratio = CGFloat(tick) / 6
+                let seconds = duration * Double(ratio)
+                let x = timelineTrackInset + max(0, width - timelineTrackInset) * ratio
+                VStack(alignment: .leading, spacing: 2) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.45))
+                        .frame(width: 1, height: 8)
+                    Text(formatSeconds(seconds))
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .offset(x: max(0, min(width - 48, x)))
+            }
+        }
+        .frame(width: width, height: 24, alignment: .topLeading)
+    }
+
+    private func timelineLane<Content: View>(
+        title: String,
+        tint: Color,
+        width: CGFloat,
+        duration: Double,
+        height: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color.primary.opacity(0.045))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(tint.opacity(0.28), lineWidth: 1)
+                )
+            content()
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 10)
+        }
+        .frame(width: width, height: height)
+    }
+
+    private func clipTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color.yellow.opacity(0.36))
+                .frame(width: max(0, width - timelineTrackInset))
+                .offset(x: timelineTrackInset)
+            if let trimStart = secondsValue(model.trimStartSeconds), trimStart > 0 {
+                Rectangle()
+                    .fill(Color.black.opacity(0.42))
+                    .frame(width: max(0, timelineX(trimStart, width: width, duration: duration) - timelineTrackInset))
+                    .offset(x: timelineTrackInset)
+            }
+            if let trimEnd = secondsValue(model.trimEndSeconds), trimEnd < duration {
+                let x = timelineX(trimEnd, width: width, duration: duration)
+                Rectangle()
+                    .fill(Color.black.opacity(0.42))
+                    .frame(width: max(0, width - x))
+                    .offset(x: x)
+            }
+            Text("Clip  \(formatSeconds(duration))")
+                .font(.system(.caption, design: .monospaced).weight(.semibold))
+                .foregroundStyle(.primary)
+                .padding(.leading, max(timelineTrackInset + 10, width * 0.46))
+        }
+    }
+
+    private func cutTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            ForEach(model.cutRows) { cut in
+                if let start = secondsValue(cut.startSeconds), let end = secondsValue(cut.endSeconds), end > start {
+                    timelineBlock(
+                        title: cut.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Cut" : cut.reason,
+                        tint: .red,
+                        start: start,
+                        end: end,
+                        width: width,
+                        duration: duration,
+                        height: 22,
+                        isEnabled: cut.isEnabled
+                    )
+                }
+            }
+        }
+    }
+
+    private func zoomTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            ForEach(model.zoomRows) { zoom in
+                if let start = secondsValue(zoom.startSeconds), let end = secondsValue(zoom.endSeconds), end > start {
+                    timelineBlock(
+                        title: "Zoom \(zoom.scale)x",
+                        tint: .purple,
+                        start: start,
+                        end: end,
+                        width: width,
+                        duration: duration,
+                        height: 22,
+                        isEnabled: zoom.isEnabled
+                    )
+                }
+            }
+        }
+    }
+
+    private func markerTimelineContent(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            ForEach(model.markerRows) { marker in
+                if let seconds = secondsValue(marker.timeSeconds) {
+                    let x = timelineX(seconds, width: width, duration: duration)
+                    VStack(spacing: 2) {
+                        Image(systemName: "flag.fill")
+                            .font(.caption2)
+                        Text(marker.title)
+                            .font(.caption2)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(.blue)
+                    .frame(width: 86, alignment: .leading)
+                    .offset(x: max(76, min(width - 86, x)))
+                }
+            }
+        }
+    }
+
+    private func timelineBlock(
+        title: String,
+        tint: Color,
+        start: Double,
+        end: Double,
+        width: CGFloat,
+        duration: Double,
+        height: CGFloat,
+        isEnabled: Bool
+    ) -> some View {
+        let x = timelineX(start, width: width, duration: duration)
+        let blockWidth = max(18, timelineX(end, width: width, duration: duration) - x)
+        return Text(title)
+            .font(.caption2.weight(.semibold))
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .frame(width: blockWidth, height: height, alignment: .leading)
+            .background(tint.opacity(isEnabled ? 0.78 : 0.28), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(tint.opacity(isEnabled ? 0.9 : 0.4), lineWidth: 1)
+            )
+            .foregroundStyle(.white)
+            .offset(x: x)
+            .opacity(isEnabled ? 1 : 0.55)
+    }
+
+    private func playheadLine(width: CGFloat, duration: Double) -> some View {
+        let x = timelineX(model.currentTimeSeconds, width: width, duration: duration)
+        return VStack(spacing: 0) {
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: 10, height: 10)
+            Rectangle()
+                .fill(Color.accentColor)
+                .frame(width: 2, height: 146)
+        }
+        .offset(x: x)
+    }
+
+    private func timelineX(_ seconds: Double, width: CGFloat, duration: Double) -> CGFloat {
+        guard duration > 0 else { return 0 }
+        let trackWidth = max(0, width - timelineTrackInset)
+        return timelineTrackInset + min(max(0, CGFloat(seconds / duration) * trackWidth), trackWidth)
+    }
+
+    private var timelineTrackInset: CGFloat { 76 }
+
+    private func inspectorSectionTitle(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
+
+    private func compactNumberField(_ title: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            TextField(title, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+        }
+    }
+
+    private func valueLine(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .font(.subheadline)
     }
 
     private func projectHeader(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
@@ -328,6 +1102,12 @@ struct ProjectEditorView: View {
                             .buttonStyle(.borderedProminent)
 
                             Button {
+                                model.importVideoForEditing(preferences.snapshot)
+                            } label: {
+                                Label("Import Video", systemImage: "film")
+                            }
+
+                            Button {
                                 appRouter.openSettings(.capture)
                             } label: {
                                 Label("Check Defaults", systemImage: "gearshape")
@@ -378,9 +1158,9 @@ struct ProjectEditorView: View {
                 Text("Lesson Readiness")
                     .font(.headline)
                 readinessLine(
-                    "Recording",
-                    status: manifest.media.screen == nil ? "Needed" : "Recorded",
-                    detail: manifest.media.screen?.relativePath ?? "Start with a screen, window, or area recording.",
+                    "Screen Video",
+                    status: manifest.media.screen == nil ? "Needed" : "Ready",
+                    detail: manifest.media.screen?.relativePath ?? "Record a take or import an existing video.",
                     systemImage: "display",
                     tint: manifest.media.screen == nil ? .orange : .green
                 )
@@ -458,8 +1238,8 @@ struct ProjectEditorView: View {
     ) -> (title: String, detail: String, systemImage: String, tint: Color) {
         if manifest.media.screen == nil {
             return (
-                "Record the lesson",
-                "This bundle has lesson structure, but no screen recording yet. Open the recorder and capture the first take.",
+                "Add video",
+                "This bundle has lesson structure, but no screen video yet. Record a take or import an existing video to start editing.",
                 "record.circle",
                 .orange
             )
@@ -553,7 +1333,7 @@ struct ProjectEditorView: View {
     }
 
     private func reviewDetail(_ manifest: ProjectManifest) -> String {
-        guard manifest.media.screen != nil else { return "Record first, then review the take." }
+        guard manifest.media.screen != nil else { return "Record or import video first, then review the take." }
 
         let pieces = [
             countLabel(model.cutRows.filter(\.isEnabled).count, singular: "cut"),
@@ -573,7 +1353,7 @@ struct ProjectEditorView: View {
 
     private func exportDetail(_ summary: ProjectBundleSummary, manifest: ProjectManifest) -> String {
         if manifest.media.screen == nil {
-            return "Export unlocks after the first recording."
+            return "Export unlocks after recording or importing video."
         }
         if hasBlockingIssues(summary) {
             return "Resolve bundle errors before rendering."
@@ -643,7 +1423,7 @@ struct ProjectEditorView: View {
     }
 
     private var startLessonPanel: some View {
-        EditorPanel(title: "Start a Lesson", subtitle: "Record into a local `.dmlm` bundle, then review, render, and package it.") {
+        EditorPanel(title: "Start a Lesson", subtitle: "Record into a local lesson project, or import an existing video and edit it immediately.") {
             HStack(spacing: 10) {
                 Button {
                     quickRecorder.presentControlBar(preferences: preferences)
@@ -653,15 +1433,21 @@ struct ProjectEditorView: View {
                 .buttonStyle(.borderedProminent)
 
                 Button {
+                    model.importVideoForEditing(preferences.snapshot)
+                } label: {
+                    Label("Edit Video", systemImage: "film")
+                }
+
+                Button {
                     model.newProject(preferences.snapshot)
                 } label: {
-                    Label("New Project", systemImage: "doc.badge.plus")
+                    Label("New Project...", systemImage: "doc.badge.plus")
                 }
 
                 Button {
                     model.openProject()
                 } label: {
-                    Label("Open Project", systemImage: "folder")
+                    Label("Open Lesson", systemImage: "folder")
                 }
 
                 if quickRecorder.isRecording {
@@ -688,7 +1474,7 @@ struct ProjectEditorView: View {
                     Button {
                         model.loadProject(URL(fileURLWithPath: projectPath))
                     } label: {
-                        Label("Open Last Recording", systemImage: "film.stack")
+                        Label("Review Last Lesson", systemImage: "film.stack")
                     }
                     Text(URL(fileURLWithPath: projectPath).lastPathComponent)
                         .font(.system(.caption, design: .monospaced))
@@ -697,7 +1483,7 @@ struct ProjectEditorView: View {
                         .truncationMode(.middle)
                 }
             } else {
-                Text("The recorder opens as a floating control bar with display, window, area, camera, microphone, annotation, and audio controls.")
+                Text("Edit Video imports an MP4 or MOV into a local lesson bundle and opens the editor for preview, cuts, zooms, trims, annotations, and export.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -705,7 +1491,7 @@ struct ProjectEditorView: View {
     }
 
     private var workflowPanel: some View {
-        EditorPanel(title: "Workflow", subtitle: "The normal path for a curriculum recording.") {
+        EditorPanel(title: "Workflow", subtitle: "The normal path for a curriculum lesson.") {
             VStack(alignment: .leading, spacing: 10) {
                 workflowRow("Set Up", "Permissions and defaults", systemImage: "checklist") {
                     openWindow(id: "onboarding")
@@ -714,7 +1500,10 @@ struct ProjectEditorView: View {
                 workflowRow("Record", "Screen, webcam, mic, and optional system audio", systemImage: "record.circle") {
                     quickRecorder.presentControlBar(preferences: preferences)
                 }
-                workflowRow("Review", "Open a lesson bundle to edit metadata, cuts, zooms, and annotations", systemImage: "film.stack") {
+                workflowRow("Edit Video", "Import or open media, then cut, trim, zoom, annotate, and export", systemImage: "film") {
+                    model.importVideoForEditing(preferences.snapshot)
+                }
+                workflowRow("Review", "Preview playback and check the lesson before export", systemImage: "film.stack") {
                     model.openProject()
                 }
                 workflowRow("Render", "Export video or package for LearnHouse", systemImage: "shippingbox") {
@@ -817,8 +1606,14 @@ struct ProjectEditorView: View {
     }
 
     private var emptyState: some View {
-        EditorPanel(title: "Create or Open a Lesson Project", subtitle: "The editor works directly against local `.dmlm` bundles.") {
+        EditorPanel(title: "Create or Open a Lesson Project", subtitle: "The editor works directly against local lesson bundles.") {
             HStack {
+                Button {
+                    model.importVideoForEditing(preferences.snapshot)
+                } label: {
+                    Label("Edit Video...", systemImage: "film")
+                }
+
                 Button {
                     model.newProject(preferences.snapshot)
                 } label: {
@@ -828,10 +1623,10 @@ struct ProjectEditorView: View {
                 Button {
                     model.openProject()
                 } label: {
-                    Label("Choose Project...", systemImage: "folder")
+                    Label("Open Lesson...", systemImage: "folder")
                 }
             }
-            Text("New projects use the configured lesson template and stay local from the first manifest.")
+            Text("Importing a video creates a local lesson bundle with the media ready for preview, cuts, zooms, trims, annotations, and export.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -878,7 +1673,7 @@ struct ProjectEditorView: View {
                     Button {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: projectPath)])
                     } label: {
-                        Label("Reveal Last Recording", systemImage: "arrow.up.forward.app")
+                        Label("Reveal Lesson Bundle", systemImage: "arrow.up.forward.app")
                     }
 
                     Text(URL(fileURLWithPath: projectPath).lastPathComponent)
@@ -921,7 +1716,7 @@ struct ProjectEditorView: View {
                 }
                 .foregroundStyle(.secondary)
             } else {
-                Text("Recordings continue until you press Stop and are saved as local `.dmlm` lesson bundles.")
+                Text("Recordings continue until you press Stop, then open in the editor as local lesson bundles.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -932,7 +1727,7 @@ struct ProjectEditorView: View {
                     Button {
                         model.loadProject(URL(fileURLWithPath: projectPath))
                     } label: {
-                        Label("Open Last Recording", systemImage: "film.stack")
+                        Label("Review Last Lesson", systemImage: "film.stack")
                     }
 
                     Button {
@@ -1598,15 +2393,40 @@ struct ProjectEditorView: View {
         let remainder = seconds - Double(minutes * 60)
         return String(format: "%02d:%05.2f", minutes, remainder)
     }
+
+    private func secondsValue(_ value: String) -> Double? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let seconds = Double(trimmed), seconds.isFinite else { return nil }
+        return max(0, seconds)
+    }
+}
+
+private enum EditorInspectorTab: String, CaseIterable, Identifiable {
+    case edits
+    case cuts
+    case zooms
+    case export
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .edits: "Edit"
+        case .cuts: "Cuts"
+        case .zooms: "Zooms"
+        case .export: "Export"
+        }
+    }
 }
 
 private struct ProjectVideoPlayer: NSViewRepresentable {
     var player: AVPlayer
+    var controlsStyle: AVPlayerViewControlsStyle = .floating
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.player = player
-        view.controlsStyle = .floating
+        view.controlsStyle = controlsStyle
         view.videoGravity = .resizeAspect
         return view
     }
@@ -1614,6 +2434,9 @@ private struct ProjectVideoPlayer: NSViewRepresentable {
     func updateNSView(_ view: AVPlayerView, context: Context) {
         if view.player !== player {
             view.player = player
+        }
+        if view.controlsStyle != controlsStyle {
+            view.controlsStyle = controlsStyle
         }
     }
 }
@@ -1757,6 +2580,35 @@ private final class ProjectEditorModel: ObservableObject {
         previewDurationSeconds > 0 ? Self.formatClock(previewDurationSeconds) : "--:--"
     }
 
+    func importVideoForEditing(_ preferences: LessonMeldPreferences) {
+        let panel = NSOpenPanel()
+        panel.title = "Create Digital Meld LessonMeld Project from Video"
+        panel.message = "Choose an MP4 or MOV file to import into a local lesson bundle."
+        panel.prompt = "Import"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = Self.editableVideoContentTypes
+
+        guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
+
+        do {
+            let didAccess = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            setMessage("Importing \(sourceURL.lastPathComponent)...")
+            let projectURL = try importVideo(sourceURL, preferences: preferences)
+            loadProject(projectURL)
+            setMessage("Imported \(sourceURL.lastPathComponent) for editing.")
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
     func newProject(_ preferences: LessonMeldPreferences) {
         do {
             let panel = NSSavePanel()
@@ -1802,6 +2654,65 @@ private final class ProjectEditorModel: ObservableObject {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         loadProject(url)
+    }
+
+    private func importVideo(_ sourceURL: URL, preferences: LessonMeldPreferences) throws -> URL {
+        let sourceExtension = sourceURL.pathExtension.lowercased()
+        guard Self.supportedEditableVideoExtensions.contains(sourceExtension) else {
+            throw ProjectEditorError.unsupportedVideoType(sourceURL.lastPathComponent)
+        }
+
+        let existingProjectURL = projectURL
+        let existingManifest = manifest
+        let shouldAttachToCurrentProject = existingProjectURL != nil && existingManifest?.media.screen == nil
+        let destinationProjectURL: URL
+        var nextManifest: ProjectManifest
+
+        if shouldAttachToCurrentProject, let existingProjectURL, let existingManifest {
+            destinationProjectURL = existingProjectURL
+            nextManifest = existingManifest
+            try FileManager.default.createDirectory(at: destinationProjectURL, withIntermediateDirectories: true)
+        } else {
+            let defaultDirectory = Self.expandedURL(preferences.general.defaultProjectDirectory)
+            try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+            destinationProjectURL = try Self.makeImportedVideoProjectURL(for: sourceURL, in: defaultDirectory)
+
+            guard let template = LessonTemplateLibrary.template(id: preferences.general.defaultTemplateID)
+                ?? LessonTemplateLibrary.defaultTemplates.first else {
+                throw ProjectEditorError.templateNotFound(preferences.general.defaultTemplateID)
+            }
+            nextManifest = template.seedManifest(lessonTitle: Self.lessonTitle(fromImportedVideo: sourceURL))
+            try FileManager.default.createDirectory(at: destinationProjectURL, withIntermediateDirectories: true)
+        }
+
+        let mediaFileName = Self.uniqueScreenMediaFileName(fileExtension: sourceExtension, in: destinationProjectURL)
+        let destinationMediaURL = destinationProjectURL.appendingPathComponent(mediaFileName)
+        let sourcePath = sourceURL.resolvingSymlinksInPath().standardizedFileURL.path
+        let destinationPath = destinationMediaURL.resolvingSymlinksInPath().standardizedFileURL.path
+        if sourcePath != destinationPath {
+            try FileManager.default.copyItem(at: sourceURL, to: destinationMediaURL)
+        }
+
+        nextManifest.media.screen = Self.projectFile(
+            for: destinationMediaURL,
+            role: .screenVideo,
+            projectURL: destinationProjectURL,
+            mimeType: Self.videoMimeType(for: sourceExtension)
+        )
+        if !nextManifest.tracks.contains(where: { $0.id == "screen" || $0.kind == .screen }) {
+            nextManifest.tracks.append(TimelineTrack(id: "screen", kind: .screen, displayName: "Screen"))
+        }
+        if nextManifest.metadata.lessonTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || nextManifest.metadata.lessonTitle == "Untitled Lesson" {
+            nextManifest.metadata.lessonTitle = Self.lessonTitle(fromImportedVideo: sourceURL)
+        }
+        if !nextManifest.exportPresets.contains("learnhouse-1080p") {
+            nextManifest.exportPresets.append("learnhouse-1080p")
+        }
+        nextManifest.updatedAt = Date()
+
+        try ProjectBundle.writeManifest(nextManifest, to: destinationProjectURL)
+        return destinationProjectURL
     }
 
     func loadProject(_ url: URL) {
@@ -2823,6 +3734,45 @@ private final class ProjectEditorModel: ObservableObject {
         url.pathExtension.lowercased() == "dmlm" ? url : url.appendingPathExtension("dmlm")
     }
 
+    private static var editableVideoContentTypes: [UTType] {
+        [.mpeg4Movie, .quickTimeMovie]
+    }
+
+    private static let supportedEditableVideoExtensions: Set<String> = ["mp4", "mov"]
+
+    private static func makeImportedVideoProjectURL(for sourceURL: URL, in root: URL) throws -> URL {
+        let baseName = fileSlug(lessonTitle(fromImportedVideo: sourceURL))
+        for attempt in 0..<100 {
+            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
+            let projectURL = root.appendingPathComponent("\(baseName)\(suffix).dmlm", isDirectory: true)
+            if !FileManager.default.fileExists(atPath: projectURL.path) {
+                return projectURL
+            }
+        }
+        return root.appendingPathComponent("\(baseName)-\(UUID().uuidString.lowercased()).dmlm", isDirectory: true)
+    }
+
+    private static func uniqueScreenMediaFileName(fileExtension: String, in projectURL: URL) -> String {
+        let normalizedExtension = supportedEditableVideoExtensions.contains(fileExtension.lowercased())
+            ? fileExtension.lowercased()
+            : "mp4"
+        for attempt in 0..<100 {
+            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
+            let fileName = "screen\(suffix).\(normalizedExtension)"
+            if !FileManager.default.fileExists(atPath: projectURL.appendingPathComponent(fileName).path) {
+                return fileName
+            }
+        }
+        return "screen-\(UUID().uuidString.lowercased()).\(normalizedExtension)"
+    }
+
+    private static func videoMimeType(for fileExtension: String) -> String {
+        switch fileExtension.lowercased() {
+        case "mov": "video/quicktime"
+        default: "video/mp4"
+        }
+    }
+
     private static var lessonProjectContentType: UTType? {
         UTType(filenameExtension: "dmlm")
     }
@@ -2830,6 +3780,11 @@ private final class ProjectEditorModel: ObservableObject {
     private static func lessonTitle(from projectURL: URL) -> String {
         let title = projectURL.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
         return title.isEmpty ? "Untitled Lesson" : title
+    }
+
+    private static func lessonTitle(fromImportedVideo url: URL) -> String {
+        let title = url.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? "Imported Video" : title
     }
 
     private static func optionalText(_ value: String) -> String? {
@@ -2969,6 +3924,7 @@ private enum ProjectEditorError: Error, LocalizedError {
     case editValidationFailed
     case templateNotFound(String)
     case frameExportFailed
+    case unsupportedVideoType(String)
 
     var errorDescription: String? {
         switch self {
@@ -2988,6 +3944,8 @@ private enum ProjectEditorError: Error, LocalizedError {
             "Lesson template was not found: \(id)"
         case .frameExportFailed:
             "Could not export the current preview frame."
+        case .unsupportedVideoType(let fileName):
+            "Choose an MP4 or MOV video file to import. Unsupported file: \(fileName)"
         }
     }
 }
