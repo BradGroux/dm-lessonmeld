@@ -237,6 +237,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
     public var captionSource: RenderMediaSource?
     public var zoomRegions: [ZoomRegion]
     public var markers: [ProjectTimelineMarker]
+    public var canvas: EditorCanvasSettings
 
     public init(
         projectURL: URL,
@@ -249,7 +250,8 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         annotationSource: RenderMediaSource? = nil,
         captionSource: RenderMediaSource? = nil,
         zoomRegions: [ZoomRegion] = [],
-        markers: [ProjectTimelineMarker] = []
+        markers: [ProjectTimelineMarker] = [],
+        canvas: EditorCanvasSettings = EditorCanvasSettings()
     ) {
         self.projectURL = projectURL
         self.destinationURL = destinationURL
@@ -262,6 +264,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         self.captionSource = captionSource
         self.zoomRegions = zoomRegions
         self.markers = markers
+        self.canvas = canvas
     }
 
     public static func make(
@@ -269,7 +272,8 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         projectURL: URL,
         destinationURL: URL,
         preset: RenderPreset = RenderPreset(),
-        editDecisionList: EditDecisionList? = nil
+        editDecisionList: EditDecisionList? = nil,
+        editorSettings: EditorSettings? = nil
     ) throws -> RenderPlan {
         guard let screen = manifest.media.screen else {
             throw RenderPlanError.missingScreenVideo
@@ -356,7 +360,8 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             annotationSource: annotationSource,
             captionSource: captionSource,
             zoomRegions: editDecisionList?.enabledZoomRegions ?? [],
-            markers: manifest.markers
+            markers: manifest.markers,
+            canvas: editorSettings?.canvas ?? EditorCanvasSettings()
         )
     }
 

@@ -3,6 +3,7 @@ import CoreMedia
 import CoreVideo
 import DMLessonMeldCore
 import Foundation
+import ImageIO
 import Testing
 
 @Suite("Render plans")
@@ -41,6 +42,42 @@ struct RenderPlanTests {
         #expect(plan.webcamOverlay?.source.url == projectURL.appendingPathComponent("media/webcam.mov"))
         #expect(plan.audioSources.map(\.role) == [.microphoneAudio])
         #expect(plan.markers.map(\.id) == ["chapter-1"])
+    }
+
+    @Test("Render inspection loads project editor canvas settings")
+    func renderInspectionLoadsEditorCanvasSettings() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let destinationURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Canvas Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo, mimeType: "video/mp4")
+                )
+            ),
+            to: projectURL
+        )
+        let settings = EditorSettings(
+            canvas: EditorCanvasSettings(
+                aspectRatio: .portrait9x16,
+                background: EditorCanvasBackground(style: .gradient, primaryColor: .purple, secondaryColor: .blue),
+                paddingRatio: 0.14,
+                insetRatio: 0.03,
+                cornerRadiusRatio: 0.05,
+                shadow: EditorCanvasShadow(isEnabled: true, opacity: 0.48)
+            )
+        )
+        try EditorSettingsFile.save(settings, toProject: projectURL)
+
+        let inspection = try AVFoundationRenderService().inspect(
+            projectURL: projectURL,
+            destinationURL: destinationURL
+        )
+
+        let plan = try #require(inspection.plan)
+        #expect(plan.canvas == settings.canvas)
+        #expect(!plan.canvas.isDefault)
     }
 
     @Test("Validation can check missing media only when requested")
@@ -322,6 +359,7 @@ struct RenderPlanTests {
 
         let screenURL = mediaURL.appendingPathComponent("screen.mp4")
         let webcamURL = mediaURL.appendingPathComponent("webcam.mp4")
+        let backgroundURL = projectURL.appendingPathComponent("backgrounds/canvas-background.png")
         let cursorURL = projectURL.appendingPathComponent("cursor-metadata.json")
         let annotationsURL = projectURL.appendingPathComponent("annotations.json")
         let transcriptURL = projectURL.appendingPathComponent("transcript.json")
@@ -336,6 +374,11 @@ struct RenderPlanTests {
             outputURL: webcamURL,
             size: CGSize(width: 64, height: 64),
             color: (red: 240, green: 186, blue: 45)
+        )
+        try SyntheticImageWriter.write(
+            outputURL: backgroundURL,
+            size: CGSize(width: 48, height: 48),
+            color: CGColor(red: 0.42, green: 0.22, blue: 0.9, alpha: 1)
         )
         try DMLessonJSON.encoder().encode(InteractionMetadataDocument(
             captureSize: CGSize(width: 160, height: 90),
@@ -402,6 +445,20 @@ struct RenderPlanTests {
             ),
             toProject: projectURL
         )
+        let canvasSettings = EditorSettings(
+            canvas: EditorCanvasSettings(
+                aspectRatio: .square1x1,
+                background: EditorCanvasBackground(
+                    style: .image,
+                    primaryColor: .purple,
+                    imagePath: "backgrounds/canvas-background.png"
+                ),
+                paddingRatio: 0.08,
+                cornerRadiusRatio: 0.06,
+                shadow: EditorCanvasShadow(isEnabled: true, opacity: 0.5)
+            )
+        )
+        try EditorSettingsFile.save(canvasSettings, toProject: projectURL)
 
         try ProjectBundle.writeManifest(
             ProjectManifest(
@@ -431,6 +488,7 @@ struct RenderPlanTests {
         #expect(inspection.plan?.annotationSource?.url == annotationsURL)
         #expect(inspection.plan?.captionSource?.url == transcriptURL)
         #expect(inspection.plan?.zoomRegions.map(\.id) == ["zoom-1"])
+        #expect(inspection.plan?.canvas == canvasSettings.canvas)
         var plan = try #require(inspection.plan)
         plan.webcamOverlay?.placement = PictureInPicturePlacement(
             corner: .bottomTrailing,
@@ -554,6 +612,33 @@ private enum SyntheticVideoWriter {
         }
 
         return pixelBuffer
+    }
+}
+
+private enum SyntheticImageWriter {
+    static func write(outputURL: URL, size: CGSize, color: CGColor) throws {
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let width = max(1, Int(size.width))
+        let height = max(1, Int(size.height))
+        let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        let bitmapContext = try #require(context)
+        bitmapContext.setFillColor(color)
+        bitmapContext.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try #require(bitmapContext.makeImage())
+        let destination = try #require(CGImageDestinationCreateWithURL(outputURL as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        #expect(CGImageDestinationFinalize(destination))
     }
 }
 
