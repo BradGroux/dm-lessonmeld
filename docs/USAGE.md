@@ -102,6 +102,22 @@ Use the **Zooms** inspector tab or the purple timeline lane to create and edit z
 - Disable a zoom to keep it visible in the timeline while excluding it from render/export.
 - Save **Zoom Defaults** to persist the project-level automatic click zoom toggle in `editor-settings.json`.
 
+## Polish Cursor Effects
+
+Recorded projects with cursor metadata can be adjusted from the **Cursor** inspector tab.
+
+- Preview pointer, click, and keyboard overlay choices directly over the editor video.
+- Choose the macOS pointer or a touch-dot pointer style.
+- Enable or disable smoothed cursor movement.
+- Change pointer visibility, size, fill color, and outline color.
+- Change click ripple color, scale, opacity, and duration.
+- Add optional generated click sounds and control their render volume.
+- Show or hide captured keyboard shortcuts.
+- Add cursor hide ranges at the playhead, then drag or resize them in the **Cursor** timeline lane.
+- Save cursor settings into `editor-settings.json` so render/export uses the same effect choices.
+
+Imported videos without cursor metadata show the cursor controls as unavailable because there is no pointer, click, or keyboard sidecar to render.
+
 ## Annotate
 
 Open annotation tools from the sidebar, project editor, recorder bar, or command palette.

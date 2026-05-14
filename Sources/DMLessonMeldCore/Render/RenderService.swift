@@ -144,6 +144,13 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let screenAsset = AVURLAsset(url: plan.screenVideo.url)
         let screenDuration = try await screenAsset.load(.duration)
         let screenVideoTracks = try await screenAsset.loadTracks(withMediaType: .video)
+        let interactionMetadata = try plan.cursorSource.map { try loadInteractionMetadata(from: $0.url) }
+        var temporaryRenderFiles: [URL] = []
+        defer {
+            for url in temporaryRenderFiles {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
 
         guard let screenVideoTrack = screenVideoTracks.first else {
             throw RenderExportError.missingVideoTrack(plan.screenVideo.relativePath)
@@ -167,6 +174,15 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         for source in plan.audioSources {
             let audioAsset = AVURLAsset(url: source.url)
             try await insertAudioTracks(from: audioAsset, into: composition, duration: screenDuration)
+        }
+        if let interactionMetadata {
+            try await insertClickSoundTrack(
+                for: interactionMetadata.clicks,
+                settings: plan.cursor.clickEffects,
+                duration: screenDuration,
+                into: composition,
+                temporaryRenderFiles: &temporaryRenderFiles
+            )
         }
 
         let screenNaturalSize = try await screenVideoTrack.load(.naturalSize)
@@ -218,7 +234,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             videoComposition: videoComposition,
             renderSize: renderSize,
             canvasGeometry: canvasGeometry,
-            webcamGeometry: webcamGeometry
+            webcamGeometry: webcamGeometry,
+            interactionMetadata: interactionMetadata
         )
 
         guard let session = AVAssetExportSession(asset: composition, presetName: presetName(for: plan.preset.quality)) else {
@@ -235,12 +252,14 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         videoComposition: AVMutableVideoComposition,
         renderSize: CGSize,
         canvasGeometry: EditorCanvasRenderGeometry,
-        webcamGeometry: PictureInPictureRenderGeometry?
+        webcamGeometry: PictureInPictureRenderGeometry?,
+        interactionMetadata: InteractionMetadataDocument?
     ) throws {
         let overlayLayers = try overlayLayers(
             plan: plan,
             renderSize: renderSize,
-            webcamGeometry: webcamGeometry
+            webcamGeometry: webcamGeometry,
+            interactionMetadata: interactionMetadata
         )
         guard !overlayLayers.isEmpty || !plan.canvas.isDefault else { return }
 
@@ -287,11 +306,11 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     private func overlayLayers(
         plan: RenderPlan,
         renderSize: CGSize,
-        webcamGeometry: PictureInPictureRenderGeometry?
+        webcamGeometry: PictureInPictureRenderGeometry?,
+        interactionMetadata: InteractionMetadataDocument?
     ) throws -> [CALayer] {
         var layers: [CALayer] = []
         var screenBoundLayers: [CALayer] = []
-        let interactionMetadata = try plan.cursorSource.map { try loadInteractionMetadata(from: $0.url) }
 
         if let annotationSource = plan.annotationSource {
             let store = try loadAnnotationStore(from: annotationSource.url)
@@ -303,7 +322,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         }
 
         if let interactionMetadata {
-            screenBoundLayers.append(contentsOf: cursorLayers(for: interactionMetadata, renderSize: renderSize))
+            screenBoundLayers.append(contentsOf: cursorLayers(for: interactionMetadata, settings: plan.cursor, renderSize: renderSize))
         }
 
         if !screenBoundLayers.isEmpty {
@@ -334,8 +353,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             })
         }
 
-        if let interactionMetadata {
-            layers.append(contentsOf: keyboardLayers(for: interactionMetadata, renderSize: renderSize))
+        if let interactionMetadata, plan.cursor.keyboardOverlay.isVisible {
+            layers.append(contentsOf: keyboardLayers(for: interactionMetadata, settings: plan.cursor.keyboardOverlay, renderSize: renderSize))
         }
 
         return layers
@@ -660,32 +679,51 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         )
     }
 
-    private func cursorLayers(for metadata: InteractionMetadataDocument, renderSize: CGSize) -> [CALayer] {
+    private func cursorLayers(
+        for metadata: InteractionMetadataDocument,
+        settings: EditorCursorSettings,
+        renderSize: CGSize
+    ) -> [CALayer] {
         var layers: [CALayer] = []
 
         if metadata.rendersCursorPointer,
-           let cursorLayer = animatedCursorLayer(for: metadata.cursorSamples, renderSize: renderSize) {
+           settings.pointerVisible,
+           let cursorLayer = animatedCursorLayer(for: metadata.cursorSamples, settings: settings, renderSize: renderSize) {
             layers.append(cursorLayer)
         }
 
-        layers.append(contentsOf: metadata.clicks.compactMap {
-            clickLayer(for: $0, renderSize: renderSize)
-        })
+        if settings.clickEffects.rippleVisible {
+            layers.append(contentsOf: metadata.clicks.compactMap {
+                clickLayer(for: $0, settings: settings.clickEffects, renderSize: renderSize)
+            })
+        }
 
         return layers
     }
 
-    private func animatedCursorLayer(for samples: [CursorSample], renderSize: CGSize) -> CALayer? {
-        let visibleSamples = samples.sorted { $0.timestampSeconds < $1.timestampSeconds }
+    private func animatedCursorLayer(
+        for samples: [CursorSample],
+        settings: EditorCursorSettings,
+        renderSize: CGSize
+    ) -> CALayer? {
+        let visibleSamples = samples
+            .sorted { $0.timestampSeconds < $1.timestampSeconds }
+            .map { sample in
+                CursorSample(
+                    timestampSeconds: sample.timestampSeconds,
+                    position: sample.position,
+                    isVisible: sample.isVisible && !settings.hiddenRanges.contains { $0.contains(sample.timestampSeconds) }
+                )
+            }
         guard let first = visibleSamples.first else { return nil }
 
         let layer = CAShapeLayer()
-        let scale = max(0.65, min(renderSize.width / 1920, 1.6))
+        let scale = max(0.65, min(renderSize.width / 1920, 1.6)) * CGFloat(settings.pointerScale)
         layer.frame = .zero
-        layer.path = cursorPointerPath(scale: scale)
-        layer.fillColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.96)
-        layer.strokeColor = CGColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.95)
-        layer.lineWidth = max(1.4, 2.2 * scale)
+        layer.path = cursorPointerPath(style: settings.pointerStyle, scale: scale)
+        layer.fillColor = cgColor(settings.pointerFillColor, opacity: settings.pointerFillColor.alpha)
+        layer.strokeColor = cgColor(settings.pointerStrokeColor, opacity: settings.pointerStrokeColor.alpha)
+        layer.lineWidth = settings.pointerStyle == .touchDot ? max(1.8, 3.2 * scale) : max(1.4, 2.2 * scale)
         layer.lineJoin = .round
         layer.lineCap = .round
         layer.position = renderPoint(first.position, renderSize: renderSize)
@@ -709,7 +747,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         positionAnimation.keyTimes = keyTimes
         positionAnimation.beginTime = AVCoreAnimationBeginTimeAtZero + start
         positionAnimation.duration = duration
-        positionAnimation.calculationMode = .linear
+        positionAnimation.calculationMode = settings.smoothMovement ? .linear : .discrete
         positionAnimation.fillMode = .forwards
         positionAnimation.isRemovedOnCompletion = false
         layer.add(positionAnimation, forKey: "cursor-position")
@@ -727,11 +765,11 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         return layer
     }
 
-    private func clickLayer(for click: CursorClick, renderSize: CGSize) -> CALayer? {
+    private func clickLayer(for click: CursorClick, settings: EditorClickEffectSettings, renderSize: CGSize) -> CALayer? {
         guard click.phase == .down else { return nil }
 
         let scale = max(0.75, min(renderSize.width / 1920, 1.8))
-        let radius = CGFloat(19 * scale * Double(click.clickCount))
+        let radius = CGFloat(19 * scale * Double(click.clickCount) * settings.scale)
         let point = renderPoint(click.position, renderSize: renderSize)
         let rect = CGRect(
             x: point.x - radius,
@@ -744,12 +782,12 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         layer.frame = rect
         layer.path = CGPath(ellipseIn: layer.bounds, transform: nil)
         layer.fillColor = nil
-        layer.strokeColor = clickColor(click.button)
+        layer.strokeColor = cgColor(settings.color, opacity: settings.color.alpha)
         layer.lineWidth = max(3, 4 * scale)
         layer.opacity = 0
 
         let opacity = CABasicAnimation(keyPath: "opacity")
-        opacity.fromValue = 0.85
+        opacity.fromValue = settings.opacity
         opacity.toValue = 0
 
         let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
@@ -759,7 +797,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let group = CAAnimationGroup()
         group.animations = [opacity, scaleAnimation]
         group.beginTime = AVCoreAnimationBeginTimeAtZero + click.timestampSeconds
-        group.duration = 0.42
+        group.duration = settings.durationSeconds
         group.timingFunction = CAMediaTimingFunction(name: .easeOut)
         group.fillMode = .removed
         group.isRemovedOnCompletion = true
@@ -768,7 +806,15 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         return layer
     }
 
-    private func cursorPointerPath(scale: CGFloat) -> CGPath {
+    private func cursorPointerPath(style: EditorCursorPointerStyle, scale: CGFloat) -> CGPath {
+        if style == .touchDot {
+            let radius = 8 * scale
+            return CGPath(
+                ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2),
+                transform: nil
+            )
+        }
+
         let path = CGMutablePath()
         path.move(to: .zero)
         path.addLine(to: CGPoint(x: 0, y: -34 * scale))
@@ -788,26 +834,21 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         )
     }
 
-    private func clickColor(_ button: CursorClickButton) -> CGColor {
-        switch button {
-        case .left:
-            CGColor(red: 1, green: 0.84, blue: 0.21, alpha: 0.95)
-        case .right:
-            CGColor(red: 0.34, green: 0.64, blue: 1, alpha: 0.95)
-        case .middle:
-            CGColor(red: 0.76, green: 0.39, blue: 0.98, alpha: 0.95)
-        case .other:
-            CGColor(red: 1, green: 1, blue: 1, alpha: 0.88)
-        }
-    }
-
-    private func keyboardLayers(for metadata: InteractionMetadataDocument, renderSize: CGSize) -> [CALayer] {
+    private func keyboardLayers(
+        for metadata: InteractionMetadataDocument,
+        settings: EditorKeyboardOverlaySettings,
+        renderSize: CGSize
+    ) -> [CALayer] {
         metadata.keystrokes.compactMap {
-            keyboardLayer(for: $0, renderSize: renderSize)
+            keyboardLayer(for: $0, settings: settings, renderSize: renderSize)
         }
     }
 
-    private func keyboardLayer(for event: KeyboardMetadataEvent, renderSize: CGSize) -> CALayer? {
+    private func keyboardLayer(
+        for event: KeyboardMetadataEvent,
+        settings: EditorKeyboardOverlaySettings,
+        renderSize: CGSize
+    ) -> CALayer? {
         guard event.phase == .down, !event.isRepeat, let label = keyboardLabel(for: event) else {
             return nil
         }
@@ -831,7 +872,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
         let background = CALayer()
         background.frame = container.bounds
-        background.backgroundColor = CGColor(red: 0.03, green: 0.035, blue: 0.04, alpha: 0.82)
+        background.backgroundColor = CGColor(red: 0.03, green: 0.035, blue: 0.04, alpha: 0.82 * settings.opacity)
         background.cornerRadius = 9
         background.borderColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.18)
         background.borderWidth = 1
@@ -1212,6 +1253,88 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         instruction.setTransform(transform, at: .zero)
         instruction.setCropRectangle(geometry.cropRect, at: .zero)
         return WebcamOverlayComposition(instruction: instruction, geometry: geometry)
+    }
+
+    private func insertClickSoundTrack(
+        for clicks: [CursorClick],
+        settings: EditorClickEffectSettings,
+        duration: CMTime,
+        into composition: AVMutableComposition,
+        temporaryRenderFiles: inout [URL]
+    ) async throws {
+        guard settings.soundEnabled, settings.soundVolume > 0 else { return }
+        let durationSeconds = duration.seconds
+        guard durationSeconds.isFinite, durationSeconds > 0 else { return }
+
+        let visibleClicks = clicks.filter {
+            $0.phase == .down && $0.timestampSeconds >= 0 && $0.timestampSeconds <= durationSeconds
+        }
+        guard !visibleClicks.isEmpty else { return }
+
+        let soundURL = try writeClickSoundTrack(clicks: visibleClicks, settings: settings, durationSeconds: durationSeconds)
+        temporaryRenderFiles.append(soundURL)
+        let asset = AVURLAsset(url: soundURL)
+        try await insertAudioTracks(from: asset, into: composition, duration: duration)
+    }
+
+    private func writeClickSoundTrack(
+        clicks: [CursorClick],
+        settings: EditorClickEffectSettings,
+        durationSeconds: Double
+    ) throws -> URL {
+        let sampleRate = 44_100.0
+        let channelCount: AVAudioChannelCount = 2
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount) else {
+            throw RenderExportError.unableToCreateCompositionTrack
+        }
+
+        let frameCount = AVAudioFrameCount(ceil(durationSeconds * sampleRate))
+        guard frameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
+              let channels = buffer.floatChannelData else {
+            throw RenderExportError.unableToCreateCompositionTrack
+        }
+        buffer.frameLength = frameCount
+
+        let maxFrame = Int(frameCount)
+        let volume = Float(settings.soundVolume)
+        for click in clicks {
+            let startFrame = max(0, Int(click.timestampSeconds * sampleRate))
+            let toneFrameCount = Int(0.055 * sampleRate)
+            let frequency = clickSoundFrequency(for: click.button)
+            for frameOffset in 0..<toneFrameCount where startFrame + frameOffset < maxFrame {
+                let t = Double(frameOffset) / sampleRate
+                let progress = Double(frameOffset) / Double(max(toneFrameCount, 1))
+                let envelope = Float(pow(max(0, 1 - progress), 2.2))
+                let sample = Float(sin(2 * Double.pi * frequency * t)) * volume * envelope * 0.28
+                for channel in 0..<Int(channelCount) {
+                    let next = channels[channel][startFrame + frameOffset] + sample
+                    channels[channel][startFrame + frameOffset] = min(1, max(-1, next))
+                }
+            }
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dm-lessonmeld-clicks-\(UUID().uuidString)")
+            .appendingPathExtension("caf")
+        var fileSettings = format.settings
+        fileSettings[AVLinearPCMIsNonInterleaved] = false
+        let file = try AVAudioFile(forWriting: url, settings: fileSettings)
+        try file.write(from: buffer)
+        return url
+    }
+
+    private func clickSoundFrequency(for button: CursorClickButton) -> Double {
+        switch button {
+        case .left:
+            880
+        case .right:
+            620
+        case .middle:
+            740
+        case .other:
+            520
+        }
     }
 
     private func insertAudioTracks(
