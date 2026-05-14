@@ -67,6 +67,29 @@ struct EditorSettingsTests {
                         text: "👍"
                     )
                 ]
+            ),
+            audio: EditorAudioSettings(
+                screenAudio: EditorAudioTrackSettings(gain: 0.9),
+                microphoneAudio: EditorAudioTrackSettings(gain: 1.2, isSoloed: true),
+                systemAudio: EditorAudioTrackSettings(gain: 0.3, isMuted: true),
+                backgroundMusic: EditorBackgroundMusicSettings(
+                    relativePath: "audio/assets/intro.m4a",
+                    startSeconds: 1,
+                    durationSeconds: 8,
+                    gain: 0.25,
+                    duckUnderVoice: true,
+                    duckedGain: 0.08
+                ),
+                volumeRegions: [
+                    EditorAudioVolumeRegion(
+                        id: "duck-1",
+                        track: .backgroundMusic,
+                        range: EditTimeRange(startSeconds: 2, endSeconds: 6),
+                        gain: 0.1,
+                        fadeInSeconds: 0.3,
+                        fadeOutSeconds: 0.4
+                    )
+                ]
             )
         )
 
@@ -122,6 +145,7 @@ struct EditorSettingsTests {
         let settings = try DMLessonJSON.decoder().decode(EditorSettings.self, from: Data(json.utf8))
 
         #expect(settings.camera == nil)
+        #expect(settings.audio == nil)
     }
 }
 

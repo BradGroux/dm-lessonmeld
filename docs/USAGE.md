@@ -90,6 +90,19 @@ The bottom timeline writes to the same project-local sidecars used by render/exp
 
 Search **Timeline Editing Shortcuts** in the command palette for the active keyboard controls.
 
+## Mix Audio and Pacing
+
+Use the **Audio** inspector tab to adjust captured sound and lesson pacing.
+
+- Control screen, microphone, and system audio gain with mute and solo toggles.
+- Import background music into `audio/assets/` inside the `.dmlm` bundle.
+- Set music start time, source offset, duration, loop behavior, fade in/out, and duck-under-voice volume.
+- Add volume regions at the playhead, then drag or resize them in the **Audio** timeline lane.
+- Choose whether each volume region targets all tracks, screen audio, microphone, system audio, or music.
+- Add speed regions for slow-downs, fast review, typing cleanup, or dead-air cleanup.
+
+Volume and music settings are saved in `editor-settings.json` and are applied by the full render exporter. Speed regions are saved in `edit-decisions.json`; render inspection blocks export while speed regions exist until AV retiming support is implemented, so the unsupported state is explicit instead of silently producing the wrong video.
+
 ## Add Video Overlays
 
 Use the **Overlays** inspector tab or the overlay timeline lane to add project-local text, shapes, callouts, arrows, images, masks, and highlights.
