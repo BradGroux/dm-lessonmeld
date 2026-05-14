@@ -123,7 +123,7 @@ struct DMLessonMeldCLI {
             }
             let projectURL = URL(fileURLWithPath: arguments[1])
             let updated = try ProjectBundle.updateManifest(at: projectURL) { manifest in
-                attachSidecars(from: arguments, projectURL: projectURL, manifest: &manifest)
+                try attachSidecars(from: arguments, projectURL: projectURL, manifest: &manifest)
             }
             if arguments.contains("--json") {
                 try printJSON(updated)
@@ -1241,42 +1241,44 @@ struct DMLessonMeldCLI {
         return path
     }
 
-    static func attachSidecars(from arguments: [String], projectURL: URL, manifest: inout ProjectManifest) {
+    static func attachSidecars(from arguments: [String], projectURL: URL, manifest: inout ProjectManifest) throws {
         if let path = optionValue("--screen", in: arguments) {
-            manifest.media.screen = projectFile(path, role: .screenVideo, projectURL: projectURL)
+            manifest.media.screen = try projectFile(path, role: .screenVideo, projectURL: projectURL)
         }
         if let path = optionValue("--webcam", in: arguments) {
-            manifest.media.webcam = projectFile(path, role: .webcamVideo, projectURL: projectURL)
+            manifest.media.webcam = try projectFile(path, role: .webcamVideo, projectURL: projectURL)
         }
         if let path = optionValue("--microphone-audio", in: arguments) {
-            manifest.media.microphoneAudio = projectFile(path, role: .microphoneAudio, projectURL: projectURL)
+            manifest.media.microphoneAudio = try projectFile(path, role: .microphoneAudio, projectURL: projectURL)
         }
         if let path = optionValue("--system-audio", in: arguments) {
-            manifest.media.systemAudio = projectFile(path, role: .systemAudio, projectURL: projectURL)
+            manifest.media.systemAudio = try projectFile(path, role: .systemAudio, projectURL: projectURL)
         }
         if let path = optionValue("--cursor-metadata", in: arguments) {
-            manifest.media.cursorMetadata = projectFile(path, role: .cursorMetadata, projectURL: projectURL)
+            manifest.media.cursorMetadata = try projectFile(path, role: .cursorMetadata, projectURL: projectURL)
         }
         if let path = optionValue("--annotations", in: arguments) {
-            manifest.media.annotations = projectFile(path, role: .annotations, projectURL: projectURL)
+            manifest.media.annotations = try projectFile(path, role: .annotations, projectURL: projectURL)
         }
         if let path = optionValue("--thumbnail", in: arguments) {
-            manifest.media.thumbnail = projectFile(path, role: .thumbnail, projectURL: projectURL)
+            manifest.media.thumbnail = try projectFile(path, role: .thumbnail, projectURL: projectURL)
         }
         if let path = optionValue("--captions", in: arguments) {
-            manifest.media.captions.append(projectFile(path, role: .captions, projectURL: projectURL))
+            manifest.media.captions.append(try projectFile(path, role: .captions, projectURL: projectURL))
         }
         if let path = optionValue("--transcript", in: arguments) {
-            manifest.media.transcripts.append(projectFile(path, role: .transcript, projectURL: projectURL))
+            manifest.media.transcripts.append(try projectFile(path, role: .transcript, projectURL: projectURL))
         }
     }
 
-    static func projectFile(_ path: String, role: ProjectFileRole, projectURL: URL) -> ProjectFile {
-        ProjectFile(
+    static func projectFile(_ path: String, role: ProjectFileRole, projectURL: URL) throws -> ProjectFile {
+        let file = ProjectFile(
             relativePath: relativePath(path, projectURL: projectURL),
             role: role,
             mimeType: mimeType(for: path)
         )
+        _ = try ProjectBundle.projectLocalFileURL(for: file, in: projectURL)
+        return file
     }
 
     static func parseRegion(_ value: String) -> CGRect? {
@@ -1446,7 +1448,7 @@ struct DMLessonMeldCLI {
         guard let screen = manifest.media.screen else {
             throw CLIError.usage("Project has no screen media.")
         }
-        return ProjectBundle.fileURL(for: screen, in: projectURL)
+        return try ProjectBundle.projectLocalFileURL(for: screen, in: projectURL)
     }
 
     static func loadOrCreateEditDecisionList(projectURL: URL, manifest: ProjectManifest) throws -> EditDecisionList {
@@ -1456,7 +1458,7 @@ struct DMLessonMeldCLI {
 
         return EditDecisionList(
             id: "lesson-edit",
-            sourceMediaURL: manifest.media.screen.map { ProjectBundle.fileURL(for: $0, in: projectURL) },
+            sourceMediaURL: try manifest.media.screen.map { try ProjectBundle.projectLocalFileURL(for: $0, in: projectURL) },
             markers: manifest.markers.map { marker in
                 TimelineMarker(
                     id: marker.id,
@@ -1500,7 +1502,7 @@ struct DMLessonMeldCLI {
     static func annotationStoreURL(projectURL: URL, createIfMissing: Bool) throws -> URL {
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
         if let annotations = manifest.media.annotations {
-            return ProjectBundle.fileURL(for: annotations, in: projectURL)
+            return try ProjectBundle.projectLocalFileURL(for: annotations, in: projectURL)
         }
         let url = projectURL.appendingPathComponent("annotations.json")
         if createIfMissing, !FileManager.default.fileExists(atPath: url.path) {
@@ -1532,7 +1534,7 @@ struct DMLessonMeldCLI {
             guard let file else {
                 throw CLIError.usage("Project has no JSON transcript or caption sidecar.")
             }
-            let data = try Data(contentsOf: ProjectBundle.fileURL(for: file, in: inputURL))
+            let data = try Data(contentsOf: ProjectBundle.projectLocalFileURL(for: file, in: inputURL))
             return try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
         }
 
@@ -1548,7 +1550,7 @@ struct DMLessonMeldCLI {
 
     static func attachAnnotationStore(projectURL: URL, storeURL: URL) throws -> ProjectManifest {
         try ProjectBundle.updateManifest(at: projectURL) { manifest in
-            manifest.media.annotations = projectFile(storeURL.path, role: .annotations, projectURL: projectURL)
+            manifest.media.annotations = try projectFile(storeURL.path, role: .annotations, projectURL: projectURL)
             if !manifest.tracks.contains(where: { $0.id == "annotations" }) {
                 manifest.tracks.append(TimelineTrack(id: "annotations", kind: .annotations, displayName: "Annotations"))
             }

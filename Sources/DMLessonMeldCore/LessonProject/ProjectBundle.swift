@@ -3,6 +3,7 @@ import Foundation
 public enum ProjectBundleError: Error, LocalizedError {
     case manifestNotFound(URL)
     case invalidBundle(URL)
+    case unsafeFileReference(String)
 
     public var errorDescription: String? {
         switch self {
@@ -10,6 +11,8 @@ public enum ProjectBundleError: Error, LocalizedError {
             "No project.json found at \(url.path)."
         case .invalidBundle(let url):
             "Project path is not a directory: \(url.path)."
+        case .unsafeFileReference(let path):
+            "Project file reference must be a project-local relative path: \(path)"
         }
     }
 }
@@ -102,11 +105,14 @@ public enum ProjectBundle {
     }
 
     public static func fileURL(for file: ProjectFile, in projectURL: URL) -> URL {
-        let path = NSString(string: file.relativePath).expandingTildeInPath
-        if path.hasPrefix("/") {
-            return URL(fileURLWithPath: path)
-        }
-        return projectURL.appendingPathComponent(file.relativePath)
+        (try? projectLocalFileURL(for: file, in: projectURL)) ?? unsafeFallbackURL(for: file, in: projectURL)
+    }
+
+    public static func projectLocalFileURL(for file: ProjectFile, in projectURL: URL) throws -> URL {
+        let relativePath = try normalizedProjectRelativePath(file.relativePath)
+        let candidateURL = projectURL.appendingPathComponent(relativePath)
+        try ensureProjectContained(candidateURL, projectURL: projectURL, originalPath: file.relativePath)
+        return candidateURL
     }
 
     public static func updateManifest(at projectURL: URL, _ update: (inout ProjectManifest) throws -> Void) throws -> ProjectManifest {
@@ -193,7 +199,17 @@ public enum ProjectBundle {
         }
 
         for file in manifest.media.allFiles {
-            let url = fileURL(for: file, in: projectURL)
+            let url: URL
+            do {
+                url = try projectLocalFileURL(for: file, in: projectURL)
+            } catch {
+                issues.append(ProjectValidationIssue(
+                    severity: .error,
+                    message: error.localizedDescription,
+                    path: file.relativePath
+                ))
+                continue
+            }
             if !FileManager.default.fileExists(atPath: url.path) {
                 issues.append(ProjectValidationIssue(
                     severity: .warning,
@@ -204,6 +220,38 @@ public enum ProjectBundle {
         }
 
         return issues
+    }
+
+    private static func normalizedProjectRelativePath(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.hasPrefix("/"),
+              !trimmed.hasPrefix("~"),
+              !trimmed.contains("\0") else {
+            throw ProjectBundleError.unsafeFileReference(value)
+        }
+
+        let components = trimmed.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            throw ProjectBundleError.unsafeFileReference(value)
+        }
+
+        return components.joined(separator: "/")
+    }
+
+    private static func ensureProjectContained(_ candidateURL: URL, projectURL: URL, originalPath: String) throws {
+        let projectPath = projectURL.resolvingSymlinksInPath().standardizedFileURL.path
+        let candidatePath = candidateURL.resolvingSymlinksInPath().standardizedFileURL.path
+        guard candidatePath == projectPath || candidatePath.hasPrefix(projectPath + "/") else {
+            throw ProjectBundleError.unsafeFileReference(originalPath)
+        }
+    }
+
+    private static func unsafeFallbackURL(for file: ProjectFile, in projectURL: URL) -> URL {
+        let fallbackName = URL(fileURLWithPath: file.relativePath).lastPathComponent.nilIfEmpty ?? "file"
+        return projectURL
+            .appendingPathComponent(".invalid-project-reference", isDirectory: true)
+            .appendingPathComponent(fallbackName)
     }
 
     private static func recoverableFiles(in projectURL: URL) -> [ProjectFile] {
@@ -388,5 +436,11 @@ public enum ProjectBundle {
         case "jpg", "jpeg": "image/jpeg"
         default: nil
         }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

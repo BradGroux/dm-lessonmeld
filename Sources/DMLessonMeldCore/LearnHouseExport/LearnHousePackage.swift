@@ -504,7 +504,7 @@ public struct LearnHousePackageBuilder {
 
     private func copyPackageFiles(files: [ProjectFile], projectURL: URL, assetsURL: URL) throws -> [LearnHousePackageFile] {
         try files.compactMap { file in
-            let sourceURL = ProjectBundle.fileURL(for: file, in: projectURL)
+            let sourceURL = try ProjectBundle.projectLocalFileURL(for: file, in: projectURL)
             guard FileManager.default.fileExists(atPath: sourceURL.path) else {
                 return nil
             }

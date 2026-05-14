@@ -33,19 +33,33 @@ public struct ConfigBackupPlanner: Sendable {
 
         guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else {
             return ConfigBackupPlan(rootPath: rootURL.path, includePaths: [], excludedPaths: [])
         }
 
         for case let url as URL in enumerator {
-            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            let displayedRelativePath = relativePath(for: url.standardizedFileURL.path, rootPath: rootURL.standardizedFileURL.path)
+            guard values.isSymbolicLink != true else {
+                excludedPaths.append(ExcludedConfigPath(
+                    path: displayedRelativePath,
+                    reason: "Symbolic links are not included in config backups."
+                ))
+                continue
+            }
             guard values.isRegularFile == true else { continue }
 
             let normalizedFilePath = url.resolvingSymlinksInPath().path
-            let relativePath = normalizedFilePath
-                .replacingOccurrences(of: normalizedRootPath + "/", with: "")
+            guard normalizedFilePath == normalizedRootPath || normalizedFilePath.hasPrefix(normalizedRootPath + "/") else {
+                excludedPaths.append(ExcludedConfigPath(
+                    path: displayedRelativePath,
+                    reason: "Path resolves outside the config backup root."
+                ))
+                continue
+            }
+            let relativePath = relativePath(for: normalizedFilePath, rootPath: normalizedRootPath)
             if let reason = exclusionReason(for: relativePath) {
                 excludedPaths.append(ExcludedConfigPath(path: relativePath, reason: reason))
             } else if isSyncable(relativePath: relativePath) {
@@ -58,6 +72,10 @@ public struct ConfigBackupPlanner: Sendable {
             includePaths: includePaths.sorted(),
             excludedPaths: excludedPaths.sorted { $0.path < $1.path }
         )
+    }
+
+    private func relativePath(for filePath: String, rootPath: String) -> String {
+        filePath.replacingOccurrences(of: rootPath + "/", with: "")
     }
 
     private func isSyncable(relativePath: String) -> Bool {
