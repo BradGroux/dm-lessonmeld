@@ -7,31 +7,47 @@ import UniformTypeIdentifiers
 
 extension ProjectEditorView {
     func mediaEditorWorkspace(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
-        VStack(spacing: 0) {
-            mediaEditorTopBar(summary: summary, manifest: manifest)
-                .padding(.bottom, 12)
+        GeometryReader { proxy in
+            let layout = EditorWorkspaceLayout.resolve(
+                containerWidth: proxy.size.width,
+                containerHeight: proxy.size.height,
+                preferredInspectorWidth: mediaEditorInspectorWidth,
+                inspectorVisible: mediaEditorInspectorVisible,
+                timelineVisible: mediaEditorTimelineVisible
+            )
 
-            Divider()
-
-            HStack(spacing: 0) {
-                mediaEditorStage(manifest: manifest)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .layoutPriority(1)
-                    .clipped()
+            VStack(spacing: 0) {
+                mediaEditorTopBar(summary: summary, manifest: manifest)
+                    .padding(.bottom, 12)
 
                 Divider()
 
-                mediaEditorInspector(summary: summary, manifest: manifest)
-                    .frame(width: mediaEditorInspectorWidth)
-                    .background(Color(nsColor: .windowBackgroundColor))
-                    .clipped()
+                HStack(spacing: 0) {
+                    mediaEditorStage(manifest: manifest)
+                        .frame(width: CGFloat(layout.stageWidth))
+                        .frame(maxHeight: .infinity)
+                        .layoutPriority(1)
+                        .clipped()
+
+                    if layout.showsInspector {
+                        Divider()
+
+                        mediaEditorInspector(summary: summary, manifest: manifest)
+                            .frame(width: CGFloat(layout.inspectorWidth))
+                            .background(Color(nsColor: .windowBackgroundColor))
+                            .clipped()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if layout.showsTimeline {
+                    Divider()
+
+                    mediaTimelineEditor(manifest: manifest)
+                        .frame(height: CGFloat(layout.timelineHeight))
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Divider()
-
-            mediaTimelineEditor(manifest: manifest)
-                .frame(height: 236)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -85,6 +101,25 @@ extension ProjectEditorView {
                 Label("Revert", systemImage: "arrow.counterclockwise")
             }
             .disabled(model.projectURL == nil || !model.hasUnsavedChanges)
+
+            Menu {
+                Toggle("Inspector", isOn: $mediaEditorInspectorVisible)
+                Toggle("Timeline", isOn: $mediaEditorTimelineVisible)
+                Divider()
+                Button("Narrow Inspector") {
+                    mediaEditorInspectorWidth = max(EditorWorkspaceLayout.minimumInspectorWidth, mediaEditorInspectorWidth - 40)
+                }
+                Button("Widen Inspector") {
+                    mediaEditorInspectorWidth = min(EditorWorkspaceLayout.maximumInspectorWidth, mediaEditorInspectorWidth + 40)
+                }
+                Button("Reset Layout") {
+                    mediaEditorInspectorVisible = true
+                    mediaEditorTimelineVisible = true
+                    mediaEditorInspectorWidth = 420
+                }
+            } label: {
+                Label("Layout", systemImage: "rectangle.split.3x1")
+            }
 
             Button {
                 model.exportRender(preferences.snapshot)
