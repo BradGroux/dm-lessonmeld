@@ -100,11 +100,11 @@ struct LessonMeldSettingsView: View {
                 Button {
                     selectedSection = section
                 } label: {
-                    Label(section.title, systemImage: section.symbolName)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(selectedSection == section ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                    LessonMeldSidebarItem(
+                        title: section.title,
+                        systemImage: section.symbolName,
+                        isSelected: selectedSection == section
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -120,7 +120,7 @@ struct LessonMeldSettingsView: View {
         .padding(.top, 16)
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .background(LessonMeldDesign.panelFill)
     }
 
     @ViewBuilder private var sectionView: some View {
@@ -897,7 +897,7 @@ private struct CommunityLinkButton: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+            .background(LessonMeldDesign.rowFill, in: RoundedRectangle(cornerRadius: LessonMeldDesign.Radius.card, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open \(title)")

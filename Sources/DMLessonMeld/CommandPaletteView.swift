@@ -26,31 +26,12 @@ struct CommandPaletteView: View {
                             command.action()
                             dismiss()
                         } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: command.systemImage)
-                                    .font(.title3)
-                                    .frame(width: 26)
-                                    .foregroundStyle(.secondary)
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(command.title)
-                                        .font(.headline)
-                                    Text(command.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-
-                                if let shortcut = command.shortcut {
-                                    Text(shortcut)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                            LessonMeldCommandRow(
+                                title: command.title,
+                                subtitle: command.subtitle,
+                                systemImage: command.systemImage,
+                                shortcut: command.shortcut
+                            )
                         }
                         .buttonStyle(.plain)
                     }
