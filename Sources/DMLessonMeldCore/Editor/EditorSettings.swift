@@ -6,13 +6,16 @@ public struct EditorSettings: Codable, Equatable, Sendable {
 
     public var schemaVersion: Int
     public var canvas: EditorCanvasSettings
+    public var zoom: EditorZoomSettings?
 
     public init(
         schemaVersion: Int = Self.currentSchemaVersion,
-        canvas: EditorCanvasSettings = EditorCanvasSettings()
+        canvas: EditorCanvasSettings = EditorCanvasSettings(),
+        zoom: EditorZoomSettings? = EditorZoomSettings()
     ) {
         self.schemaVersion = schemaVersion
         self.canvas = canvas
+        self.zoom = zoom
     }
 }
 
@@ -264,5 +267,13 @@ public struct EditorCanvasShadow: Codable, Equatable, Sendable {
         self.opacity = min(1, max(0, opacity.isFinite ? opacity : 0.34))
         self.radiusRatio = min(0.12, max(0, radiusRatio.isFinite ? radiusRatio : 0.02))
         self.offsetYRatio = min(0.12, max(-0.12, offsetYRatio.isFinite ? offsetYRatio : -0.008))
+    }
+}
+
+public struct EditorZoomSettings: Codable, Equatable, Sendable {
+    public var automaticClickZoomsEnabled: Bool
+
+    public init(automaticClickZoomsEnabled: Bool = true) {
+        self.automaticClickZoomsEnabled = automaticClickZoomsEnabled
     }
 }

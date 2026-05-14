@@ -105,7 +105,13 @@ struct EditDecisionListTests {
                 TimelineCut(id: "cut-1", range: EditTimeRange(startSeconds: 20, durationSeconds: 4), reason: "Retake")
             ],
             zoomRegions: [
-                ZoomRegion(id: "zoom-1", range: EditTimeRange(startSeconds: 12, durationSeconds: 3), scale: 1.6)
+                ZoomRegion(
+                    id: "zoom-1",
+                    range: EditTimeRange(startSeconds: 12, durationSeconds: 3),
+                    scale: 1.6,
+                    focusMode: .clickMetadata,
+                    easing: .instant
+                )
             ]
         )
 

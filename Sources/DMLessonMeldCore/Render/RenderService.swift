@@ -535,7 +535,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             guard endSeconds > startSeconds else { continue }
 
             let regionDuration = endSeconds - startSeconds
-            let rampDuration = min(0.22, regionDuration / 3)
+            let rampDuration = zoomRampDuration(for: region, regionDuration: regionDuration)
             let zoomTransform = zoomTransform(for: region, baseTransform: baseTransform, renderSize: renderSize)
 
             if rampDuration > 0 {
@@ -599,7 +599,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             guard endSeconds > startSeconds else { continue }
 
             let regionDuration = endSeconds - startSeconds
-            let rampDuration = min(0.22, regionDuration / 3)
+            let rampDuration = zoomRampDuration(for: region, regionDuration: regionDuration)
             let zoomTransform = zoomTransform(for: region, baseTransform: .identity, renderSize: renderSize)
             let zoom3D = CATransform3DMakeAffineTransform(zoomTransform)
             let identity3D = CATransform3DIdentity
@@ -610,7 +610,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 zoomIn.toValue = zoom3D
                 zoomIn.beginTime = AVCoreAnimationBeginTimeAtZero + startSeconds
                 zoomIn.duration = rampDuration
-                zoomIn.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                zoomIn.timingFunction = zoomTimingFunction(for: region)
                 zoomIn.fillMode = .forwards
                 zoomIn.isRemovedOnCompletion = false
                 layer.add(zoomIn, forKey: "overlay-zoom-in-\(region.id)")
@@ -623,11 +623,29 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 zoomOut.toValue = identity3D
                 zoomOut.beginTime = AVCoreAnimationBeginTimeAtZero + outStart
                 zoomOut.duration = rampDuration
-                zoomOut.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                zoomOut.timingFunction = zoomTimingFunction(for: region)
                 zoomOut.fillMode = .forwards
                 zoomOut.isRemovedOnCompletion = false
                 layer.add(zoomOut, forKey: "overlay-zoom-out-\(region.id)")
             }
+        }
+    }
+
+    private func zoomRampDuration(for region: ZoomRegion, regionDuration: Double) -> Double {
+        switch region.easing ?? .smooth {
+        case .instant:
+            0
+        case .linear, .smooth:
+            min(0.22, regionDuration / 3)
+        }
+    }
+
+    private func zoomTimingFunction(for region: ZoomRegion) -> CAMediaTimingFunction {
+        switch region.easing ?? .smooth {
+        case .linear:
+            CAMediaTimingFunction(name: .linear)
+        case .instant, .smooth:
+            CAMediaTimingFunction(name: .easeInEaseOut)
         }
     }
 

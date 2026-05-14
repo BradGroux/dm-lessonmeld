@@ -90,6 +90,18 @@ The bottom timeline writes to the same project-local sidecars used by render/exp
 
 Search **Timeline Editing Shortcuts** in the command palette for the active keyboard controls.
 
+## Add Zooms
+
+Use the **Zooms** inspector tab or the purple timeline lane to create and edit zoom regions.
+
+- **Add** creates a smooth zoom at the playhead.
+- **Instant** creates a zoom with no ramp.
+- **Auto** creates zooms from recorded click metadata when the project has a cursor metadata sidecar.
+- Select a zoom block, then drag the focus box on the preview to place the zoom visually.
+- Use the scale, focus size, X, and Y sliders for precise adjustment without typing normalized values.
+- Disable a zoom to keep it visible in the timeline while excluding it from render/export.
+- Save **Zoom Defaults** to persist the project-level automatic click zoom toggle in `editor-settings.json`.
+
 ## Annotate
 
 Open annotation tools from the sidebar, project editor, recorder bar, or command palette.
