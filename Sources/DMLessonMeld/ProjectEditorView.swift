@@ -7,9 +7,11 @@ import UniformTypeIdentifiers
 
 struct ProjectEditorView: View {
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject var appRouter: LessonMeldAppRouter
     @ObservedObject var preferences: AppPreferencesController
     @ObservedObject var annotationOverlay: AnnotationOverlayCoordinator
     @ObservedObject var quickRecorder: QuickRecorderModel
+    let fallbackAnnotationOverlayHandler: (LessonMeldPreferences) -> Void
     @StateObject private var model = ProjectEditorModel()
     @State private var showRecoveryNotice = false
     @State private var didShowRecoveryNoticeThisLaunch = false
@@ -36,8 +38,8 @@ struct ProjectEditorView: View {
                 annotationOverlay.open(preferences: preferences, annotationStoreURL: storeURL, forceToolbarVisible: true)
             }
             LocalAppControlBridge.shared.configure(quickRecorder: quickRecorder, preferences: preferences)
-            if let pendingProjectURL = ProjectOpenRouter.shared.consumePendingProjectURL() {
-                model.loadProject(pendingProjectURL)
+            ProjectOpenRouter.shared.registerConsumer { [weak model] projectURL in
+                model?.loadProject(projectURL)
             }
             if preferences.shouldUseRecoveryLaunch, !didShowRecoveryNoticeThisLaunch {
                 showRecoveryNotice = true
@@ -47,12 +49,9 @@ struct ProjectEditorView: View {
         }
         .onDisappear {
             quickRecorder.openProjectHandler = nil
-            quickRecorder.annotationOverlayHandler = nil
+            quickRecorder.annotationOverlayHandler = fallbackAnnotationOverlayHandler
+            ProjectOpenRouter.shared.unregisterConsumer()
             model.teardown()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .lessonMeldOpenProject)) { notification in
-            guard let projectURL = notification.object as? URL else { return }
-            model.loadProject(projectURL)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             quickRecorder.refreshPermissions(updateMessage: false)
@@ -156,8 +155,7 @@ struct ProjectEditorView: View {
             sidebarSection("App")
 
             Button {
-                openWindow(id: "settings")
-                NSApplication.shared.activate()
+                appRouter.openSettings()
             } label: {
                 Label("Settings", systemImage: "gearshape")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -330,8 +328,7 @@ struct ProjectEditorView: View {
                             .buttonStyle(.borderedProminent)
 
                             Button {
-                                openWindow(id: "settings")
-                                NSApplication.shared.activate()
+                                appRouter.openSettings(.capture)
                             } label: {
                                 Label("Check Defaults", systemImage: "gearshape")
                             }
@@ -721,8 +718,7 @@ struct ProjectEditorView: View {
                     model.openProject()
                 }
                 workflowRow("Render", "Export video or package for LearnHouse", systemImage: "shippingbox") {
-                    openWindow(id: "settings")
-                    NSApplication.shared.activate()
+                    appRouter.openSettings(.export)
                 }
             }
         }
@@ -752,8 +748,7 @@ struct ProjectEditorView: View {
     private var appToolButtons: some View {
         Group {
             Button {
-                openWindow(id: "settings")
-                NSApplication.shared.activate()
+                appRouter.openSettings()
             } label: {
                 Label("Settings", systemImage: "gearshape")
             }

@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class AnnotationOverlayCoordinator: NSObject, ObservableObject {
     @Published private(set) var isPresented = false
+    var openSettingsHandler: ((LessonMeldSettingsSection) -> Void)?
 
     private var overlayWindow: AnnotationOverlayWindow?
     private var toolbarController: AnnotationOverlayToolbarWindowController?
@@ -74,12 +75,8 @@ final class AnnotationOverlayCoordinator: NSObject, ObservableObject {
             onStopAnnotating: { [weak self] in
                 self?.stopAnnotating()
             },
-            onOpenSettings: {
-                NotificationCenter.default.post(
-                    name: .lessonMeldOpenSettingsRequested,
-                    object: nil,
-                    userInfo: [LessonMeldSettingsRequest.sectionUserInfoKey: LessonMeldSettingsRequest.annotationsSection]
-                )
+            onOpenSettings: { [weak self] in
+                self?.openSettingsHandler?(.annotations)
             }
         )
 
@@ -399,6 +396,9 @@ private final class AnnotationOverlaySession: ObservableObject {
         }
 
         boardMode = mode
+        if selectedTool == .cursor {
+            selectedTool = .pen
+        }
     }
 
     private func mutateStore(_ mutation: (inout AnnotationStore) -> Void) {
@@ -1567,21 +1567,12 @@ private struct AnnotationOverlayToolbarView: View {
     }
 
     private func runToolbarAction(preserveTool: Bool = true, _ action: () -> Void) {
-        let selectedTool = session.selectedTool
-        let boardMode = session.boardMode
         if preserveTool {
             session.suppressDrawingFromToolbarAction()
         } else {
             session.exitToolModeForUtilityAction()
         }
         action()
-        guard preserveTool else { return }
-        session.selectedTool = selectedTool
-        session.boardMode = boardMode
-        DispatchQueue.main.async {
-            session.selectedTool = selectedTool
-            session.boardMode = boardMode
-        }
     }
 
     private func iconButton(

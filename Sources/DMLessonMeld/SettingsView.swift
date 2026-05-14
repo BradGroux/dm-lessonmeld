@@ -3,14 +3,16 @@ import DMLessonMeldCore
 import SwiftUI
 
 struct LessonMeldSettingsView: View {
+    @ObservedObject var appRouter: LessonMeldAppRouter
     @ObservedObject var preferences: AppPreferencesController
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
-    @State private var selectedSection: SettingsSection = .capture
+    @State private var selectedSection: LessonMeldSettingsSection = .capture
     @State private var draft: LessonMeldPreferences
     @State private var saveMessage = "Saved"
 
-    init(preferences: AppPreferencesController) {
+    init(appRouter: LessonMeldAppRouter, preferences: AppPreferencesController) {
+        self.appRouter = appRouter
         self.preferences = preferences
         _draft = State(initialValue: preferences.snapshot.normalized())
     }
@@ -31,10 +33,10 @@ struct LessonMeldSettingsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             refreshDraft()
-            applyPendingSettingsRequest()
+            applySettingsRequest(appRouter.settingsRequest)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .lessonMeldOpenSettingsRequested)) { notification in
-            applySettingsRequest(notification)
+        .onReceive(appRouter.$settingsRequest.compactMap(\.self)) { request in
+            applySettingsRequest(request)
         }
     }
 
@@ -92,7 +94,7 @@ struct LessonMeldSettingsView: View {
                 .font(.title2.weight(.semibold))
                 .padding(.bottom, 12)
 
-            ForEach(SettingsSection.allCases) { section in
+            ForEach(LessonMeldSettingsSection.allCases) { section in
                 Button {
                     selectedSection = section
                 } label: {
@@ -501,25 +503,9 @@ struct LessonMeldSettingsView: View {
         saveMessage = "Saved"
     }
 
-    private func applyPendingSettingsRequest() {
-        guard let rawValue = LessonMeldSettingsRequest.pendingSectionRawValue,
-              let section = SettingsSection(rawValue: rawValue)
-        else {
-            return
-        }
-
+    private func applySettingsRequest(_ request: LessonMeldSettingsWindowRequest?) {
+        guard let section = request?.section else { return }
         selectedSection = section
-        LessonMeldSettingsRequest.pendingSectionRawValue = nil
-    }
-
-    private func applySettingsRequest(_ notification: Notification) {
-        if let rawValue = notification.userInfo?[LessonMeldSettingsRequest.sectionUserInfoKey] as? String,
-           let section = SettingsSection(rawValue: rawValue) {
-            selectedSection = section
-            return
-        }
-
-        applyPendingSettingsRequest()
     }
 }
 
@@ -849,44 +835,6 @@ private struct SettingsSectionView<Content: View>: View {
     }
 }
 
-private enum SettingsSection: String, CaseIterable, Identifiable {
-    case general
-    case capture
-    case annotations
-    case export
-    case community
-    case privacy
-    case shortcuts
-    case diagnostics
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .general: "General"
-        case .capture: "Capture"
-        case .annotations: "Annotations"
-        case .export: "Export"
-        case .community: "Community"
-        case .privacy: "Privacy"
-        case .shortcuts: "Shortcuts"
-        case .diagnostics: "Diagnostics"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .general: "gearshape"
-        case .capture: "record.circle"
-        case .annotations: "pencil.tip"
-        case .export: "square.and.arrow.up"
-        case .community: "person.2"
-        case .privacy: "lock.shield"
-        case .shortcuts: "keyboard"
-        case .diagnostics: "stethoscope"
-        }
-    }
-}
 
 private extension LessonMeldShortcutAction {
     var displayName: String {

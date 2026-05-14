@@ -6,18 +6,35 @@ import Foundation
 final class ProjectOpenRouter {
     static let shared = ProjectOpenRouter()
 
-    private var pendingProjectURL: URL?
+    private var pendingProjectURLs: [URL] = []
+    private var consumer: ((URL) -> Void)?
 
     private init() {}
 
-    func publish(_ projectURL: URL) {
-        pendingProjectURL = projectURL
-        NotificationCenter.default.post(name: .lessonMeldOpenProject, object: projectURL)
+    func registerConsumer(_ consumer: @escaping (URL) -> Void) {
+        self.consumer = consumer
+        drainPendingProjectURLs()
     }
 
-    func consumePendingProjectURL() -> URL? {
-        defer { pendingProjectURL = nil }
-        return pendingProjectURL
+    func unregisterConsumer() {
+        consumer = nil
+    }
+
+    func publish(_ projectURL: URL) {
+        guard let consumer else {
+            pendingProjectURLs.append(projectURL)
+            return
+        }
+        consumer(projectURL)
+    }
+
+    private func drainPendingProjectURLs() {
+        guard let consumer else { return }
+        let urls = pendingProjectURLs
+        pendingProjectURLs.removeAll()
+        for url in urls {
+            consumer(url)
+        }
     }
 }
 
@@ -48,10 +65,6 @@ final class LessonMeldAppDelegate: NSObject, NSApplicationDelegate {
     private func openProject(_ url: URL) {
         Task { @MainActor in
             NSApplication.shared.activate(ignoringOtherApps: true)
-            ProjectOpenRouter.shared.publish(url)
-
-            // Finder/open-url events can arrive before SwiftUI has attached the main view listener.
-            try? await Task.sleep(nanoseconds: 300_000_000)
             ProjectOpenRouter.shared.publish(url)
         }
     }
