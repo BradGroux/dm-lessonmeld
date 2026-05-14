@@ -19,6 +19,8 @@ struct ProjectEditorView: View {
     @State private var showLessonMarkers = true
     @State private var editorInspectorTab: EditorInspectorTab = .edits
     @State private var timelineZoom = 1.0
+    @State private var activeTimelineDrag: TimelineDragState?
+    @State private var selectedTimelineItem: TimelineSelection?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -814,17 +816,40 @@ struct ProjectEditorView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
+                    model.stepPlayhead(by: -1)
+                } label: {
+                    Label("Back 1s", systemImage: "backward.frame")
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                Button {
+                    model.stepPlayhead(by: 1)
+                } label: {
+                    Label("Forward 1s", systemImage: "forward.frame")
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                Button {
                     model.addCutAtPlayhead()
+                    persistTimelineEditChanges(for: .moveCut)
                     editorInspectorTab = .cuts
                 } label: {
                     Label("Cut", systemImage: "scissors")
                 }
+                .keyboardShortcut("b", modifiers: [])
                 Button {
                     model.addZoomAtPlayhead()
+                    persistTimelineEditChanges(for: .moveZoom)
                     editorInspectorTab = .zooms
                 } label: {
                     Label("Zoom", systemImage: "plus.magnifyingglass")
                 }
+                .keyboardShortcut("z", modifiers: [])
+                Button {
+                    deleteSelectedTimelineItem()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .keyboardShortcut(.delete, modifiers: [])
+                .disabled(selectedTimelineItem == nil)
                 Button {
                     model.saveEditDecisions()
                 } label: {
@@ -834,6 +859,13 @@ struct ProjectEditorView: View {
                     .foregroundStyle(.secondary)
                 Slider(value: $timelineZoom, in: 1...6)
                     .frame(width: 120)
+            }
+            if !model.editValidationIssues.isEmpty {
+                Text(model.editValidationIssues.map(\.message).joined(separator: " "))
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
 
             GeometryReader { proxy in
@@ -887,8 +919,8 @@ struct ProjectEditorView: View {
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
-                                let x = min(max(value.location.x, 0), timelineWidth)
-                                model.seek(to: Double(x / timelineWidth) * duration)
+                                guard activeTimelineDrag == nil else { return }
+                                model.seek(to: timelineSeconds(value.location.x, width: timelineWidth, duration: duration))
                             }
                     )
                 }
@@ -947,6 +979,8 @@ struct ProjectEditorView: View {
 
     private func clipTimelineContent(width: CGFloat, duration: Double) -> some View {
         ZStack(alignment: .leading) {
+            let trimStart = secondsValue(model.trimStartSeconds) ?? 0
+            let trimEnd = secondsValue(model.trimEndSeconds) ?? duration
             RoundedRectangle(cornerRadius: 7)
                 .fill(Color.yellow.opacity(0.36))
                 .frame(width: max(0, width - timelineTrackInset))
@@ -968,6 +1002,28 @@ struct ProjectEditorView: View {
                 .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .foregroundStyle(.primary)
                 .padding(.leading, max(timelineTrackInset + 10, width * 0.46))
+            trimHandle("In")
+                .offset(x: timelineX(trimStart, width: width, duration: duration) - 5)
+                .gesture(timelineDragGesture(action: .trimStart, id: "trim-start", start: trimStart, end: trimEnd, width: width, duration: duration))
+                .help("Drag to set trim start")
+            trimHandle("Out")
+                .offset(x: timelineX(trimEnd, width: width, duration: duration) - 5)
+                .gesture(timelineDragGesture(action: .trimEnd, id: "trim-end", start: trimStart, end: trimEnd, width: width, duration: duration))
+                .help("Drag to set trim end")
+        }
+        .contextMenu {
+            Button("Set Trim In to Playhead") {
+                model.setTrimStartToPlayhead()
+                persistTimelineEditChanges(for: .trimStart)
+            }
+            Button("Set Trim Out to Playhead") {
+                model.setTrimEndToPlayhead()
+                persistTimelineEditChanges(for: .trimEnd)
+            }
+            Button("Clear Trim") {
+                model.clearTrim(duration: duration)
+                persistTimelineEditChanges(for: .trimStart)
+            }
         }
     }
 
@@ -983,8 +1039,40 @@ struct ProjectEditorView: View {
                         width: width,
                         duration: duration,
                         height: 22,
-                        isEnabled: cut.isEnabled
+                        isEnabled: cut.isEnabled,
+                        isSelected: selectedTimelineItem == .cut(cut.id)
                     )
+                    .onTapGesture {
+                        selectedTimelineItem = .cut(cut.id)
+                        editorInspectorTab = .cuts
+                    }
+                    .gesture(timelineDragGesture(action: .moveCut, id: cut.id, start: start, end: end, width: width, duration: duration))
+                    .overlay(alignment: .leading) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeCutStart, id: cut.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .overlay(alignment: .trailing) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeCutEnd, id: cut.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .contextMenu {
+                        Button("Jump to Cut") {
+                            model.seek(to: start)
+                        }
+                        Button(cut.isEnabled ? "Disable Cut" : "Enable Cut") {
+                            model.toggleCutEnabled(id: cut.id)
+                            persistTimelineEditChanges(for: .moveCut)
+                        }
+                        Button("Duplicate Cut") {
+                            model.duplicateCut(id: cut.id, duration: duration)
+                            persistTimelineEditChanges(for: .moveCut)
+                        }
+                        Button("Remove Cut", role: .destructive) {
+                            model.removeCut(id: cut.id)
+                            selectedTimelineItem = nil
+                            persistTimelineEditChanges(for: .moveCut)
+                        }
+                    }
                 }
             }
         }
@@ -1002,8 +1090,40 @@ struct ProjectEditorView: View {
                         width: width,
                         duration: duration,
                         height: 22,
-                        isEnabled: zoom.isEnabled
+                        isEnabled: zoom.isEnabled,
+                        isSelected: selectedTimelineItem == .zoom(zoom.id)
                     )
+                    .onTapGesture {
+                        selectedTimelineItem = .zoom(zoom.id)
+                        editorInspectorTab = .zooms
+                    }
+                    .gesture(timelineDragGesture(action: .moveZoom, id: zoom.id, start: start, end: end, width: width, duration: duration))
+                    .overlay(alignment: .leading) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeZoomStart, id: zoom.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .overlay(alignment: .trailing) {
+                        timelineResizeHandle()
+                            .gesture(timelineDragGesture(action: .resizeZoomEnd, id: zoom.id, start: start, end: end, width: width, duration: duration))
+                    }
+                    .contextMenu {
+                        Button("Jump to Zoom") {
+                            model.seek(to: start)
+                        }
+                        Button(zoom.isEnabled ? "Disable Zoom" : "Enable Zoom") {
+                            model.toggleZoomEnabled(id: zoom.id)
+                            persistTimelineEditChanges(for: .moveZoom)
+                        }
+                        Button("Duplicate Zoom") {
+                            model.duplicateZoom(id: zoom.id, duration: duration)
+                            persistTimelineEditChanges(for: .moveZoom)
+                        }
+                        Button("Remove Zoom", role: .destructive) {
+                            model.removeZoom(id: zoom.id)
+                            selectedTimelineItem = nil
+                            persistTimelineEditChanges(for: .moveZoom)
+                        }
+                    }
                 }
             }
         }
@@ -1024,6 +1144,29 @@ struct ProjectEditorView: View {
                     .foregroundStyle(.blue)
                     .frame(width: 86, alignment: .leading)
                     .offset(x: max(76, min(width - 86, x)))
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill((selectedTimelineItem == .marker(marker.id) ? Color.blue.opacity(0.22) : Color.clear))
+                    )
+                    .onTapGesture {
+                        selectedTimelineItem = .marker(marker.id)
+                    }
+                    .gesture(timelineDragGesture(action: .moveMarker, id: marker.id, start: seconds, end: seconds, width: width, duration: duration))
+                    .contextMenu {
+                        Button("Jump to Marker") {
+                            model.seek(to: seconds)
+                        }
+                        Button("Duplicate Marker") {
+                            model.duplicateMarker(id: marker.id, duration: duration)
+                            persistTimelineEditChanges(for: .moveMarker)
+                        }
+                        Button("Remove Marker", role: .destructive) {
+                            model.removeMarker(id: marker.id)
+                            selectedTimelineItem = nil
+                            persistTimelineEditChanges(for: .moveMarker)
+                        }
+                    }
                 }
             }
         }
@@ -1037,7 +1180,8 @@ struct ProjectEditorView: View {
         width: CGFloat,
         duration: Double,
         height: CGFloat,
-        isEnabled: Bool
+        isEnabled: Bool,
+        isSelected: Bool
     ) -> some View {
         let x = timelineX(start, width: width, duration: duration)
         let blockWidth = max(18, timelineX(end, width: width, duration: duration) - x)
@@ -1049,11 +1193,12 @@ struct ProjectEditorView: View {
             .background(tint.opacity(isEnabled ? 0.78 : 0.28), in: RoundedRectangle(cornerRadius: 6))
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(tint.opacity(isEnabled ? 0.9 : 0.4), lineWidth: 1)
+                    .stroke(isSelected ? Color.accentColor : tint.opacity(isEnabled ? 0.9 : 0.4), lineWidth: isSelected ? 2 : 1)
             )
             .foregroundStyle(.white)
             .offset(x: x)
             .opacity(isEnabled ? 1 : 0.55)
+            .contentShape(Rectangle())
     }
 
     private func playheadLine(width: CGFloat, duration: Double) -> some View {
@@ -1069,10 +1214,132 @@ struct ProjectEditorView: View {
         .offset(x: x)
     }
 
+    private func trimHandle(_ title: String) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.white.opacity(0.94))
+                .frame(width: 10, height: 28)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(Color.black.opacity(0.25), lineWidth: 1)
+                )
+        }
+        .foregroundStyle(.black.opacity(0.75))
+        .frame(width: 28, height: 38)
+        .contentShape(Rectangle())
+    }
+
+    private func timelineResizeHandle() -> some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(Color.white.opacity(0.88))
+            .frame(width: 9)
+            .overlay(
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(Color.black.opacity(0.22), lineWidth: 1)
+            )
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+            .help("Drag to resize")
+    }
+
+    private func timelineDragGesture(
+        action: TimelineDragAction,
+        id: String,
+        start: Double,
+        end: Double,
+        width: CGFloat,
+        duration: Double
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                if activeTimelineDrag == nil {
+                    activeTimelineDrag = TimelineDragState(
+                        action: action,
+                        id: id,
+                        startSeconds: start,
+                        endSeconds: end
+                    )
+                }
+                guard let drag = activeTimelineDrag,
+                      drag.action == action,
+                      drag.id == id else {
+                    return
+                }
+                applyTimelineDrag(drag, delta: timelineDeltaSeconds(value.translation.width, width: width, duration: duration), duration: duration)
+            }
+            .onEnded { _ in
+                activeTimelineDrag = nil
+                persistTimelineEditChanges(for: action)
+            }
+    }
+
+    private func applyTimelineDrag(_ drag: TimelineDragState, delta: Double, duration: Double) {
+        switch drag.action {
+        case .trimStart:
+            model.updateTrimStart(drag.startSeconds + delta, duration: duration)
+        case .trimEnd:
+            model.updateTrimEnd(drag.endSeconds + delta, duration: duration)
+        case .moveCut:
+            model.moveCut(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
+        case .resizeCutStart:
+            model.resizeCut(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
+        case .resizeCutEnd:
+            model.resizeCut(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
+        case .moveZoom:
+            model.moveZoom(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds + delta, duration: duration)
+        case .resizeZoomStart:
+            model.resizeZoom(id: drag.id, start: drag.startSeconds + delta, end: drag.endSeconds, duration: duration)
+        case .resizeZoomEnd:
+            model.resizeZoom(id: drag.id, start: drag.startSeconds, end: drag.endSeconds + delta, duration: duration)
+        case .moveMarker:
+            model.moveMarker(id: drag.id, to: drag.startSeconds + delta, duration: duration)
+        }
+    }
+
+    private func persistTimelineEditChanges(for action: TimelineDragAction) {
+        switch action {
+        case .moveMarker:
+            model.saveMarkers()
+        default:
+            model.saveEditDecisions()
+        }
+    }
+
+    private func deleteSelectedTimelineItem() {
+        guard let selectedTimelineItem else { return }
+        switch selectedTimelineItem {
+        case .cut(let id):
+            model.removeCut(id: id)
+            persistTimelineEditChanges(for: .moveCut)
+        case .zoom(let id):
+            model.removeZoom(id: id)
+            persistTimelineEditChanges(for: .moveZoom)
+        case .marker(let id):
+            model.removeMarker(id: id)
+            persistTimelineEditChanges(for: .moveMarker)
+        }
+        self.selectedTimelineItem = nil
+    }
+
     private func timelineX(_ seconds: Double, width: CGFloat, duration: Double) -> CGFloat {
         guard duration > 0 else { return 0 }
         let trackWidth = max(0, width - timelineTrackInset)
         return timelineTrackInset + min(max(0, CGFloat(seconds / duration) * trackWidth), trackWidth)
+    }
+
+    private func timelineSeconds(_ x: CGFloat, width: CGFloat, duration: Double) -> Double {
+        guard duration > 0 else { return 0 }
+        let trackWidth = max(1, width - timelineTrackInset)
+        let trackX = min(max(0, x - timelineTrackInset), trackWidth)
+        return Double(trackX / trackWidth) * duration
+    }
+
+    private func timelineDeltaSeconds(_ translation: CGFloat, width: CGFloat, duration: Double) -> Double {
+        guard duration > 0 else { return 0 }
+        let trackWidth = max(1, width - timelineTrackInset)
+        return Double(translation / trackWidth) * duration
     }
 
     private var timelineTrackInset: CGFloat { 76 }
@@ -2578,6 +2845,31 @@ private enum EditorInspectorTab: String, CaseIterable, Identifiable {
     }
 }
 
+private enum TimelineSelection: Equatable {
+    case cut(String)
+    case zoom(String)
+    case marker(String)
+}
+
+private enum TimelineDragAction: Equatable {
+    case trimStart
+    case trimEnd
+    case moveCut
+    case resizeCutStart
+    case resizeCutEnd
+    case moveZoom
+    case resizeZoomStart
+    case resizeZoomEnd
+    case moveMarker
+}
+
+private struct TimelineDragState {
+    var action: TimelineDragAction
+    var id: String
+    var startSeconds: Double
+    var endSeconds: Double
+}
+
 private struct ProjectVideoPlayer: NSViewRepresentable {
     var player: AVPlayer
     var controlsStyle: AVPlayerViewControlsStyle = .floating
@@ -2696,6 +2988,15 @@ private struct EditableZoomRow: Identifiable, Equatable {
     var isEnabled: Bool
 }
 
+private protocol EditableTimelineRangeRow {
+    var id: String { get }
+    var startSeconds: String { get set }
+    var endSeconds: String { get set }
+}
+
+extension EditableCutRow: EditableTimelineRangeRow {}
+extension EditableZoomRow: EditableTimelineRangeRow {}
+
 private struct EditableMarkerRow: Identifiable, Equatable {
     var id: String
     var kind: ProjectTimelineMarkerKind
@@ -2766,6 +3067,7 @@ private final class ProjectEditorModel: ObservableObject {
     private var timeObserver: Any?
     private var lastEditDecisionList: EditDecisionList?
     private var renderTask: Task<Void, Never>?
+    private static let minimumTimelineRangeSeconds = 0.1
 
     func apply(_ preferences: LessonMeldPreferences) {
         renderQuality = RenderQuality(rawValue: preferences.export.defaultRenderQuality.rawValue) ?? .highest
@@ -2988,6 +3290,31 @@ private final class ProjectEditorModel: ObservableObject {
         trimEndSeconds = Self.formatSecondsForEditing(currentTimeSeconds)
     }
 
+    func updateTrimStart(_ seconds: Double, duration: Double) {
+        let end = optionalTimelineSeconds(trimEndSeconds) ?? duration
+        let clamped = min(max(0, seconds), max(0, end - Self.minimumTimelineRangeSeconds))
+        trimStartSeconds = Self.formatSecondsForEditing(clamped)
+        clearTimelineValidation()
+    }
+
+    func updateTrimEnd(_ seconds: Double, duration: Double) {
+        let start = optionalTimelineSeconds(trimStartSeconds) ?? 0
+        let clamped = max(min(max(0, seconds), max(duration, start + Self.minimumTimelineRangeSeconds)), start + Self.minimumTimelineRangeSeconds)
+        trimEndSeconds = Self.formatSecondsForEditing(clamped)
+        clearTimelineValidation()
+    }
+
+    func clearTrim(duration: Double) {
+        trimStartSeconds = "0"
+        trimEndSeconds = Self.formatSecondsForEditing(duration)
+        clearTimelineValidation()
+    }
+
+    func stepPlayhead(by delta: Double) {
+        let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + abs(delta))
+        seek(to: min(max(currentTimeSeconds + delta, 0), max(duration, 0)))
+    }
+
     func copyCurrentFrame() {
         guard !isExportingFrame else { return }
         isExportingFrame = true
@@ -3059,6 +3386,36 @@ private final class ProjectEditorModel: ObservableObject {
         cutRows.removeAll { $0.id == id }
     }
 
+    func moveCut(id: String, start: Double, end: Double, duration: Double) {
+        updateRangeRow(id: id, start: start, end: end, duration: duration, rows: &cutRows)
+    }
+
+    func resizeCut(id: String, start: Double, end: Double, duration: Double) {
+        resizeRangeRow(id: id, start: start, end: end, duration: duration, rows: &cutRows)
+    }
+
+    func toggleCutEnabled(id: String) {
+        guard let index = cutRows.firstIndex(where: { $0.id == id }) else { return }
+        cutRows[index].isEnabled.toggle()
+        clearTimelineValidation()
+    }
+
+    func duplicateCut(id: String, duration: Double) {
+        guard let source = cutRows.first(where: { $0.id == id }),
+              let start = optionalTimelineSeconds(source.startSeconds),
+              let end = optionalTimelineSeconds(source.endSeconds) else {
+            return
+        }
+        let length = max(Self.minimumTimelineRangeSeconds, end - start)
+        let nextStart = min(max(0, start + length), max(0, duration - length))
+        var duplicate = source
+        duplicate.id = "cut-\(UUID().uuidString)"
+        duplicate.startSeconds = Self.formatSecondsForEditing(nextStart)
+        duplicate.endSeconds = Self.formatSecondsForEditing(nextStart + length)
+        cutRows.append(duplicate)
+        clearTimelineValidation()
+    }
+
     func addZoomAtPlayhead() {
         let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? currentTimeSeconds + 3)
         let start = min(max(currentTimeSeconds, 0), max(duration - 0.5, 0))
@@ -3081,6 +3438,36 @@ private final class ProjectEditorModel: ObservableObject {
         zoomRows.removeAll { $0.id == id }
     }
 
+    func moveZoom(id: String, start: Double, end: Double, duration: Double) {
+        updateRangeRow(id: id, start: start, end: end, duration: duration, rows: &zoomRows)
+    }
+
+    func resizeZoom(id: String, start: Double, end: Double, duration: Double) {
+        resizeRangeRow(id: id, start: start, end: end, duration: duration, rows: &zoomRows)
+    }
+
+    func toggleZoomEnabled(id: String) {
+        guard let index = zoomRows.firstIndex(where: { $0.id == id }) else { return }
+        zoomRows[index].isEnabled.toggle()
+        clearTimelineValidation()
+    }
+
+    func duplicateZoom(id: String, duration: Double) {
+        guard let source = zoomRows.first(where: { $0.id == id }),
+              let start = optionalTimelineSeconds(source.startSeconds),
+              let end = optionalTimelineSeconds(source.endSeconds) else {
+            return
+        }
+        let length = max(Self.minimumTimelineRangeSeconds, end - start)
+        let nextStart = min(max(0, start + length), max(0, duration - length))
+        var duplicate = source
+        duplicate.id = "zoom-\(UUID().uuidString)"
+        duplicate.startSeconds = Self.formatSecondsForEditing(nextStart)
+        duplicate.endSeconds = Self.formatSecondsForEditing(nextStart + length)
+        zoomRows.append(duplicate)
+        clearTimelineValidation()
+    }
+
     func addMarkerAtPlayhead() {
         let number = markerRows.count + 1
         let time = previewDurationSeconds > 0 ? currentTimeSeconds : 0
@@ -3097,6 +3484,25 @@ private final class ProjectEditorModel: ObservableObject {
 
     func removeMarker(id: String) {
         markerRows.removeAll { $0.id == id }
+    }
+
+    func moveMarker(id: String, to seconds: Double, duration: Double) {
+        guard let index = markerRows.firstIndex(where: { $0.id == id }) else { return }
+        markerRows[index].timeSeconds = Self.formatSecondsForEditing(min(max(0, seconds), max(duration, 0)))
+        clearTimelineValidation()
+    }
+
+    func duplicateMarker(id: String, duration: Double) {
+        guard let source = markerRows.first(where: { $0.id == id }),
+              let seconds = optionalTimelineSeconds(source.timeSeconds) else {
+            return
+        }
+        var duplicate = source
+        duplicate.id = "marker-\(UUID().uuidString)"
+        duplicate.title = "\(source.title) Copy"
+        duplicate.timeSeconds = Self.formatSecondsForEditing(min(seconds + 1, max(duration, 0)))
+        markerRows.append(duplicate)
+        clearTimelineValidation()
     }
 
     func saveMarkers() {
@@ -3785,6 +4191,47 @@ private final class ProjectEditorModel: ObservableObject {
             applyEditorSettings(EditorSettings())
             setError("Could not load \(EditorSettingsFile.defaultFileName): \(error.localizedDescription)")
         }
+    }
+
+    private func updateRangeRow<Row: EditableTimelineRangeRow>(
+        id: String,
+        start: Double,
+        end: Double,
+        duration: Double,
+        rows: inout [Row]
+    ) {
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        let length = max(Self.minimumTimelineRangeSeconds, end - start)
+        let maxStart = max(0, duration - length)
+        let nextStart = min(max(0, start), maxStart)
+        rows[index].startSeconds = Self.formatSecondsForEditing(nextStart)
+        rows[index].endSeconds = Self.formatSecondsForEditing(nextStart + length)
+        clearTimelineValidation()
+    }
+
+    private func resizeRangeRow<Row: EditableTimelineRangeRow>(
+        id: String,
+        start: Double,
+        end: Double,
+        duration: Double,
+        rows: inout [Row]
+    ) {
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        let nextStart = min(max(0, start), max(0, duration - Self.minimumTimelineRangeSeconds))
+        let nextEnd = min(max(end, nextStart + Self.minimumTimelineRangeSeconds), max(duration, nextStart + Self.minimumTimelineRangeSeconds))
+        rows[index].startSeconds = Self.formatSecondsForEditing(nextStart)
+        rows[index].endSeconds = Self.formatSecondsForEditing(nextEnd)
+        clearTimelineValidation()
+    }
+
+    private func optionalTimelineSeconds(_ value: String) -> Double? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let seconds = Double(trimmed), seconds.isFinite else { return nil }
+        return seconds
+    }
+
+    private func clearTimelineValidation() {
+        editValidationIssues = []
     }
 
     private func applyEditorSettings(_ settings: EditorSettings) {

@@ -242,6 +242,17 @@ private struct CommandPaletteWindowContent: View {
                 NSApplication.shared.activate()
             },
             CommandPaletteCommand(
+                id: "timeline-shortcuts",
+                title: "Timeline Editing Shortcuts",
+                subtitle: "Space plays, arrows nudge, B cuts, Z adds zoom, Delete removes the selected edit.",
+                systemImage: "keyboard",
+                shortcut: "B  Z  Delete",
+                keywords: ["timeline", "shortcut", "cut", "zoom", "delete", "nudge", "keyboard"]
+            ) {
+                openWindow(id: "main")
+                NSApplication.shared.activate()
+            },
+            CommandPaletteCommand(
                 id: "permissions",
                 title: "Open Capture Permissions",
                 subtitle: "Open onboarding for Screen Recording, Microphone, and Camera.",
