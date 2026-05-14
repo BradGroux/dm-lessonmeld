@@ -90,6 +90,16 @@ struct EditorSettingsTests {
                         fadeOutSeconds: 0.4
                     )
                 ]
+            ),
+            captions: EditorCaptionSettings(
+                burnInEnabled: true,
+                placement: .top,
+                fontName: "Helvetica",
+                fontSize: 40,
+                textColor: .yellow,
+                backgroundColor: RGBAColor(red: 0, green: 0, blue: 0, alpha: 0.6),
+                maxLineCount: 2,
+                safeMarginRatio: 0.1
             )
         )
 
@@ -146,6 +156,7 @@ struct EditorSettingsTests {
 
         #expect(settings.camera == nil)
         #expect(settings.audio == nil)
+        #expect(settings.captions == nil)
     }
 }
 

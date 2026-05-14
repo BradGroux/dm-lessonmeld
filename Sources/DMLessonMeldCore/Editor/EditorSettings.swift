@@ -10,6 +10,7 @@ public struct EditorSettings: Codable, Equatable, Sendable {
     public var cursor: EditorCursorSettings?
     public var camera: EditorCameraSettings?
     public var audio: EditorAudioSettings?
+    public var captions: EditorCaptionSettings?
 
     public init(
         schemaVersion: Int = Self.currentSchemaVersion,
@@ -17,7 +18,8 @@ public struct EditorSettings: Codable, Equatable, Sendable {
         zoom: EditorZoomSettings? = EditorZoomSettings(),
         cursor: EditorCursorSettings? = EditorCursorSettings(),
         camera: EditorCameraSettings? = EditorCameraSettings(),
-        audio: EditorAudioSettings? = EditorAudioSettings()
+        audio: EditorAudioSettings? = EditorAudioSettings(),
+        captions: EditorCaptionSettings? = EditorCaptionSettings()
     ) {
         self.schemaVersion = schemaVersion
         self.canvas = canvas
@@ -25,6 +27,7 @@ public struct EditorSettings: Codable, Equatable, Sendable {
         self.cursor = cursor
         self.camera = camera
         self.audio = audio
+        self.captions = captions
     }
 }
 
@@ -445,6 +448,57 @@ public struct EditorBackgroundMusicSettings: Codable, Equatable, Sendable {
         self.duckedGain = min(2, max(0, duckedGain.isFinite ? duckedGain : 0.12))
         self.fadeInSeconds = min(10, max(0, fadeInSeconds.isFinite ? fadeInSeconds : 0.5))
         self.fadeOutSeconds = min(10, max(0, fadeOutSeconds.isFinite ? fadeOutSeconds : 0.5))
+    }
+}
+
+public struct EditorCaptionSettings: Codable, Equatable, Sendable {
+    public var burnInEnabled: Bool
+    public var placement: EditorCaptionPlacement
+    public var fontName: String
+    public var fontSize: Double
+    public var textColor: RGBAColor
+    public var backgroundColor: RGBAColor
+    public var maxLineCount: Int
+    public var safeMarginRatio: Double
+
+    public init(
+        burnInEnabled: Bool = true,
+        placement: EditorCaptionPlacement = .bottom,
+        fontName: String = "Helvetica-Bold",
+        fontSize: Double = 34,
+        textColor: RGBAColor = .white,
+        backgroundColor: RGBAColor = RGBAColor(red: 0.02, green: 0.02, blue: 0.025, alpha: 0.72),
+        maxLineCount: Int = 3,
+        safeMarginRatio: Double = 0.07
+    ) {
+        self.burnInEnabled = burnInEnabled
+        let trimmedFontName = fontName.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.fontName = trimmedFontName.isEmpty ? "Helvetica-Bold" : trimmedFontName
+        self.placement = placement
+        self.fontSize = min(96, max(12, fontSize.isFinite ? fontSize : 34))
+        self.textColor = textColor
+        self.backgroundColor = backgroundColor
+        self.maxLineCount = min(5, max(1, maxLineCount))
+        self.safeMarginRatio = min(0.25, max(0, safeMarginRatio.isFinite ? safeMarginRatio : 0.07))
+    }
+}
+
+public enum EditorCaptionPlacement: String, Codable, CaseIterable, Identifiable, Sendable {
+    case top
+    case middle
+    case bottom
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .top:
+            "Top"
+        case .middle:
+            "Middle"
+        case .bottom:
+            "Bottom"
+        }
     }
 }
 

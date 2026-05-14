@@ -243,6 +243,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
     public var canvas: EditorCanvasSettings
     public var camera: EditorCameraSettings
     public var audio: EditorAudioSettings
+    public var captions: EditorCaptionSettings
     public var cursor: EditorCursorSettings
 
     public init(
@@ -262,6 +263,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         canvas: EditorCanvasSettings = EditorCanvasSettings(),
         camera: EditorCameraSettings = EditorCameraSettings(),
         audio: EditorAudioSettings = EditorAudioSettings(),
+        captions: EditorCaptionSettings = EditorCaptionSettings(),
         cursor: EditorCursorSettings = EditorCursorSettings()
     ) {
         self.projectURL = projectURL
@@ -280,6 +282,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         self.canvas = canvas
         self.camera = camera
         self.audio = audio
+        self.captions = captions
         self.cursor = cursor
     }
 
@@ -398,6 +401,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             canvas: editorSettings?.canvas ?? EditorCanvasSettings(),
             camera: cameraSettings,
             audio: editorSettings?.audio ?? EditorAudioSettings(),
+            captions: editorSettings?.captions ?? EditorCaptionSettings(),
             cursor: editorSettings?.cursor ?? EditorCursorSettings()
         )
     }

@@ -617,6 +617,13 @@ struct RenderPlanTests {
                         text: "👍"
                     )
                 ]
+            ),
+            captions: EditorCaptionSettings(
+                placement: .top,
+                fontSize: 28,
+                textColor: .yellow,
+                maxLineCount: 2,
+                safeMarginRatio: 0.08
             )
         )
         try EditorSettingsFile.save(canvasSettings, toProject: projectURL)
@@ -655,6 +662,7 @@ struct RenderPlanTests {
         #expect(inspection.plan?.canvas == canvasSettings.canvas)
         #expect(inspection.plan?.cursor == canvasSettings.cursor)
         #expect(inspection.plan?.camera == canvasSettings.camera)
+        #expect(inspection.plan?.captions == canvasSettings.captions)
         #expect(inspection.plan?.webcamOverlay?.placement == canvasSettings.camera?.defaultPlacement)
         var plan = try #require(inspection.plan)
         plan.webcamOverlay?.placement = PictureInPicturePlacement(

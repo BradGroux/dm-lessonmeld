@@ -15,8 +15,8 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - Live annotation overlay with cursor, pen, highlighter, eraser, line, box, ellipse, arrow, text, laser pointer, whiteboard, blackboard, colors, line weights, text sizes, undo/redo, copy, and clear controls
 - Webcam picture-in-picture settings for aspect ratio, shape, corners, mirroring, border, shadow, timed layout regions, and reactions
 - Timeline edit-decision sidecars for trims, cuts, speed regions, markers, zoom regions, timed video overlays, masks, and highlights
-- Render planning/export with webcam PiP, audio gain regions, background music, cursor/click/shortcut effects, zooms, masks/highlights, overlays, annotations, and captions
-- Caption and transcript sidecar exporters
+- Render planning/export with webcam PiP, audio gain regions, background music, cursor/click/shortcut effects, zooms, masks/highlights, overlays, annotations, and styled caption burn-in
+- Caption and transcript import, timeline editing, styling, and sidecar exporters
 - Local package export for course publishing workflows
 - Git-safe settings/template backup planning for non-sensitive config
 - Agent-readable project manifests and signed local app-control messages for automation
