@@ -75,6 +75,21 @@ Canvas controls affect the final render:
 
 Use **None** for background when the rendered video should remain raw source pixels. Use a solid, gradient, or image background when exporting square, portrait, or padded lesson videos for publishing.
 
+## Edit on the Timeline
+
+The bottom timeline writes to the same project-local sidecars used by render/export. Timeline edits autosave when you finish dragging or use the block context menu.
+
+- Drag the **In** and **Out** handles on the clip lane to adjust trim bounds.
+- Drag cut and zoom blocks to move them.
+- Drag a cut or zoom block edge to resize its range.
+- Drag markers to retime them.
+- Right-click cut, zoom, and marker blocks to jump, disable, duplicate, or remove them.
+- Select a block and press **Delete** to remove it.
+- Press **B** to add a cut at the playhead and **Z** to add a zoom at the playhead.
+- Use the left and right arrow keys to nudge the playhead by one second.
+
+Search **Timeline Editing Shortcuts** in the command palette for the active keyboard controls.
+
 ## Annotate
 
 Open annotation tools from the sidebar, project editor, recorder bar, or command palette.
