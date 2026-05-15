@@ -127,7 +127,7 @@ extension ProjectEditorView {
                 Label(model.isRendering ? "Rendering..." : "Export", systemImage: "square.and.arrow.up")
             }
             .buttonStyle(.borderedProminent)
-            .disabled(model.isRendering || model.projectURL == nil)
+            .disabled(!model.canStartEditorJob(.renderVideo))
         }
     }
 
@@ -242,17 +242,261 @@ extension ProjectEditorView {
                     Label("Annotate", systemImage: "paintpalette")
                 }
                 Spacer()
-                if model.isRendering {
-                    ProgressView(value: model.renderProgress)
-                        .frame(width: 160)
-                    Text("\(Int((model.renderProgress * 100).rounded()))%")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
+            }
+
+            if !model.jobHistory.isEmpty {
+                editorJobQueueStrip
             }
         }
         .padding(.trailing, 16)
         .padding(.vertical, 14)
+    }
+
+    var editorJobQueueStrip: some View {
+        HStack(spacing: 10) {
+            Label("Jobs", systemImage: "list.bullet.rectangle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if let activeJob = model.activeEditorJob {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Label(activeJob.title, systemImage: editorJobKindIcon(activeJob.kind))
+                            .font(.caption.weight(.semibold))
+                        Text(editorJobProgressText(activeJob))
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    ProgressView(value: activeJob.progress)
+                        .frame(maxWidth: 280)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Active job")
+                .accessibilityValue("\(activeJob.title), \(editorJobProgressText(activeJob))")
+            } else if let latestJob = model.recentEditorJobs.first {
+                Label("\(latestJob.title): \(latestJob.statusTitle)", systemImage: editorJobStatusIcon(latestJob.status))
+                    .font(.caption)
+                    .foregroundStyle(editorJobStatusColor(latestJob.status))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            if let activeJob = model.activeEditorJob, activeJob.isCancellable {
+                Button {
+                    model.cancelJob(activeJob)
+                } label: {
+                    Label("Cancel", systemImage: "xmark.circle")
+                }
+            }
+
+            Menu {
+                editorJobHistoryMenuContent
+            } label: {
+                Label("History", systemImage: "clock.arrow.circlepath")
+            }
+            .accessibilityLabel("Job history")
+        }
+        .padding(10)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    var editorJobQueueInspector: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                inspectorSectionTitle("Job Queue")
+                Spacer()
+                Menu {
+                    editorJobHistoryMenuContent
+                } label: {
+                    Label("Actions", systemImage: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+            }
+
+            if let activeJob = model.activeEditorJob {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(activeJob.title, systemImage: editorJobKindIcon(activeJob.kind))
+                        .font(.caption.weight(.semibold))
+                    ProgressView(value: activeJob.progress)
+                    HStack {
+                        Text(editorJobProgressText(activeJob))
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if activeJob.isCancellable {
+                            Button("Cancel") {
+                                model.cancelJob(activeJob)
+                            }
+                        }
+                    }
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+            } else if let latestJob = model.recentEditorJobs.first {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(latestJob.title, systemImage: editorJobStatusIcon(latestJob.status))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(editorJobStatusColor(latestJob.status))
+                    valueLine("Status", latestJob.statusTitle)
+                    if let outputPath = latestJob.outputPath {
+                        Text(outputPath)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
+                    HStack {
+                        Button("Reveal") {
+                            model.revealJobOutput(latestJob)
+                        }
+                        .disabled(latestJob.outputPath == nil)
+                        Button("Log") {
+                            showEditorJobLog(latestJob)
+                        }
+                        Button("Retry") {
+                            model.retryJob(latestJob, preferences: preferences.snapshot)
+                        }
+                        .disabled(!latestJob.isRetryable)
+                    }
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+            }
+        }
+    }
+
+    @ViewBuilder
+    var editorJobHistoryMenuContent: some View {
+        if model.recentEditorJobs.isEmpty {
+            Text("No jobs yet.")
+        } else {
+            ForEach(model.recentEditorJobs) { job in
+                Section {
+                    Button {
+                        model.revealJobOutput(job)
+                    } label: {
+                        Label("Reveal Output", systemImage: "folder")
+                    }
+                    .disabled(job.outputPath == nil)
+
+                    Button {
+                        model.copyJobOutputPath(job)
+                    } label: {
+                        Label("Copy Output Path", systemImage: "doc.on.doc")
+                    }
+                    .disabled(job.outputPath == nil)
+
+                    Button {
+                        model.retryJob(job, preferences: preferences.snapshot)
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(!job.isRetryable)
+
+                    Button {
+                        showEditorJobLog(job)
+                    } label: {
+                        Label("View Log", systemImage: "doc.text.magnifyingglass")
+                    }
+
+                    Button {
+                        model.copyJobLog(job)
+                    } label: {
+                        Label("Copy Log", systemImage: "doc.text")
+                    }
+
+                    if job.isCancellable {
+                        Button {
+                            model.cancelJob(job)
+                        } label: {
+                            Label("Cancel", systemImage: "xmark.circle")
+                        }
+                    }
+                } header: {
+                    Text("\(job.title) - \(job.statusTitle)")
+                }
+            }
+        }
+    }
+
+    func editorJobStatusIcon(_ status: EditorJobStatus) -> String {
+        switch status {
+        case .queued:
+            "clock"
+        case .running:
+            "progress.indicator"
+        case .completed:
+            "checkmark.circle"
+        case .failed:
+            "exclamationmark.triangle"
+        case .cancelled:
+            "xmark.circle"
+        }
+    }
+
+    func editorJobStatusColor(_ status: EditorJobStatus) -> Color {
+        switch status {
+        case .queued,
+             .running:
+            .blue
+        case .completed:
+            .green
+        case .failed:
+            .red
+        case .cancelled:
+            .orange
+        }
+    }
+
+    func editorJobKindIcon(_ kind: EditorJobKind) -> String {
+        switch kind {
+        case .renderVideo:
+            "square.and.arrow.up"
+        case .trimExport:
+            "timeline.selection"
+        case .editDecisionExport:
+            "scissors"
+        case .learnHousePackage:
+            "shippingbox"
+        case .rawAssetExtract:
+            "folder.badge.gearshape"
+        case .sharePackage:
+            "archivebox"
+        case .frameExport:
+            "photo"
+        case .frameCopy:
+            "doc.on.doc"
+        case .captionSidecars:
+            "captions.bubble"
+        }
+    }
+
+    func editorJobProgressText(_ job: EditorJobRecord) -> String {
+        switch job.status {
+        case .queued:
+            "Queued"
+        case .running:
+            "\(Int((job.progress * 100).rounded()))%"
+        case .completed,
+             .failed,
+             .cancelled:
+            job.statusTitle
+        }
+    }
+
+    func showEditorJobLog(_ job: EditorJobRecord) {
+        let alert = NSAlert()
+        alert.alertStyle = job.status == .failed ? .warning : .informational
+        alert.messageText = "\(job.title) Log"
+        alert.informativeText = model.jobLogText(job)
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     func mediaEditorInspector(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
@@ -379,7 +623,7 @@ extension ProjectEditorView {
                 Button("Set In") { model.setTrimStartToPlayhead() }
                 Button("Set Out") { model.setTrimEndToPlayhead() }
                 Button(model.isTrimming ? "Exporting..." : "Export Trim") { model.exportTrim() }
-                    .disabled(model.isTrimming || model.projectURL == nil)
+                    .disabled(!model.canStartEditorJob(.trimExport))
             }
 
             Divider()
@@ -557,7 +801,7 @@ extension ProjectEditorView {
             HStack {
                 Button("Save") { model.saveEditDecisions() }
                 Button(model.isTrimming ? "Exporting..." : "Export Cut List") { model.exportEditDecisions() }
-                    .disabled(model.isTrimming || model.projectURL == nil)
+                    .disabled(!model.canStartEditorJob(.editDecisionExport))
                 Button("Reload") { model.reloadEditDecisions() }
             }
 
@@ -1308,6 +1552,11 @@ extension ProjectEditorView {
 
     func editorExportInspector(summary: ProjectBundleSummary, manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 14) {
+            if !model.jobHistory.isEmpty {
+                editorJobQueueInspector
+                Divider()
+            }
+
             inspectorSectionTitle("Render Settings")
             Picker("Quality", selection: $model.renderQuality) {
                 ForEach(RenderQuality.allCases, id: \.self) { quality in
@@ -1353,7 +1602,7 @@ extension ProjectEditorView {
                 Button("Choose...") { model.chooseRenderDestination() }
                 Button("Check") { model.inspectRender(preferences.snapshot) }
                 Button(model.isRendering ? "Rendering..." : "Export") { model.exportRender(preferences.snapshot) }
-                    .disabled(model.isRendering || model.projectURL == nil)
+                    .disabled(!model.canStartEditorJob(.renderVideo))
             }
 
             Divider()
@@ -1368,7 +1617,7 @@ extension ProjectEditorView {
                 Button("Folder...") { model.chooseSharePackageDestination() }
                 Button("Video...") { model.chooseShareFinalVideo() }
                 Button(model.isBuildingSharePackage ? "Packaging..." : "Build Package") { model.buildLocalSharePackage() }
-                    .disabled(model.isBuildingSharePackage || model.projectURL == nil)
+                    .disabled(!model.canStartEditorJob(.sharePackage))
             }
 
             Divider()
@@ -1379,7 +1628,7 @@ extension ProjectEditorView {
             HStack {
                 Button("Folder...") { model.chooseRawAssetDestination() }
                 Button(model.isExtractingRawAssets ? "Extracting..." : "Extract Raw Assets") { model.extractRawAssets() }
-                    .disabled(model.isExtractingRawAssets || model.projectURL == nil)
+                    .disabled(!model.canStartEditorJob(.rawAssetExtract))
             }
 
             Divider()
@@ -1387,7 +1636,7 @@ extension ProjectEditorView {
             Button(model.isPackagingLearnHouse ? "Packaging..." : "Package LearnHouse") {
                 model.packageLearnHouse(preferences.snapshot)
             }
-            .disabled(model.isPackagingLearnHouse || manifest.media.screen == nil)
+            .disabled(!model.canStartEditorJob(.learnHousePackage) || manifest.media.screen == nil)
 
             Divider()
             inspectorSectionTitle("Publishing")
