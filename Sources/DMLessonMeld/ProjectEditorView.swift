@@ -35,7 +35,10 @@ struct ProjectEditorView: View {
             contentPane
                 .frame(minWidth: 700)
         }
-        .frame(minWidth: 960, minHeight: 640)
+        .frame(
+            minWidth: AppUILayoutSurface.videoEditor.minimumSize.width,
+            minHeight: AppUILayoutSurface.videoEditor.minimumSize.height
+        )
         .onAppear {
             model.apply(preferences.snapshot)
             quickRecorder.refreshPermissions(updateMessage: false)

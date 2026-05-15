@@ -622,12 +622,12 @@ private struct ControlBarDivider: View {
 }
 
 private enum ControlBarPalette {
-    static let stableContentWidth: CGFloat = 624
-    static let itemWidth: CGFloat = 38
-    static let itemHeight: CGFloat = 38
-    static let itemGap: CGFloat = 2
-    static let outerPadding: CGFloat = 8
-    static let dividerInset: CGFloat = 6
+    static let stableContentWidth = RecorderControlBarLayout.stableContentWidth
+    static let itemWidth = RecorderControlBarLayout.itemWidth
+    static let itemHeight = RecorderControlBarLayout.itemHeight
+    static let itemGap = RecorderControlBarLayout.itemGap
+    static let outerPadding = RecorderControlBarLayout.outerPadding
+    static let dividerInset = RecorderControlBarLayout.dividerInset
     static let cornerRadius: CGFloat = 8
     static let barCornerRadius: CGFloat = 13
     static let iconSize: CGFloat = 17

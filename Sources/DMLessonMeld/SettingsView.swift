@@ -32,7 +32,12 @@ struct LessonMeldSettingsView: View {
                 contentPane
             }
         }
-        .frame(minWidth: 900, idealWidth: 920, minHeight: 620, idealHeight: 640)
+        .frame(
+            minWidth: AppUILayoutSurface.settings.minimumSize.width,
+            idealWidth: 920,
+            minHeight: AppUILayoutSurface.settings.minimumSize.height,
+            idealHeight: 640
+        )
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             refreshDraft()

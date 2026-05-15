@@ -1,4 +1,5 @@
 import AppKit
+import DMLessonMeldCore
 import SwiftUI
 
 @main
@@ -24,7 +25,12 @@ struct DMLessonMeldApp: App {
                     annotationOverlay.open(preferences: preferences, forceToolbarVisible: true)
                 }
             )
-                .frame(minWidth: 960, idealWidth: 1180, minHeight: 680, idealHeight: 780)
+                .frame(
+                    minWidth: AppUILayoutSurface.mainEditor.minimumSize.width,
+                    idealWidth: UIRegressionFixtures.laptop.width,
+                    minHeight: AppUILayoutSurface.mainEditor.minimumSize.height,
+                    idealHeight: UIRegressionFixtures.laptop.height
+                )
                 .disablesWindowRestoration()
                 .hidesWindowTitle()
                 .handlesLessonMeldAppEvents(appRouter: appRouter)
