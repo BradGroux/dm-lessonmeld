@@ -175,6 +175,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             at: .zero
         )
 
+        let outputDuration = retimedDuration(sourceDuration: screenDuration, speedRegions: plan.speedRegions)
+
         var audioTracks: [InsertedAudioTrack] = []
         audioTracks += try await insertAudioTracks(
             from: screenAsset,
@@ -192,23 +194,6 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 duration: screenDuration
             )
         }
-        if let backgroundMusic = plan.audio.backgroundMusic {
-            audioTracks += try await insertBackgroundMusicTrack(
-                backgroundMusic,
-                projectURL: plan.projectURL,
-                into: composition,
-                duration: screenDuration
-            )
-        }
-        if let interactionMetadata {
-            try await insertClickSoundTrack(
-                for: interactionMetadata.clicks,
-                settings: plan.cursor.clickEffects,
-                duration: screenDuration,
-                into: composition,
-                temporaryRenderFiles: &temporaryRenderFiles
-            )
-        }
 
         let screenNaturalSize = try await screenVideoTrack.load(.naturalSize)
         let screenPreferredTransform = try await screenVideoTrack.load(.preferredTransform)
@@ -217,7 +202,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let renderSize = canvasGeometry.renderSize
 
         let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: .zero, duration: screenDuration)
+        instruction.timeRange = CMTimeRange(start: .zero, duration: outputDuration)
 
         let screenInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionScreenTrack)
         let screenBaseTransform = canvasScreenTransform(
@@ -236,6 +221,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
         var layerInstructions = [screenInstruction]
         var webcamGeometry: PictureInPictureRenderGeometry?
+        var retimedTracks = [compositionScreenTrack]
+        retimedTracks += audioTracks.map(\.track)
 
         if let webcamOverlay = plan.webcamOverlay {
             let webcamOverlayComposition = try await insertWebcamOverlay(
@@ -247,6 +234,27 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             )
             layerInstructions.insert(webcamOverlayComposition.instruction, at: 0)
             webcamGeometry = webcamOverlayComposition.geometry
+            retimedTracks.append(webcamOverlayComposition.track)
+        }
+
+        applySpeedRegions(plan.speedRegions, to: retimedTracks, sourceDuration: screenDuration)
+
+        if let backgroundMusic = plan.audio.backgroundMusic {
+            audioTracks += try await insertBackgroundMusicTrack(
+                backgroundMusic,
+                projectURL: plan.projectURL,
+                into: composition,
+                duration: outputDuration
+            )
+        }
+        if let interactionMetadata {
+            try await insertClickSoundTrack(
+                for: interactionMetadata.clicks,
+                settings: plan.cursor.clickEffects,
+                duration: outputDuration,
+                into: composition,
+                temporaryRenderFiles: &temporaryRenderFiles
+            )
         }
 
         instruction.layerInstructions = layerInstructions
@@ -271,7 +279,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         session.audioMix = audioMix(
             for: audioTracks,
             settings: plan.audio,
-            duration: screenDuration,
+            duration: outputDuration,
             hasVoiceAudio: plan.audioSources.contains { $0.role == .microphoneAudio || $0.role == .systemAudio }
         )
 
@@ -619,6 +627,49 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             return nil
         }
         return try EditDecisionListFile.load(fromProject: projectURL)
+    }
+
+    private func applySpeedRegions(
+        _ speedRegions: [SpeedRegion],
+        to tracks: [AVMutableCompositionTrack],
+        sourceDuration: CMTime
+    ) {
+        let sourceDurationSeconds = sourceDuration.seconds.isFinite ? max(0, sourceDuration.seconds) : 0
+        guard sourceDurationSeconds > 0 else { return }
+
+        for region in speedRegions.sorted(by: { $0.range.startSeconds > $1.range.startSeconds }) {
+            let startSeconds = min(max(0, region.range.startSeconds), sourceDurationSeconds)
+            let endSeconds = min(max(startSeconds, region.range.endSeconds), sourceDurationSeconds)
+            guard endSeconds > startSeconds, region.playbackRate.isFinite, region.playbackRate > 0 else {
+                continue
+            }
+
+            let sourceRange = CMTimeRange(
+                start: time(startSeconds),
+                duration: time(endSeconds - startSeconds)
+            )
+            let targetDuration = time((endSeconds - startSeconds) / region.playbackRate)
+            for track in tracks {
+                track.scaleTimeRange(sourceRange, toDuration: targetDuration)
+            }
+        }
+    }
+
+    private func retimedDuration(sourceDuration: CMTime, speedRegions: [SpeedRegion]) -> CMTime {
+        let sourceDurationSeconds = sourceDuration.seconds.isFinite ? max(0, sourceDuration.seconds) : 0
+        guard sourceDurationSeconds > 0, !speedRegions.isEmpty else { return sourceDuration }
+
+        var durationSeconds = sourceDurationSeconds
+        for region in speedRegions {
+            let startSeconds = min(max(0, region.range.startSeconds), sourceDurationSeconds)
+            let endSeconds = min(max(startSeconds, region.range.endSeconds), sourceDurationSeconds)
+            guard endSeconds > startSeconds, region.playbackRate.isFinite, region.playbackRate > 0 else {
+                continue
+            }
+            let sourceRegionDuration = endSeconds - startSeconds
+            durationSeconds += (sourceRegionDuration / region.playbackRate) - sourceRegionDuration
+        }
+        return time(max(0, durationSeconds))
     }
 
     private func applyZoomRegions(
@@ -1697,7 +1748,11 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             instruction.setOpacity(1, at: start)
         }
 
-        return WebcamOverlayComposition(instruction: instruction, geometry: defaultState.geometry)
+        return WebcamOverlayComposition(
+            track: compositionWebcamTrack,
+            instruction: instruction,
+            geometry: defaultState.geometry
+        )
     }
 
     private func webcamRenderState(
@@ -2078,6 +2133,7 @@ private final class ExportSessionBox: @unchecked Sendable {
 }
 
 private struct WebcamOverlayComposition {
+    var track: AVMutableCompositionTrack
     var instruction: AVMutableVideoCompositionLayerInstruction
     var geometry: PictureInPictureRenderGeometry
 }

@@ -80,8 +80,8 @@ struct RenderPlanTests {
         #expect(!plan.canvas.isDefault)
     }
 
-    @Test("Render inspection loads audio settings and blocks unsupported speed regions")
-    func renderInspectionLoadsAudioSettingsAndBlocksSpeedRegions() throws {
+    @Test("Render inspection loads audio settings and accepts speed regions")
+    func renderInspectionLoadsAudioSettingsAndAcceptsSpeedRegions() throws {
         let temp = try TemporaryDirectory()
         let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
         let destinationURL = temp.url.appendingPathComponent("exports/lesson.mp4")
@@ -135,8 +135,54 @@ struct RenderPlanTests {
         #expect(plan.audio == audioSettings)
         #expect(plan.audioSources.map(\.role) == [.microphoneAudio, .systemAudio])
         #expect(plan.speedRegions.map(\.id) == ["speed-typing"])
+        #expect(!inspection.issues.contains {
+            $0.severity == .error && ($0.path?.hasPrefix("speedRegions") ?? false)
+        })
+    }
+
+    @Test("Render validation rejects overlapping speed regions")
+    func renderValidationRejectsOverlappingSpeedRegions() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let destinationURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Speed Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo, mimeType: "video/mp4")
+                )
+            ),
+            to: projectURL
+        )
+        try EditDecisionListFile.save(
+            EditDecisionList(
+                id: "lesson-edit",
+                sourceDurationSeconds: 8,
+                speedRegions: [
+                    SpeedRegion(
+                        id: "speed-a",
+                        range: EditTimeRange(startSeconds: 1, endSeconds: 4),
+                        playbackRate: 1.5
+                    ),
+                    SpeedRegion(
+                        id: "speed-b",
+                        range: EditTimeRange(startSeconds: 3, endSeconds: 6),
+                        playbackRate: 0.75
+                    )
+                ]
+            ),
+            toProject: projectURL
+        )
+
+        let inspection = try AVFoundationRenderService().inspect(
+            projectURL: projectURL,
+            destinationURL: destinationURL
+        )
+
         #expect(inspection.issues.contains {
-            $0.severity == .error && $0.path == "speedRegions[0]"
+            $0.severity == .error &&
+                $0.path == "speedRegions[1].range" &&
+                $0.message == "Speed regions must not overlap."
         })
     }
 
@@ -722,6 +768,53 @@ struct RenderPlanTests {
         let attributes = try FileManager.default.attributesOfItem(atPath: renderedURL.path)
         let byteCount = try #require(attributes[.size] as? Int64)
         #expect(byteCount > 0)
+    }
+
+    @Test("Exports synthetic media with speed-region retiming")
+    func exportsSyntheticMediaWithSpeedRegionRetiming() async throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let mediaURL = projectURL.appendingPathComponent("media/screen.mp4")
+        let outputURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+
+        try await SyntheticVideoWriter.write(
+            outputURL: mediaURL,
+            size: CGSize(width: 320, height: 180),
+            color: (red: 40, green: 80, blue: 180)
+        )
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Speed Export"),
+                media: ProjectMedia(screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo))
+            ),
+            to: projectURL
+        )
+        try EditDecisionListFile.save(
+            EditDecisionList(
+                id: "lesson-edit",
+                sourceDurationSeconds: 1,
+                speedRegions: [
+                    SpeedRegion(
+                        id: "speed-fast",
+                        range: EditTimeRange(startSeconds: 0, endSeconds: 1),
+                        playbackRate: 2
+                    )
+                ]
+            ),
+            toProject: projectURL
+        )
+
+        let renderedURL = try await AVFoundationRenderService().export(
+            projectURL: projectURL,
+            destinationURL: outputURL,
+            preset: RenderPreset(fileType: .mp4)
+        )
+
+        let asset = AVURLAsset(url: renderedURL)
+        let duration = try await asset.load(.duration)
+
+        #expect(renderedURL.pathExtension == "mp4")
+        #expect(abs(duration.seconds - 0.5) < 0.25)
     }
 
     @Test("Exports synthetic media as ProRes MOV")

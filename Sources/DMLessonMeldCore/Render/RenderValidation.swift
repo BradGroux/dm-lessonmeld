@@ -238,17 +238,21 @@ public enum RenderPlanValidator {
         _ speedRegions: [SpeedRegion],
         issues: inout [RenderValidationIssue]
     ) {
+        var validRanges: [(index: Int, range: EditTimeRange)] = []
         for (index, region) in speedRegions.enumerated() {
             let path = "speedRegions[\(index)]"
-            if !region.range.startSeconds.isFinite ||
+            let hasInvalidRange = !region.range.startSeconds.isFinite ||
                 !region.range.durationSeconds.isFinite ||
                 region.range.startSeconds < 0 ||
-                region.range.durationSeconds <= 0 {
+                region.range.durationSeconds <= 0
+            if hasInvalidRange {
                 issues.append(RenderValidationIssue(
                     severity: .error,
                     message: "Speed region range must be finite, non-negative, and positive.",
                     path: "\(path).range"
                 ))
+            } else {
+                validRanges.append((index: index, range: region.range))
             }
 
             if !region.playbackRate.isFinite || region.playbackRate <= 0 || region.playbackRate > 8 {
@@ -258,11 +262,19 @@ public enum RenderPlanValidator {
                     path: "\(path).playbackRate"
                 ))
             }
+        }
 
+        let sortedRanges = validRanges.sorted { left, right in
+            if left.range.startSeconds == right.range.startSeconds {
+                return left.index < right.index
+            }
+            return left.range.startSeconds < right.range.startSeconds
+        }
+        for pair in zip(sortedRanges, sortedRanges.dropFirst()) where pair.0.range.overlaps(pair.1.range) {
             issues.append(RenderValidationIssue(
                 severity: .error,
-                message: "Speed regions are saved in the editor, but full render retiming is not supported yet. Remove speed regions before export.",
-                path: path
+                message: "Speed regions must not overlap.",
+                path: "speedRegions[\(pair.1.index)].range"
             ))
         }
     }
