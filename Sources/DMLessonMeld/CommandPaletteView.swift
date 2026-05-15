@@ -1,4 +1,5 @@
 import AppKit
+import DMLessonMeldCore
 import SwiftUI
 
 struct CommandPaletteView: View {
@@ -55,7 +56,10 @@ struct CommandPaletteView: View {
             }
             .frame(minHeight: 280)
         }
-        .frame(minWidth: 560, minHeight: 360)
+        .frame(
+            minWidth: AppUILayoutSurface.commandPalette.minimumSize.width,
+            minHeight: AppUILayoutSurface.commandPalette.minimumSize.height
+        )
         .onAppear {
             searchFocused = true
         }

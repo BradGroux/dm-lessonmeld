@@ -50,7 +50,12 @@ struct OnboardingView: View {
                 }
             }
         }
-        .frame(minWidth: 760, idealWidth: 980, minHeight: 640, idealHeight: 760)
+        .frame(
+            minWidth: AppUILayoutSurface.onboarding.minimumSize.width,
+            idealWidth: 980,
+            minHeight: AppUILayoutSurface.onboarding.minimumSize.height,
+            idealHeight: 760
+        )
         .background(Color(nsColor: .windowBackgroundColor))
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refresh()
