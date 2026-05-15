@@ -52,4 +52,38 @@ struct LocalAppControlTests {
 
         #expect(LocalAppControl.isAuthentic(command, token: "test-token", now: issuedAt.addingTimeInterval(61)) == false)
     }
+
+    @Test("Status files are owner-readable only")
+    func statusFilesArePrivate() throws {
+        let temp = try TemporaryDirectory()
+        let statusURL = temp.url.appendingPathComponent("runtime-status.json")
+        try LocalAppControl.writeStatus(
+            LocalAppControlStatus(
+                isRecording: false,
+                isPaused: false,
+                isStopping: false,
+                elapsedSeconds: 0,
+                lastProjectPath: "/Users/example/Movies/DMLessonMeld/private.dmlm",
+                message: "Idle"
+            ),
+            to: statusURL
+        )
+
+        let permissions = try #require(FileManager.default.attributesOfItem(atPath: statusURL.path)[.posixPermissions] as? NSNumber)
+        #expect(permissions.intValue & 0o777 == 0o600)
+    }
+}
+
+private final class TemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dm-lessonmeld-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
+    }
 }

@@ -1569,13 +1569,16 @@ struct DMLessonMeldCLI {
     }
 
     static func loadOrCreateEditDecisionList(projectURL: URL, manifest: ProjectManifest) throws -> EditDecisionList {
+        let sourceMediaURL = try manifest.media.screen.map { try ProjectBundle.projectLocalFileURL(for: $0, in: projectURL) }
         if EditDecisionListFile.exists(in: projectURL) {
-            return try EditDecisionListFile.load(fromProject: projectURL)
+            var editDecisionList = try EditDecisionListFile.load(fromProject: projectURL)
+            editDecisionList.sourceMediaURL = sourceMediaURL
+            return editDecisionList
         }
 
         return EditDecisionList(
             id: "lesson-edit",
-            sourceMediaURL: try manifest.media.screen.map { try ProjectBundle.projectLocalFileURL(for: $0, in: projectURL) },
+            sourceMediaURL: sourceMediaURL,
             markers: manifest.markers.map { marker in
                 TimelineMarker(
                     id: marker.id,

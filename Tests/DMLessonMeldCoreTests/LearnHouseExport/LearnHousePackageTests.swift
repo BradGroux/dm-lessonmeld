@@ -107,6 +107,22 @@ struct LearnHousePackageTests {
             try LearnHousePackageBuilder().buildPackage(projectURL: projectURL, outputDirectory: outputURL)
         }
     }
+
+    @Test("Rejects symlinked LearnHouse package destinations")
+    func rejectsSymlinkedPackageDestinations() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = try makeProject(in: temp.url)
+        let outputURL = temp.url.appendingPathComponent("exports", isDirectory: true)
+        let outsideURL = temp.url.appendingPathComponent("outside", isDirectory: true)
+        let packageURL = outputURL.appendingPathComponent("lesson.learnhouse", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outsideURL, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: packageURL, withDestinationURL: outsideURL)
+
+        #expect(throws: LearnHousePackageError.self) {
+            try LearnHousePackageBuilder().buildPackage(projectURL: projectURL, outputDirectory: outputURL)
+        }
+    }
 }
 
 private func makeProject(in tempURL: URL) throws -> URL {

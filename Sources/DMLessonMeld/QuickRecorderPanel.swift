@@ -1142,6 +1142,7 @@ final class QuickRecorderModel: ObservableObject {
                                 : "Recording \(self.enabledTrackLabels) from \(self.recordTarget.displayName.lowercased()). Press Stop to finish."
                         }
                     }
+                    try await self.waitForRecordingStart(recordingID: recordingID)
                     metadataCapture = await MainActor.run {
                         guard captureInteractionMetadata else { return nil }
                         let session = InteractionMetadataCaptureSession(
@@ -1201,6 +1202,17 @@ final class QuickRecorderModel: ObservableObject {
             recordingRuntime.setRecordingTask(task)
         } catch {
             message = error.localizedDescription
+        }
+    }
+
+    private func waitForRecordingStart(recordingID: UUID) async throws {
+        while await MainActor.run(body: { activeRecordingID == recordingID && isRecording && isPaused && !isStopping }) {
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let shouldStart = await MainActor.run(body: { activeRecordingID == recordingID && isRecording && !isStopping })
+        guard shouldStart else {
+            throw CancellationError()
         }
     }
 
