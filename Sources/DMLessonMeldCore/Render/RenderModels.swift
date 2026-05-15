@@ -50,6 +50,10 @@ public struct RenderPreset: Codable, Equatable, Sendable {
         self.proResEnabled = proResEnabled
     }
 
+    public var usesProRes: Bool {
+        codec == .proRes || proResEnabled
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
