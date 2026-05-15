@@ -47,6 +47,19 @@ struct RecordingLifecycleTests {
         #expect(lifecycle.elapsed(at: start.addingTimeInterval(90)) == 10)
     }
 
+    @Test("Stopping elapsed time and timeout are explicit")
+    func stopTimeoutState() {
+        let start = Date(timeIntervalSince1970: 2_500)
+        var lifecycle = RecordingLifecycleStateMachine()
+
+        _ = lifecycle.start(at: start)
+        _ = lifecycle.requestStop(at: start.addingTimeInterval(12))
+
+        #expect(lifecycle.stoppingElapsed(at: start.addingTimeInterval(16)) == 4)
+        #expect(!lifecycle.hasStopTimedOut(after: 10, at: start.addingTimeInterval(21)))
+        #expect(lifecycle.hasStopTimedOut(after: 10, at: start.addingTimeInterval(22)))
+    }
+
     @Test("Finish fail and reset leave inactive snapshots")
     func completionSnapshots() {
         let start = Date(timeIntervalSince1970: 3_000)

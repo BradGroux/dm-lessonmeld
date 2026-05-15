@@ -146,6 +146,16 @@ public struct RecordingLifecycleStateMachine: Equatable, Sendable {
         return max(0, effectiveDate.timeIntervalSince(startedAt) - accumulatedPausedDuration - currentPausedDuration)
     }
 
+    public func stoppingElapsed(at date: Date = Date()) -> TimeInterval {
+        guard phase == .stopping, let stoppedAt else { return 0 }
+        return max(0, date.timeIntervalSince(stoppedAt))
+    }
+
+    public func hasStopTimedOut(after timeout: TimeInterval, at date: Date = Date()) -> Bool {
+        guard timeout > 0 else { return phase == .stopping }
+        return stoppingElapsed(at: date) >= timeout
+    }
+
     public func snapshot(at date: Date = Date()) -> RecordingLifecycleSnapshot {
         RecordingLifecycleSnapshot(
             phase: phase,
