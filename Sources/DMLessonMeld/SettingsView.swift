@@ -9,6 +9,7 @@ struct LessonMeldSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @State private var selectedSection: LessonMeldSettingsSection = .capture
+    @State private var settingsSearchText = ""
     @State private var draft: LessonMeldPreferences
     @State private var saveMessage = "Saved"
     @State private var presetMessage = ""
@@ -46,6 +47,28 @@ struct LessonMeldSettingsView: View {
         draft.normalized() != preferences.snapshot.normalized()
     }
 
+    private var activeSection: LessonMeldSettingsSection {
+        if visibleSections.contains(selectedSection) {
+            return selectedSection
+        }
+        return visibleSections.first ?? selectedSection
+    }
+
+    private var visibleSections: [LessonMeldSettingsSection] {
+        LessonMeldSettingsSection.allCases.filter(sectionMatchesSearch)
+    }
+
+    private var visibleGroups: [(title: String, sections: [LessonMeldSettingsSection])] {
+        ["App", "Recording", "Lesson Defaults", "Community"].compactMap { title in
+            let sections = visibleSections.filter { $0.groupTitle == title }
+            return sections.isEmpty ? nil : (title, sections)
+        }
+    }
+
+    private var searchQuery: String {
+        settingsSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
     private var settingsToolbar: some View {
         HStack(spacing: 12) {
             Button {
@@ -54,18 +77,30 @@ struct LessonMeldSettingsView: View {
                 Label("Back", systemImage: "chevron.left")
             }
 
+            Label("Search", systemImage: "magnifyingglass")
+                .labelStyle(.iconOnly)
+                .foregroundStyle(.secondary)
+            TextField("Search settings", text: $settingsSearchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 220)
+
             Spacer()
 
             Text(hasUnsavedChanges ? "Unsaved changes" : saveMessage)
                 .font(.caption)
                 .foregroundStyle(hasUnsavedChanges ? .orange : .secondary)
 
-            Button("Revert") {
+            Button("Revert Section") {
+                revertSection(activeSection)
+            }
+            .disabled(!sectionHasUnsavedChanges(activeSection))
+
+            Button("Revert All") {
                 refreshDraft()
             }
             .disabled(!hasUnsavedChanges)
 
-            Button("Save") {
+            Button("Save All") {
                 preferences.replace(with: draft)
                 refreshDraft()
                 saveMessage = "Saved"
@@ -81,7 +116,11 @@ struct LessonMeldSettingsView: View {
     private var contentPane: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                sectionView
+                if visibleSections.isEmpty {
+                    ContentUnavailableView("No Settings Found", systemImage: "magnifyingglass", description: Text("Try a different search."))
+                } else {
+                    sectionView
+                }
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 24)
@@ -96,24 +135,39 @@ struct LessonMeldSettingsView: View {
                 .font(.title2.weight(.semibold))
                 .padding(.bottom, 12)
 
-            ForEach(LessonMeldSettingsSection.allCases) { section in
-                Button {
-                    selectedSection = section
-                } label: {
-                    LessonMeldSidebarItem(
-                        title: section.title,
-                        systemImage: section.symbolName,
-                        isSelected: selectedSection == section
-                    )
+            if visibleGroups.isEmpty {
+                Text("No settings match.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(visibleGroups, id: \.title) { group in
+                    Text(group.title.uppercased())
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                        .padding(.horizontal, 8)
+
+                    ForEach(group.sections) { section in
+                        Button {
+                            selectedSection = section
+                        } label: {
+                            LessonMeldSidebarItem(
+                                title: section.title,
+                                systemImage: section.symbolName,
+                                isSelected: activeSection == section,
+                                isDirty: sectionHasUnsavedChanges(section)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
             }
 
             Spacer()
 
             Button("Reset Defaults") {
-                draft = LessonMeldPreferences()
-                saveMessage = "Defaults staged"
+                confirmResetDefaults()
             }
             .foregroundStyle(.secondary)
         }
@@ -124,11 +178,17 @@ struct LessonMeldSettingsView: View {
     }
 
     @ViewBuilder private var sectionView: some View {
-        switch selectedSection {
+        switch activeSection {
         case .general:
             generalSection
         case .capture:
             captureSection
+        case .camera:
+            cameraSection
+        case .audio:
+            audioSection
+        case .editor:
+            editorSection
         case .annotations:
             annotationsSection
         case .export:
@@ -162,7 +222,7 @@ struct LessonMeldSettingsView: View {
     }
 
     private var captureSection: some View {
-        SettingsSectionView(title: "Capture", subtitle: "Recording defaults for teaching and workshop sessions.") {
+        SettingsSectionView(title: "Capture", subtitle: "Screen recording defaults for teaching and workshop sessions.", scope: .futureRecordings) {
             Stepper("Quick record duration: \(formatDuration(draft.capture.quickRecordDurationSeconds))", value: intBinding(\.capture.quickRecordDurationSeconds), in: 1...3_600, step: 30)
             Picker("Screen frame rate", selection: intBinding(\.capture.fps)) {
                 Text("30 fps").tag(30)
@@ -170,6 +230,14 @@ struct LessonMeldSettingsView: View {
             }
             Toggle("Include cursor", isOn: binding(\.capture.includeCursor))
             Toggle("Capture click and shortcut metadata", isOn: binding(\.capture.captureInteractionMetadata))
+            Stepper("Countdown: \(draft.capture.countdownSeconds)s", value: intBinding(\.capture.countdownSeconds), in: 0...10)
+            Toggle("Remember last region", isOn: binding(\.capture.rememberLastRegion))
+            Toggle("Hide recorder controls from screenshots and recordings", isOn: binding(\.capture.hideRecorderControlsFromCapture))
+        }
+    }
+
+    private var audioSection: some View {
+        SettingsSectionView(title: "Audio", subtitle: "Voice and system-audio defaults for future recordings.", scope: .futureRecordings) {
             Toggle("Capture microphone by default", isOn: binding(\.capture.captureMicrophone))
             Picker("Microphone input", selection: optionalStringBinding(\.capture.microphoneDeviceID)) {
                 Text("System Default").tag(String?.none)
@@ -179,15 +247,13 @@ struct LessonMeldSettingsView: View {
             }
             .pickerStyle(.menu)
             .disabled(!draft.capture.captureMicrophone)
-            Toggle("Capture webcam by default", isOn: binding(\.capture.captureWebcam))
             Toggle("Capture system audio by default", isOn: binding(\.capture.captureSystemAudio))
-            Toggle("Remember last region", isOn: binding(\.capture.rememberLastRegion))
-            Toggle("Hide recorder controls from screenshots and recordings", isOn: binding(\.capture.hideRecorderControlsFromCapture))
+        }
+    }
 
-            Divider()
-
-            Label("Webcam", systemImage: "web.camera")
-                .font(.headline)
+    private var cameraSection: some View {
+        SettingsSectionView(title: "Camera", subtitle: "Webcam picture-in-picture defaults for future recordings.", scope: .futureRecordings) {
+            Toggle("Capture webcam by default", isOn: binding(\.capture.captureWebcam))
             Picker("Webcam resolution", selection: binding(\.capture.cameraResolution)) {
                 ForEach(CameraResolution.allCases) { resolution in
                     Text(resolution.rawValue).tag(resolution)
@@ -237,8 +303,19 @@ struct LessonMeldSettingsView: View {
         }
     }
 
+    private var editorSection: some View {
+        SettingsSectionView(title: "Editor", subtitle: "Project editor defaults and active-project boundaries.", scope: .projectLevel) {
+            diagnosticsRow("Video edits", "Saved inside each .dmlm project")
+            diagnosticsRow("Canvas, cursor, captions, overlays", "Project-level editor settings")
+            diagnosticsRow("Reusable looks", "Use Presets from an open project")
+            Text("App Settings controls future defaults. Open a lesson project to change edits, canvas styling, overlays, captions, zoom regions, and export decisions for that project.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var annotationsSection: some View {
-        SettingsSectionView(title: "Annotations", subtitle: "Shared defaults for the embedded overlay and lesson annotation tools.") {
+        SettingsSectionView(title: "Annotations", subtitle: "Shared defaults for the embedded overlay and lesson annotation tools.", scope: .futureDefaults) {
             Picker("Default tool", selection: binding(\.annotation.defaultTool)) {
                 ForEach(AnnotationToolID.allCases) { tool in
                     Text(tool.rawValue.capitalized).tag(tool)
@@ -304,7 +381,7 @@ struct LessonMeldSettingsView: View {
     }
 
     private var exportSection: some View {
-        SettingsSectionView(title: "Export", subtitle: "Renderer and LearnHouse package defaults.") {
+        SettingsSectionView(title: "Export", subtitle: "Renderer and LearnHouse package defaults.", scope: .futureDefaults) {
             Picker("Render quality", selection: binding(\.export.defaultRenderQuality)) {
                 ForEach(RenderQualityID.allCases) { quality in
                     Text(quality.rawValue.capitalized).tag(quality)
@@ -324,7 +401,7 @@ struct LessonMeldSettingsView: View {
     }
 
     private var presetsSection: some View {
-        SettingsSectionView(title: "Presets", subtitle: "Share reusable capture, annotation, and export defaults as local preset files.") {
+        SettingsSectionView(title: "Presets", subtitle: "Share reusable capture, annotation, and export defaults as local preset files.", scope: .futureDefaults) {
             HStack {
                 Button {
                     exportSettingsPreset()
@@ -613,6 +690,121 @@ struct LessonMeldSettingsView: View {
     private func applySettingsRequest(_ request: LessonMeldSettingsWindowRequest?) {
         guard let section = request?.section else { return }
         selectedSection = section
+    }
+
+    private func sectionMatchesSearch(_ section: LessonMeldSettingsSection) -> Bool {
+        let query = searchQuery
+        guard !query.isEmpty else { return true }
+        return section.title.lowercased().contains(query)
+            || section.groupTitle.lowercased().contains(query)
+            || section.searchKeywords.lowercased().contains(query)
+    }
+
+    private func sectionHasUnsavedChanges(_ section: LessonMeldSettingsSection) -> Bool {
+        let saved = preferences.snapshot.normalized()
+        switch section {
+        case .general:
+            return draft.general != saved.general
+                || draft.capture.showRecorderControlTooltips != saved.capture.showRecorderControlTooltips
+        case .capture:
+            return draft.capture.quickRecordDurationSeconds != saved.capture.quickRecordDurationSeconds
+                || draft.capture.fps != saved.capture.fps
+                || draft.capture.includeCursor != saved.capture.includeCursor
+                || draft.capture.captureInteractionMetadata != saved.capture.captureInteractionMetadata
+                || draft.capture.countdownSeconds != saved.capture.countdownSeconds
+                || draft.capture.rememberLastRegion != saved.capture.rememberLastRegion
+                || draft.capture.hideRecorderControlsFromCapture != saved.capture.hideRecorderControlsFromCapture
+        case .camera:
+            return draft.capture.captureWebcam != saved.capture.captureWebcam
+                || draft.capture.cameraResolution != saved.capture.cameraResolution
+                || draft.capture.webcamFPS != saved.capture.webcamFPS
+                || draft.capture.webcamAspectRatio != saved.capture.webcamAspectRatio
+                || draft.capture.webcamFrameShape != saved.capture.webcamFrameShape
+                || draft.capture.webcamCornerRadius != saved.capture.webcamCornerRadius
+                || draft.capture.webcamRelativeSize != saved.capture.webcamRelativeSize
+                || draft.capture.webcamMirror != saved.capture.webcamMirror
+                || draft.capture.webcamBorderEnabled != saved.capture.webcamBorderEnabled
+                || draft.capture.webcamShadowEnabled != saved.capture.webcamShadowEnabled
+                || draft.capture.showFloatingWebcamPreview != saved.capture.showFloatingWebcamPreview
+        case .audio:
+            return draft.capture.captureMicrophone != saved.capture.captureMicrophone
+                || draft.capture.microphoneDeviceID != saved.capture.microphoneDeviceID
+                || draft.capture.captureSystemAudio != saved.capture.captureSystemAudio
+        case .editor:
+            return false
+        case .annotations:
+            return draft.annotation != saved.annotation
+        case .export:
+            return draft.export != saved.export
+                || draft.integrations.learnHouseEnabled != saved.integrations.learnHouseEnabled
+                || draft.integrations.agentManifestsEnabled != saved.integrations.agentManifestsEnabled
+        case .privacy:
+            return draft.privacy != saved.privacy
+        case .shortcuts:
+            return draft.shortcuts != saved.shortcuts
+        case .diagnostics, .presets, .community:
+            return false
+        }
+    }
+
+    private func revertSection(_ section: LessonMeldSettingsSection) {
+        let saved = preferences.snapshot.normalized()
+        switch section {
+        case .general:
+            draft.general = saved.general
+            draft.capture.showRecorderControlTooltips = saved.capture.showRecorderControlTooltips
+        case .capture:
+            draft.capture.quickRecordDurationSeconds = saved.capture.quickRecordDurationSeconds
+            draft.capture.fps = saved.capture.fps
+            draft.capture.includeCursor = saved.capture.includeCursor
+            draft.capture.captureInteractionMetadata = saved.capture.captureInteractionMetadata
+            draft.capture.countdownSeconds = saved.capture.countdownSeconds
+            draft.capture.rememberLastRegion = saved.capture.rememberLastRegion
+            draft.capture.hideRecorderControlsFromCapture = saved.capture.hideRecorderControlsFromCapture
+        case .camera:
+            draft.capture.captureWebcam = saved.capture.captureWebcam
+            draft.capture.cameraResolution = saved.capture.cameraResolution
+            draft.capture.webcamFPS = saved.capture.webcamFPS
+            draft.capture.webcamAspectRatio = saved.capture.webcamAspectRatio
+            draft.capture.webcamFrameShape = saved.capture.webcamFrameShape
+            draft.capture.webcamCornerRadius = saved.capture.webcamCornerRadius
+            draft.capture.webcamRelativeSize = saved.capture.webcamRelativeSize
+            draft.capture.webcamMirror = saved.capture.webcamMirror
+            draft.capture.webcamBorderEnabled = saved.capture.webcamBorderEnabled
+            draft.capture.webcamShadowEnabled = saved.capture.webcamShadowEnabled
+            draft.capture.showFloatingWebcamPreview = saved.capture.showFloatingWebcamPreview
+        case .audio:
+            draft.capture.captureMicrophone = saved.capture.captureMicrophone
+            draft.capture.microphoneDeviceID = saved.capture.microphoneDeviceID
+            draft.capture.captureSystemAudio = saved.capture.captureSystemAudio
+        case .editor:
+            break
+        case .annotations:
+            draft.annotation = saved.annotation
+        case .export:
+            draft.export = saved.export
+            draft.integrations.learnHouseEnabled = saved.integrations.learnHouseEnabled
+            draft.integrations.agentManifestsEnabled = saved.integrations.agentManifestsEnabled
+        case .privacy:
+            draft.privacy = saved.privacy
+        case .shortcuts:
+            draft.shortcuts = saved.shortcuts
+        case .diagnostics, .presets, .community:
+            break
+        }
+        saveMessage = "Section reverted"
+    }
+
+    private func confirmResetDefaults() {
+        let alert = NSAlert()
+        alert.messageText = "Reset all settings to defaults?"
+        alert.informativeText = "This stages default app settings. Nothing is saved until you choose Save All."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Reset Defaults")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        draft = LessonMeldPreferences()
+        saveMessage = "Defaults staged"
     }
 }
 
@@ -921,6 +1113,7 @@ private enum CommunityLinks {
 private struct SettingsSectionView<Content: View>: View {
     var title: String
     var subtitle: String
+    var scope: SettingsScope = .app
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -930,6 +1123,12 @@ private struct SettingsSectionView<Content: View>: View {
                     .font(.largeTitle.weight(.semibold))
                 Text(subtitle)
                     .foregroundStyle(.secondary)
+                Label(scope.title, systemImage: scope.systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(scope.tint)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(scope.tint.opacity(0.12), in: Capsule())
             }
 
             SettingsCard {
@@ -938,6 +1137,52 @@ private struct SettingsSectionView<Content: View>: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+        }
+    }
+}
+
+private enum SettingsScope {
+    case app
+    case futureRecordings
+    case futureDefaults
+    case projectLevel
+
+    var title: String {
+        switch self {
+        case .app:
+            "App setting"
+        case .futureRecordings:
+            "Future recordings"
+        case .futureDefaults:
+            "Future lesson defaults"
+        case .projectLevel:
+            "Project-level settings"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .app:
+            "app"
+        case .futureRecordings:
+            "record.circle"
+        case .futureDefaults:
+            "slider.horizontal.3"
+        case .projectLevel:
+            "doc.badge.gearshape"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .app:
+            .secondary
+        case .futureRecordings:
+            .orange
+        case .futureDefaults:
+            .blue
+        case .projectLevel:
+            .purple
         }
     }
 }

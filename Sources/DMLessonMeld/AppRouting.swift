@@ -38,13 +38,16 @@ struct LessonMeldProjectCommandRequest: Identifiable, Equatable {
 enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
     case general
     case capture
+    case camera
+    case audio
+    case editor
     case annotations
     case export
-    case presets
-    case community
     case privacy
     case shortcuts
     case diagnostics
+    case presets
+    case community
 
     var id: String { rawValue }
 
@@ -52,13 +55,16 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "General"
         case .capture: "Capture"
+        case .camera: "Camera"
+        case .audio: "Audio"
+        case .editor: "Editor"
         case .annotations: "Annotations"
         case .export: "Export"
-        case .presets: "Presets"
-        case .community: "Community"
         case .privacy: "Privacy"
         case .shortcuts: "Shortcuts"
         case .diagnostics: "Diagnostics"
+        case .presets: "Presets"
+        case .community: "Community"
         }
     }
 
@@ -66,13 +72,58 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gearshape"
         case .capture: "record.circle"
+        case .camera: "web.camera"
+        case .audio: "waveform"
+        case .editor: "timeline.selection"
         case .annotations: "pencil.tip"
         case .export: "square.and.arrow.up"
-        case .presets: "wand.and.stars"
-        case .community: "person.2"
         case .privacy: "lock.shield"
         case .shortcuts: "keyboard"
         case .diagnostics: "stethoscope"
+        case .presets: "wand.and.stars"
+        case .community: "person.2"
+        }
+    }
+
+    var groupTitle: String {
+        switch self {
+        case .general, .privacy, .shortcuts, .diagnostics:
+            "App"
+        case .capture, .camera, .audio:
+            "Recording"
+        case .editor, .annotations, .export, .presets:
+            "Lesson Defaults"
+        case .community:
+            "Community"
+        }
+    }
+
+    var searchKeywords: String {
+        switch self {
+        case .general:
+            "appearance project folder template launch main window"
+        case .capture:
+            "recording screen fps cursor countdown region controls"
+        case .camera:
+            "webcam camera picture in picture pip resolution fps mirror border shadow"
+        case .audio:
+            "microphone mic system audio voice input"
+        case .editor:
+            "editor video timeline canvas project level cuts zooms overlays captions"
+        case .annotations:
+            "annotations overlay pencil palette stroke colors toolbar"
+        case .export:
+            "render export learnhouse package mp4 mov quality archive"
+        case .privacy:
+            "privacy local only agent manifest transcript media git backup"
+        case .shortcuts:
+            "keyboard shortcuts hotkeys commands"
+        case .diagnostics:
+            "diagnostics permissions health cli status"
+        case .presets:
+            "presets import export reusable defaults"
+        case .community:
+            "community sstb discord podcast links"
         }
     }
 }
