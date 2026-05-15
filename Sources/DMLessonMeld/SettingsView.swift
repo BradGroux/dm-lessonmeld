@@ -83,6 +83,8 @@ struct LessonMeldSettingsView: View {
             TextField("Search settings", text: $settingsSearchText)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 220)
+                .accessibilityLabel("Search settings")
+                .accessibilityHint("Filter settings by workflow, feature, or section name.")
 
             Spacer()
 

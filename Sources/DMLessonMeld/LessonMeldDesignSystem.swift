@@ -162,6 +162,16 @@ struct LessonMeldSidebarItem: View {
                 RoundedRectangle(cornerRadius: LessonMeldDesign.Radius.card, style: .continuous)
                     .stroke(isSelected ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
             )
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(title)
+            .accessibilityValue(accessibilityValue)
+            .accessibilityHint("Opens the \(title) section.")
+    }
+
+    private var accessibilityValue: String {
+        [isSelected ? "Selected" : nil, isDirty ? "Unsaved changes" : nil]
+            .compactMap(\.self)
+            .joined(separator: ", ")
     }
 }
 
@@ -197,5 +207,14 @@ struct LessonMeldCommandRow: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(LessonMeldDesign.rowFill, in: RoundedRectangle(cornerRadius: LessonMeldDesign.Radius.card, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint(subtitle)
+    }
+
+    private var accessibilityValue: String {
+        guard let shortcut else { return "No keyboard shortcut" }
+        return "Shortcut \(shortcut)"
     }
 }

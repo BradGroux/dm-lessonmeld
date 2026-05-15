@@ -515,6 +515,12 @@ private final class AnnotationOverlayToolbarWindowController: NSObject, NSWindow
             return
         }
 
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.orderFrontRegardless()
+            NSSound.beep()
+            return
+        }
+
         let originalFrame = panel.frame
         let shifted = originalFrame.offsetBy(dx: 14, dy: 0)
         suppressMovePersistence(for: 0.35)
@@ -1333,6 +1339,7 @@ private struct AnnotationOverlayToolbarView: View {
         )
         .shadow(color: .black.opacity(0.28), radius: 7, y: 3)
         .foregroundStyle(.white)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("LessonMeld annotation toolbar")
     }
 
@@ -1486,6 +1493,8 @@ private struct AnnotationOverlayToolbarView: View {
             .buttonStyle(.plain)
             .overlayHelp(color.accessibilityName, enabled: session.tooltipsEnabled)
             .accessibilityLabel(color.accessibilityName)
+            .accessibilityValue(session.selectedColor == color ? "Selected" : "Not selected")
+            .accessibilityHint("Sets the annotation color.")
         }
     }
 
@@ -1504,6 +1513,7 @@ private struct AnnotationOverlayToolbarView: View {
         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlayHelp("Line width", enabled: session.tooltipsEnabled)
         .accessibilityLabel("Line width")
+        .accessibilityValue("\(Int(session.lineWidth)) pixels")
     }
 
     private var textSizeMenu: some View {
@@ -1521,6 +1531,7 @@ private struct AnnotationOverlayToolbarView: View {
         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlayHelp("Text size", enabled: session.tooltipsEnabled)
         .accessibilityLabel("Text size")
+        .accessibilityValue("\(Int(session.textSize)) pixels")
     }
 
     @ViewBuilder private var actionButtons: some View {
@@ -1592,6 +1603,8 @@ private struct AnnotationOverlayToolbarView: View {
         .opacity(enabled ? 1 : 0.38)
         .overlayHelp(label, enabled: session.tooltipsEnabled)
         .accessibilityLabel(label)
+        .accessibilityValue(active ? "Selected" : (enabled ? "Available" : "Disabled"))
+        .accessibilityHint(active ? "Current toolbar selection." : "Activates \(label).")
     }
 
     private func menuLabel(_ systemImage: String, value: String) -> some View {

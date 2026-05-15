@@ -54,6 +54,23 @@ enum EditorInspectorTab: String, CaseIterable, Identifiable {
         case .export: "square.and.arrow.up"
         }
     }
+
+    var keyboardShortcut: KeyEquivalent {
+        switch self {
+        case .edits: "1"
+        case .assets: "2"
+        case .canvas: "3"
+        case .cuts: "4"
+        case .zooms: "5"
+        case .overlays: "6"
+        case .camera: "7"
+        case .audio: "8"
+        case .captions: "9"
+        case .presets: "0"
+        case .cursor: "-"
+        case .export: "="
+        }
+    }
 }
 
 enum LessonWorkflowStage: String, CaseIterable, Identifiable {

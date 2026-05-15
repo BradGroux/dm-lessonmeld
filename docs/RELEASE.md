@@ -40,6 +40,8 @@ ruby -c Casks/dm-lessonmeld.rb
 brew style Casks/dm-lessonmeld.rb
 ```
 
+Run the app-level keyboard and VoiceOver checklist in `docs/ACCESSIBILITY_QA.md` before tagging a public release.
+
 ## Build an app bundle
 
 ```sh

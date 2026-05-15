@@ -113,6 +113,9 @@ private struct QuickRecordingControlBar: View {
         )
         .shadow(color: .black.opacity(0.38), radius: 14, y: 7)
         .environment(\.controlTooltipsEnabled, model.showRecorderControlTooltips)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Recording controls")
+        .accessibilityHint("Use the buttons to choose capture sources, pause, stop, annotate, or finish a recording.")
         .onAppear {
             model.applyPreferences(preferences.snapshot)
             model.refreshCaptureChoices()
@@ -422,6 +425,9 @@ private struct RecordingStatusPill: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(isStopping ? "Recording stopping" : (isPaused ? "Recording paused" : "Recording"))
+        .accessibilityValue(elapsed)
     }
 }
 
@@ -544,6 +550,8 @@ private struct ControlBarButton: View {
         .onHover { isHovered = $0 }
         .controlHelp(title, isEnabled: tooltipsEnabled)
         .accessibilityLabel(title)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint(isDestructive ? "Destructive recording action." : "Recording control.")
     }
 
     private var foregroundStyle: Color {
@@ -568,6 +576,16 @@ private struct ControlBarButton: View {
         }
         return Color.clear
     }
+
+    private var accessibilityValue: String {
+        if isProminent {
+            return "Selected"
+        }
+        if isSubdued {
+            return "Off"
+        }
+        return "Available"
+    }
 }
 
 private struct PrimaryControlBarButton: View {
@@ -590,6 +608,7 @@ private struct PrimaryControlBarButton: View {
         .onHover { isHovered = $0 }
         .controlHelp(title, isEnabled: tooltipsEnabled)
         .accessibilityLabel(title)
+        .accessibilityValue("Primary action")
     }
 }
 

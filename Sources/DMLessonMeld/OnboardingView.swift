@@ -277,6 +277,10 @@ private struct PermissionSetupRow: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(item.id.title)
+        .accessibilityValue("\(item.need.title), \(item.statusTitle)")
+        .accessibilityHint(item.detail)
     }
 
     private var statusIcon: some View {
@@ -313,6 +317,7 @@ private struct PermissionSetupRow: View {
     private var actionButton: some View {
         Button(actionTitle, action: action)
             .frame(width: 120)
+            .accessibilityLabel("\(actionTitle) for \(item.id.title)")
     }
 }
 
