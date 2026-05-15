@@ -1568,6 +1568,11 @@ extension ProjectEditorView {
                     Text(fileType.rawValue.uppercased()).tag(fileType)
                 }
             }
+            .onChange(of: model.renderFileType) { _, fileType in
+                if fileType != .mov, model.renderCodec == .proRes {
+                    model.renderCodec = .h264
+                }
+            }
             Picker("Resolution", selection: $model.renderResolution) {
                 ForEach(RenderResolution.allCases) { resolution in
                     Text(resolution.title).tag(resolution)
@@ -1583,15 +1588,22 @@ extension ProjectEditorView {
                     Text(codec.title).tag(codec)
                 }
             }
+            .onChange(of: model.renderCodec) { _, codec in
+                if codec == .proRes {
+                    model.renderFileType = .mov
+                }
+            }
             Toggle("Hardware acceleration", isOn: $model.renderHardwareAccelerationEnabled)
                 .toggleStyle(.checkbox)
             Stepper("Concurrent exports: \(model.renderMaxConcurrentExports)", value: $model.renderMaxConcurrentExports, in: 1...8)
-            Toggle("Alpha channel", isOn: $model.renderAlphaChannelEnabled)
-                .toggleStyle(.checkbox)
-            Toggle("Animated GIF", isOn: $model.renderAnimatedGIFEnabled)
-                .toggleStyle(.checkbox)
-            Toggle("ProRes", isOn: $model.renderProResEnabled)
-                .toggleStyle(.checkbox)
+            Label("ProRes is available through Codec: ProRes with MOV output.", systemImage: "film")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Label("Alpha channel and animated GIF export are unavailable until dedicated render pipelines are implemented.", systemImage: "lock")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
             inspectorSectionTitle("Local Render")

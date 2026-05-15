@@ -137,7 +137,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
     private func exportSingleAsset(_ plan: RenderPlan, progress: RenderProgressHandler?) async throws -> URL {
         let asset = AVURLAsset(url: plan.screenVideo.url)
-        guard let session = AVAssetExportSession(asset: asset, presetName: presetName(for: plan.preset.quality)) else {
+        guard let session = AVAssetExportSession(asset: asset, presetName: presetName(for: plan.preset)) else {
             throw RenderExportError.unableToCreateExportSession
         }
 
@@ -264,7 +264,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             interactionMetadata: interactionMetadata
         )
 
-        guard let session = AVAssetExportSession(asset: composition, presetName: presetName(for: plan.preset.quality)) else {
+        guard let session = AVAssetExportSession(asset: composition, presetName: presetName(for: plan.preset)) else {
             throw RenderExportError.unableToCreateExportSession
         }
         session.videoComposition = videoComposition
@@ -2014,12 +2014,20 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         )
     }
 
-    private func presetName(for quality: RenderQuality) -> String {
-        switch quality {
+    private func presetName(for preset: RenderPreset) -> String {
+        if preset.usesProRes {
+            return AVAssetExportPresetAppleProRes422LPCM
+        }
+
+        if preset.codec == .hevc {
+            return AVAssetExportPresetHEVCHighestQuality
+        }
+
+        switch preset.quality {
         case .medium:
-            AVAssetExportPresetMediumQuality
+            return AVAssetExportPresetMediumQuality
         case .highest:
-            AVAssetExportPresetHighestQuality
+            return AVAssetExportPresetHighestQuality
         }
     }
 

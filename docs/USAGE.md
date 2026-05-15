@@ -128,8 +128,8 @@ Render/export uses the JSON transcript source for styled burned-in captions. Lea
 
 Use the **Export** inspector tab to keep export actions separate:
 
-- **Render Settings** controls quality, container, resolution, frame rate, codec, hardware acceleration, concurrency, and explicit alpha/GIF/ProRes roadmap gates.
-- **Local Render** writes a final MP4/MOV through the renderer.
+- **Render Settings** controls quality, container, resolution, frame rate, codec, hardware acceleration, concurrency, ProRes MOV output, and explicit unavailable states for alpha/GIF.
+- **Local Render** writes a final MP4/MOV, including ProRes MOV when Codec is set to ProRes.
 - **Local Share Package** builds a `.lessonshare` directory with project metadata, editable sidecars, raw assets, optional final video, and checksums.
 - **Raw Assets** extracts source files from the `.dmlm` bundle into a standalone raw-assets folder.
 - **Course Package** builds the LearnHouse package.
@@ -139,11 +139,12 @@ CLI equivalents:
 
 ```sh
 swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --resolution 1080p --fps 30 --codec h264 --json
+swift run dmlesson render export /tmp/Intro.dmlm --output /tmp/lesson.mov --codec prores
 swift run dmlesson project extract-assets /tmp/Intro.dmlm --output /tmp/raw-assets --json
 swift run dmlesson share package /tmp/Intro.dmlm --output /tmp/shares --final-video /tmp/lesson.mp4 --json
 ```
 
-Alpha, GIF, and ProRes options are visible as explicit gates. Render validation reports them as unsupported instead of silently producing a different file.
+ProRes requires MOV output. Alpha-channel and animated GIF export are not active controls until dedicated alpha and image-sequence render pipelines exist; legacy CLI flags still fail validation instead of silently producing a different file.
 
 ## Add Video Overlays
 

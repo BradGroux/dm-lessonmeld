@@ -51,7 +51,7 @@ Tests/
 - Effect controls beyond trims, cuts, zooms, markers, annotations, and export readiness.
 - iOS device capture.
 - Local transcription model download/runtime.
-- Higher-fidelity renderer support for caption styling, cursor styling, zoom/pan keyframes, GIF/ProRes, and parallel rendering.
+- Higher-fidelity renderer support for caption styling, cursor styling, zoom/pan keyframes, GIF/alpha output, and parallel rendering.
 - Apple Developer account provisioning for public binary publication. Release packaging, DMG generation, Developer ID signing/notarization enforcement, and the Homebrew cask mirror are wired.
 
 ## Agent boundary

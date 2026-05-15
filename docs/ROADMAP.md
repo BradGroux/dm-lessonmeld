@@ -29,7 +29,7 @@
 - Harden webcam, microphone, system audio, cursor metadata, click/shortcut metadata capture in combined app workflows. Initial combined app workflow is wired; broader device and permission-matrix QA remains.
 - Add recording recovery, Finder/open-url project handling, and richer project bundle creation. Finder/open-url project handling is wired; recovery remains.
 - Add a post-recording completion widget with Edit, Save Video, Copy Path, Open Project, Package LearnHouse, and caption/transcript export actions.
-- Extend cut-list export into the full render pipeline with webcam PiP/audio/cursor effects/zoom regions/annotations/captions, then add zoom/pan keyframes, webcam PiP controls, canvas styling, and richer render progress. Full render, share packages, and raw asset extraction are wired; GIF/ProRes/alpha/parallel execution remains behind explicit export gates.
+- Extend cut-list export into the full render pipeline with webcam PiP/audio/cursor effects/zoom regions/annotations/captions, then add zoom/pan keyframes, webcam PiP controls, canvas styling, and richer render progress. Full render, ProRes MOV export, share packages, and raw asset extraction are wired; GIF/alpha/parallel execution remains behind explicit export gates.
 - Expand annotation overlay polish: horizontal/vertical toolbar, pen, highlighter, eraser, line, arrow, box, ellipse, text, spotlight, whiteboard, blackboard, swatches, line weights, text sizes, undo/redo, clear, and frame capture.
 - Expand presets/templates to cover capture sources, webcam layout, annotations, zoom behavior, captions, canvas/background, export, and LearnHouse packaging. Project/app preset files are wired; additional bundled preset templates remain.
 - Add local transcription model handling.

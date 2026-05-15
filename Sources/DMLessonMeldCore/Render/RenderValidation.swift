@@ -144,14 +144,6 @@ public enum RenderPlanValidator {
             ))
         }
 
-        if preset.codec == .hevc {
-            issues.append(RenderValidationIssue(
-                severity: .warning,
-                message: "HEVC codec selection is recorded in the render plan, but AVFoundation currently chooses the concrete codec from the export preset.",
-                path: "preset.codec"
-            ))
-        }
-
         if !preset.hardwareAccelerationEnabled || preset.maxConcurrentExports > 1 {
             issues.append(RenderValidationIssue(
                 severity: .warning,
@@ -160,10 +152,10 @@ public enum RenderPlanValidator {
             ))
         }
 
-        if preset.codec == .proRes || preset.proResEnabled {
+        if preset.usesProRes, preset.fileType != .mov {
             issues.append(RenderValidationIssue(
                 severity: .error,
-                message: "ProRes export is not implemented yet.",
+                message: "ProRes export requires MOV output.",
                 path: "preset.codec"
             ))
         }
@@ -171,7 +163,7 @@ public enum RenderPlanValidator {
         if preset.alphaChannelEnabled {
             issues.append(RenderValidationIssue(
                 severity: .error,
-                message: "Alpha-channel export is not implemented yet.",
+                message: "Alpha-channel export is not available in this build. Disable alpha until the renderer has an alpha-capable pipeline.",
                 path: "preset.alphaChannelEnabled"
             ))
         }
@@ -179,7 +171,7 @@ public enum RenderPlanValidator {
         if preset.animatedGIFEnabled {
             issues.append(RenderValidationIssue(
                 severity: .error,
-                message: "Animated GIF export is not implemented yet.",
+                message: "Animated GIF export is not available in this build. Use MP4 or MOV until the image-sequence renderer is implemented.",
                 path: "preset.animatedGIFEnabled"
             ))
         }

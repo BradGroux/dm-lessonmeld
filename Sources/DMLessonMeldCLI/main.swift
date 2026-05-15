@@ -879,11 +879,11 @@ struct DMLessonMeldCLI {
 
     static func runRender(_ arguments: [String]) async throws {
         guard let subcommand = arguments.first else {
-            throw CLIError.usage("Usage: dmlesson render plan|export <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--json]")
+            throw CLIError.usage("Usage: dmlesson render plan|export <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--prores] [--json]")
         }
         guard arguments.count >= 2,
               let output = optionValue("--output", in: arguments) else {
-            throw CLIError.usage("Usage: dmlesson render \(subcommand) <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--json]")
+            throw CLIError.usage("Usage: dmlesson render \(subcommand) <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--prores] [--json]")
         }
 
         let projectURL = URL(fileURLWithPath: arguments[1])
@@ -1278,7 +1278,7 @@ struct DMLessonMeldCLI {
           annotations add-text <project.dmlm> --text <text> (--x <points> --y <points> | --normalized-x 0...1 --normalized-y 0...1) [--start <seconds>] [--end <seconds>] [--display-id <id>] [--json]
           transcript export <project.dmlm|transcript.json> --format vtt|srt|md|txt --output <path> [--json]
           chapters export <project.dmlm> --format youtube|md|json --output <path> [--json]
-          render plan|export <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--concurrency 1...8] [--alpha] [--gif] [--prores] [--json]
+          render plan|export <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--concurrency 1...8] [--prores] [--json]
           export <project> --preset <id> [--json]
           templates list|show <id> [--json]
           templates apply <id> --lesson-title <title> --output <project> [--course-title <title>] [--json]
@@ -1613,17 +1613,20 @@ struct DMLessonMeldCLI {
     static func renderPreset(from arguments: [String], outputURL: URL) -> RenderPreset {
         let quality = optionValue("--quality", in: arguments).flatMap(RenderQuality.init(rawValue:)) ?? .highest
         let fileType: RenderFileType = outputURL.pathExtension.lowercased() == "mov" ? .mov : .mp4
+        let codec = arguments.contains("--prores")
+            ? RenderCodec.proRes
+            : optionValue("--codec", in: arguments).flatMap(RenderCodec.init(rawValue:)) ?? .h264
         return RenderPreset(
             fileType: fileType,
             quality: quality,
             resolution: optionValue("--resolution", in: arguments).flatMap(RenderResolution.init(rawValue:)) ?? .source,
             frameRate: optionValue("--fps", in: arguments).flatMap(RenderFrameRate.init(rawValue:)) ?? .source,
-            codec: optionValue("--codec", in: arguments).flatMap(RenderCodec.init(rawValue:)) ?? .h264,
+            codec: codec,
             hardwareAccelerationEnabled: !arguments.contains("--disable-hardware-acceleration"),
             maxConcurrentExports: optionValue("--concurrency", in: arguments).flatMap(Int.init) ?? 1,
             alphaChannelEnabled: arguments.contains("--alpha"),
             animatedGIFEnabled: arguments.contains("--gif"),
-            proResEnabled: arguments.contains("--prores")
+            proResEnabled: codec == .proRes
         )
     }
 

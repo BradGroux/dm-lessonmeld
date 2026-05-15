@@ -166,8 +166,8 @@ struct RenderPlanTests {
         #expect(issues.map(\.path).contains("missing-webcam.mp4"))
     }
 
-    @Test("Render preset defaults keep legacy JSON readable and gate unsupported formats")
-    func renderPresetDefaultsAndUnsupportedFormatGates() throws {
+    @Test("Render preset defaults keep legacy JSON readable and validate advanced formats")
+    func renderPresetDefaultsAndAdvancedFormatValidation() throws {
         let legacy = try DMLessonJSON.decoder().decode(
             RenderPreset.self,
             from: Data(#"{"fileType":"mp4","quality":"highest"}"#.utf8)
@@ -190,9 +190,20 @@ struct RenderPlanTests {
         )
 
         let messages = plan.validate().map(\.message)
-        #expect(messages.contains("ProRes export is not implemented yet."))
-        #expect(messages.contains("Alpha-channel export is not implemented yet."))
-        #expect(messages.contains("Animated GIF export is not implemented yet."))
+        #expect(messages.contains("ProRes export requires MOV output."))
+        #expect(messages.contains("Alpha-channel export is not available in this build. Disable alpha until the renderer has an alpha-capable pipeline."))
+        #expect(messages.contains("Animated GIF export is not available in this build. Use MP4 or MOV until the image-sequence renderer is implemented."))
+
+        let proResPlan = try RenderPlan.make(
+            manifest: ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "ProRes"),
+                media: ProjectMedia(screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo))
+            ),
+            projectURL: projectURL,
+            destinationURL: temp.url.appendingPathComponent("lesson.mov"),
+            preset: RenderPreset(fileType: .mov, codec: .proRes)
+        )
+        #expect(proResPlan.validate().isEmpty)
     }
 
     @Test("Rejects render plans with media paths outside the project")
@@ -711,6 +722,53 @@ struct RenderPlanTests {
         let attributes = try FileManager.default.attributesOfItem(atPath: renderedURL.path)
         let byteCount = try #require(attributes[.size] as? Int64)
         #expect(byteCount > 0)
+    }
+
+    @Test("Exports synthetic media as ProRes MOV")
+    func exportsSyntheticMediaAsProResMOV() async throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let mediaURL = projectURL.appendingPathComponent("media/screen.mp4")
+        let outputURL = temp.url.appendingPathComponent("exports/lesson.mov")
+
+        try await SyntheticVideoWriter.write(
+            outputURL: mediaURL,
+            size: CGSize(width: 320, height: 180),
+            color: (red: 20, green: 120, blue: 220)
+        )
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "ProRes Export"),
+                media: ProjectMedia(screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo))
+            ),
+            to: projectURL
+        )
+
+        let renderedURL = try await AVFoundationRenderService().export(
+            projectURL: projectURL,
+            destinationURL: outputURL,
+            preset: RenderPreset(fileType: .mov, codec: .proRes)
+        )
+
+        let asset = AVURLAsset(url: renderedURL)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let formatDescriptions = try await tracks.first?.load(.formatDescriptions) ?? []
+        let codecNames = formatDescriptions.map { CMFormatDescriptionGetMediaSubType($0).fourCCString }
+
+        #expect(renderedURL.pathExtension == "mov")
+        #expect(codecNames.contains("apcn"))
+    }
+}
+
+private extension FourCharCode {
+    var fourCCString: String {
+        let bytes = [
+            UInt8((self >> 24) & 0xff),
+            UInt8((self >> 16) & 0xff),
+            UInt8((self >> 8) & 0xff),
+            UInt8(self & 0xff)
+        ]
+        return String(bytes: bytes, encoding: .macOSRoman) ?? "\(self)"
     }
 }
 
