@@ -37,11 +37,12 @@ bash -n scripts/build-app.sh
 bash -n scripts/package-app.sh
 bash -n scripts/package-dmg.sh
 bash -n scripts/package-release.sh
+bash -n scripts/capture-device-matrix-smoke.sh
 ruby -c Casks/dm-lessonmeld.rb
 brew style Casks/dm-lessonmeld.rb
 ```
 
-Run the app-level keyboard, VoiceOver, and layout checklists in `docs/ACCESSIBILITY_QA.md` and `docs/UI_REGRESSION_QA.md` before tagging a public release.
+Run the app-level keyboard, VoiceOver, layout, and capture-device checklists in `docs/ACCESSIBILITY_QA.md`, `docs/UI_REGRESSION_QA.md`, and `docs/CAPTURE_DEVICE_QA.md` before tagging a public release. The capture smoke command is local-only and should run on a machine where recording permissions and test devices are available.
 
 ## Build an app bundle
 

@@ -4,7 +4,7 @@
 
 It records lessons into local `.dmlm` project bundles, lets you review and annotate them, renders teaching-ready videos, and packages exports for course workflows without accounts, telemetry, analytics, or cloud processing.
 
-> Status: v0.0.3 developer preview. The core app, CLI, project bundle, recording, annotation, render, export, settings, and packaging foundations are in place. Release automation now supports Developer ID signed/notarized DMG and zip artifacts; device-matrix QA remains release work.
+> Status: v0.0.3 developer preview. The core app, CLI, project bundle, recording, annotation, render, export, settings, packaging foundations, and local capture smoke harness are in place. Release automation now supports Developer ID signed/notarized DMG and zip artifacts.
 
 ## Features
 
@@ -29,6 +29,7 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - [Usage guide](docs/USAGE.md)
 - [Architecture notes](docs/ARCHITECTURE.md)
 - [Release guide](docs/RELEASE.md)
+- [Capture device QA](docs/CAPTURE_DEVICE_QA.md)
 - [Product requirements](docs/PRD.md)
 - [Roadmap](docs/ROADMAP.md)
 - [LearnHouse export](docs/LEARNHOUSE_EXPORT.md)
