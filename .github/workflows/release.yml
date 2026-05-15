@@ -55,6 +55,7 @@ jobs:
           bash -n scripts/package-app.sh
           bash -n scripts/package-dmg.sh
           bash -n scripts/package-release.sh
+          bash -n scripts/verify-dmg.sh
 
       - name: Validate signing configuration
         run: |
@@ -119,7 +120,7 @@ jobs:
           codesign --verify --strict --deep --verbose=2 "Packaging/Digital Meld LessonMeld.app"
           spctl --assess --type execute --verbose "Packaging/Digital Meld LessonMeld.app"
           xcrun stapler validate "Packaging/Digital Meld LessonMeld.app"
-          hdiutil verify "${dmg_path}"
+          scripts/verify-dmg.sh "${dmg_path}"
           xcrun stapler validate "${dmg_path}"
 
           {

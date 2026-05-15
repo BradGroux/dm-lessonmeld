@@ -64,6 +64,6 @@ if [[ "${#notarize_args[@]}" -gt 0 ]]; then
   xcrun stapler validate "${DMG_PATH}"
 fi
 
-hdiutil verify "${DMG_PATH}" >/dev/null
+"${ROOT_DIR}/scripts/verify-dmg.sh" "${DMG_PATH}" >/dev/null
 
 echo "${DMG_PATH}"
