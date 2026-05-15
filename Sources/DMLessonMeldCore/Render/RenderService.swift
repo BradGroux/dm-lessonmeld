@@ -175,7 +175,12 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             at: .zero
         )
 
-        let outputDuration = retimedDuration(sourceDuration: screenDuration, speedRegions: plan.speedRegions)
+        let sourceDurationSeconds = screenDuration.seconds.isFinite ? max(0, screenDuration.seconds) : 0
+        let timelineMapper = TimelineRetimingMapper(
+            speedRegions: plan.speedRegions,
+            sourceDurationSeconds: sourceDurationSeconds
+        )
+        let outputDuration = time(timelineMapper.outputDuration(forSourceDuration: sourceDurationSeconds))
 
         var audioTracks: [InsertedAudioTrack] = []
         audioTracks += try await insertAudioTracks(
@@ -216,7 +221,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             to: screenInstruction,
             baseTransform: screenBaseTransform,
             renderSize: renderSize,
-            duration: screenDuration
+            duration: screenDuration,
+            timelineMapper: timelineMapper
         )
 
         var layerInstructions = [screenInstruction]
@@ -230,7 +236,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 into: composition,
                 duration: screenDuration,
                 renderSize: renderSize,
-                camera: plan.camera
+                camera: plan.camera,
+                timelineMapper: timelineMapper
             )
             layerInstructions.insert(webcamOverlayComposition.instruction, at: 0)
             webcamGeometry = webcamOverlayComposition.geometry
@@ -252,6 +259,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 for: interactionMetadata.clicks,
                 settings: plan.cursor.clickEffects,
                 duration: outputDuration,
+                timelineMapper: timelineMapper,
                 into: composition,
                 temporaryRenderFiles: &temporaryRenderFiles
             )
@@ -269,7 +277,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             renderSize: renderSize,
             canvasGeometry: canvasGeometry,
             webcamGeometry: webcamGeometry,
-            interactionMetadata: interactionMetadata
+            interactionMetadata: interactionMetadata,
+            timelineMapper: timelineMapper
         )
 
         guard let session = AVAssetExportSession(asset: composition, presetName: presetName(for: plan.preset)) else {
@@ -280,6 +289,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             for: audioTracks,
             settings: plan.audio,
             duration: outputDuration,
+            timelineMapper: timelineMapper,
             hasVoiceAudio: plan.audioSources.contains { $0.role == .microphoneAudio || $0.role == .systemAudio }
         )
 
@@ -293,13 +303,15 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         renderSize: CGSize,
         canvasGeometry: EditorCanvasRenderGeometry,
         webcamGeometry: PictureInPictureRenderGeometry?,
-        interactionMetadata: InteractionMetadataDocument?
+        interactionMetadata: InteractionMetadataDocument?,
+        timelineMapper: TimelineRetimingMapper
     ) throws {
         let overlayLayers = try overlayLayers(
             plan: plan,
             renderSize: renderSize,
             webcamGeometry: webcamGeometry,
-            interactionMetadata: interactionMetadata
+            interactionMetadata: interactionMetadata,
+            timelineMapper: timelineMapper
         )
         guard !overlayLayers.isEmpty || !plan.canvas.isDefault else { return }
 
@@ -347,7 +359,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         plan: RenderPlan,
         renderSize: CGSize,
         webcamGeometry: PictureInPictureRenderGeometry?,
-        interactionMetadata: InteractionMetadataDocument?
+        interactionMetadata: InteractionMetadataDocument?,
+        timelineMapper: TimelineRetimingMapper
     ) throws -> [CALayer] {
         var layers: [CALayer] = []
         var screenBoundLayers: [CALayer] = []
@@ -356,13 +369,18 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             let store = try loadAnnotationStore(from: annotationSource.url)
             if store.isVisible {
                 screenBoundLayers.append(contentsOf: store.annotations.filter(\.isVisible).map {
-                    annotationLayer(for: $0, renderSize: renderSize)
+                    annotationLayer(for: $0, renderSize: renderSize, timelineMapper: timelineMapper)
                 })
             }
         }
 
         if let interactionMetadata {
-            screenBoundLayers.append(contentsOf: cursorLayers(for: interactionMetadata, settings: plan.cursor, renderSize: renderSize))
+            screenBoundLayers.append(contentsOf: cursorLayers(
+                for: interactionMetadata,
+                settings: plan.cursor,
+                renderSize: renderSize,
+                timelineMapper: timelineMapper
+            ))
         }
 
         if !screenBoundLayers.isEmpty {
@@ -374,7 +392,12 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             for layer in screenBoundLayers {
                 screenBoundContainer.addSublayer(layer)
             }
-            applyOverlayZoomRegions(plan.zoomRegions, to: screenBoundContainer, renderSize: renderSize)
+            applyOverlayZoomRegions(
+                plan.zoomRegions,
+                to: screenBoundContainer,
+                renderSize: renderSize,
+                timelineMapper: timelineMapper
+            )
             layers.append(screenBoundContainer)
         }
 
@@ -387,7 +410,11 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         }
 
         if plan.webcamOverlay != nil {
-            layers.append(contentsOf: cameraReactionLayers(for: plan.camera.enabledReactions, renderSize: renderSize))
+            layers.append(contentsOf: cameraReactionLayers(
+                for: plan.camera.enabledReactions,
+                renderSize: renderSize,
+                timelineMapper: timelineMapper
+            ))
         }
 
         if let overlaySource = plan.overlaySource {
@@ -396,19 +423,34 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 layers.append(contentsOf: store.overlays
                     .filter(\.isEnabled)
                     .sorted { $0.zIndex < $1.zIndex }
-                    .map { overlayLayer(for: $0, projectURL: plan.projectURL, renderSize: renderSize) })
+                    .map { overlayLayer(
+                        for: $0,
+                        projectURL: plan.projectURL,
+                        renderSize: renderSize,
+                        timelineMapper: timelineMapper
+                    ) })
             }
         }
 
         if let captionSource = plan.captionSource, plan.captions.burnInEnabled {
             let transcript = try loadTranscript(from: captionSource.url)
             layers.append(contentsOf: transcript.segments.compactMap {
-                captionLayer(for: $0, settings: plan.captions, renderSize: renderSize)
+                captionLayer(
+                    for: $0,
+                    settings: plan.captions,
+                    renderSize: renderSize,
+                    timelineMapper: timelineMapper
+                )
             })
         }
 
         if let interactionMetadata, plan.cursor.keyboardOverlay.isVisible {
-            layers.append(contentsOf: keyboardLayers(for: interactionMetadata, settings: plan.cursor.keyboardOverlay, renderSize: renderSize))
+            layers.append(contentsOf: keyboardLayers(
+                for: interactionMetadata,
+                settings: plan.cursor.keyboardOverlay,
+                renderSize: renderSize,
+                timelineMapper: timelineMapper
+            ))
         }
 
         return layers
@@ -460,7 +502,11 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         return layers
     }
 
-    private func cameraReactionLayers(for reactions: [CameraReaction], renderSize: CGSize) -> [CALayer] {
+    private func cameraReactionLayers(
+        for reactions: [CameraReaction],
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
+    ) -> [CALayer] {
         reactions.map { reaction in
             let rect = overlayFrame(reaction.frame, renderSize: renderSize)
             let container = CALayer()
@@ -476,8 +522,9 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             text.frame = container.bounds
             container.addSublayer(text)
 
-            let start = reaction.range.startSeconds
-            let duration = max(reaction.range.durationSeconds, 0.1)
+            let mappedRange = timelineMapper.outputRange(forSourceRange: reaction.range)
+            let start = mappedRange.startSeconds
+            let duration = max(mappedRange.durationSeconds, 0.1)
             container.opacity = 0
             let animation = CAKeyframeAnimation(keyPath: "opacity")
             animation.values = [0, 1, 1, 0]
@@ -655,29 +702,13 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         }
     }
 
-    private func retimedDuration(sourceDuration: CMTime, speedRegions: [SpeedRegion]) -> CMTime {
-        let sourceDurationSeconds = sourceDuration.seconds.isFinite ? max(0, sourceDuration.seconds) : 0
-        guard sourceDurationSeconds > 0, !speedRegions.isEmpty else { return sourceDuration }
-
-        var durationSeconds = sourceDurationSeconds
-        for region in speedRegions {
-            let startSeconds = min(max(0, region.range.startSeconds), sourceDurationSeconds)
-            let endSeconds = min(max(startSeconds, region.range.endSeconds), sourceDurationSeconds)
-            guard endSeconds > startSeconds, region.playbackRate.isFinite, region.playbackRate > 0 else {
-                continue
-            }
-            let sourceRegionDuration = endSeconds - startSeconds
-            durationSeconds += (sourceRegionDuration / region.playbackRate) - sourceRegionDuration
-        }
-        return time(max(0, durationSeconds))
-    }
-
     private func applyZoomRegions(
         _ zoomRegions: [ZoomRegion],
         to instruction: AVMutableVideoCompositionLayerInstruction,
         baseTransform: CGAffineTransform,
         renderSize: CGSize,
-        duration: CMTime
+        duration: CMTime,
+        timelineMapper: TimelineRetimingMapper
     ) {
         guard !zoomRegions.isEmpty else { return }
 
@@ -689,7 +720,12 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             let endSeconds = max(startSeconds, min(region.range.endSeconds, totalSeconds))
             guard endSeconds > startSeconds else { continue }
 
-            let regionDuration = endSeconds - startSeconds
+            let mappedRange = timelineMapper.outputRange(
+                forSourceRange: EditTimeRange(startSeconds: startSeconds, endSeconds: endSeconds)
+            )
+            let mappedStartSeconds = mappedRange.startSeconds
+            let mappedEndSeconds = mappedRange.endSeconds
+            let regionDuration = mappedRange.durationSeconds
             let rampDuration = zoomRampDuration(for: region, regionDuration: regionDuration)
             let zoomTransform = zoomTransform(for: region, baseTransform: baseTransform, renderSize: renderSize)
 
@@ -697,14 +733,14 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 instruction.setTransformRamp(
                     fromStart: baseTransform,
                     toEnd: zoomTransform,
-                    timeRange: timeRange(startSeconds: startSeconds, durationSeconds: rampDuration)
+                    timeRange: timeRange(startSeconds: mappedStartSeconds, durationSeconds: rampDuration)
                 )
             } else {
-                instruction.setTransform(zoomTransform, at: time(startSeconds))
+                instruction.setTransform(zoomTransform, at: time(mappedStartSeconds))
             }
 
-            let holdStart = startSeconds + rampDuration
-            let outStart = endSeconds - rampDuration
+            let holdStart = mappedStartSeconds + rampDuration
+            let outStart = mappedEndSeconds - rampDuration
             if outStart > holdStart {
                 instruction.setTransform(zoomTransform, at: time(holdStart))
                 instruction.setTransform(zoomTransform, at: time(outStart))
@@ -717,7 +753,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                     timeRange: timeRange(startSeconds: outStart, durationSeconds: rampDuration)
                 )
             }
-            instruction.setTransform(baseTransform, at: time(endSeconds))
+            instruction.setTransform(baseTransform, at: time(mappedEndSeconds))
         }
     }
 
@@ -745,7 +781,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     private func applyOverlayZoomRegions(
         _ zoomRegions: [ZoomRegion],
         to layer: CALayer,
-        renderSize: CGSize
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
     ) {
         guard !zoomRegions.isEmpty else { return }
 
@@ -754,7 +791,12 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             let endSeconds = max(startSeconds, region.range.endSeconds)
             guard endSeconds > startSeconds else { continue }
 
-            let regionDuration = endSeconds - startSeconds
+            let mappedRange = timelineMapper.outputRange(
+                forSourceRange: EditTimeRange(startSeconds: startSeconds, endSeconds: endSeconds)
+            )
+            let mappedStartSeconds = mappedRange.startSeconds
+            let mappedEndSeconds = mappedRange.endSeconds
+            let regionDuration = mappedRange.durationSeconds
             let rampDuration = zoomRampDuration(for: region, regionDuration: regionDuration)
             let zoomTransform = zoomTransform(for: region, baseTransform: .identity, renderSize: renderSize)
             let zoom3D = CATransform3DMakeAffineTransform(zoomTransform)
@@ -764,7 +806,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 let zoomIn = CABasicAnimation(keyPath: "transform")
                 zoomIn.fromValue = identity3D
                 zoomIn.toValue = zoom3D
-                zoomIn.beginTime = AVCoreAnimationBeginTimeAtZero + startSeconds
+                zoomIn.beginTime = AVCoreAnimationBeginTimeAtZero + mappedStartSeconds
                 zoomIn.duration = rampDuration
                 zoomIn.timingFunction = zoomTimingFunction(for: region)
                 zoomIn.fillMode = .forwards
@@ -772,7 +814,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 layer.add(zoomIn, forKey: "overlay-zoom-in-\(region.id)")
             }
 
-            let outStart = endSeconds - rampDuration
+            let outStart = mappedEndSeconds - rampDuration
             if rampDuration > 0 {
                 let zoomOut = CABasicAnimation(keyPath: "transform")
                 zoomOut.fromValue = zoom3D
@@ -819,19 +861,30 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     private func cursorLayers(
         for metadata: InteractionMetadataDocument,
         settings: EditorCursorSettings,
-        renderSize: CGSize
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
     ) -> [CALayer] {
         var layers: [CALayer] = []
 
         if metadata.rendersCursorPointer,
            settings.pointerVisible,
-           let cursorLayer = animatedCursorLayer(for: metadata.cursorSamples, settings: settings, renderSize: renderSize) {
+           let cursorLayer = animatedCursorLayer(
+            for: metadata.cursorSamples,
+            settings: settings,
+            renderSize: renderSize,
+            timelineMapper: timelineMapper
+           ) {
             layers.append(cursorLayer)
         }
 
         if settings.clickEffects.rippleVisible {
             layers.append(contentsOf: metadata.clicks.compactMap {
-                clickLayer(for: $0, settings: settings.clickEffects, renderSize: renderSize)
+                clickLayer(
+                    for: $0,
+                    settings: settings.clickEffects,
+                    renderSize: renderSize,
+                    timelineMapper: timelineMapper
+                )
             })
         }
 
@@ -841,13 +894,14 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     private func animatedCursorLayer(
         for samples: [CursorSample],
         settings: EditorCursorSettings,
-        renderSize: CGSize
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
     ) -> CALayer? {
         let visibleSamples = samples
             .sorted { $0.timestampSeconds < $1.timestampSeconds }
             .map { sample in
                 CursorSample(
-                    timestampSeconds: sample.timestampSeconds,
+                    timestampSeconds: timelineMapper.outputTime(forSourceTime: sample.timestampSeconds),
                     position: sample.position,
                     isVisible: sample.isVisible && !settings.hiddenRanges.contains { $0.contains(sample.timestampSeconds) }
                 )
@@ -902,7 +956,12 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         return layer
     }
 
-    private func clickLayer(for click: CursorClick, settings: EditorClickEffectSettings, renderSize: CGSize) -> CALayer? {
+    private func clickLayer(
+        for click: CursorClick,
+        settings: EditorClickEffectSettings,
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
+    ) -> CALayer? {
         guard click.phase == .down else { return nil }
 
         let scale = max(0.75, min(renderSize.width / 1920, 1.8))
@@ -933,12 +992,13 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
         let group = CAAnimationGroup()
         group.animations = [opacity, scaleAnimation]
-        group.beginTime = AVCoreAnimationBeginTimeAtZero + click.timestampSeconds
+        let timestampSeconds = timelineMapper.outputTime(forSourceTime: click.timestampSeconds)
+        group.beginTime = AVCoreAnimationBeginTimeAtZero + timestampSeconds
         group.duration = settings.durationSeconds
         group.timingFunction = CAMediaTimingFunction(name: .easeOut)
         group.fillMode = .removed
         group.isRemovedOnCompletion = true
-        layer.add(group, forKey: "click-\(click.timestampSeconds)")
+        layer.add(group, forKey: "click-\(timestampSeconds)")
 
         return layer
     }
@@ -971,17 +1031,24 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     private func keyboardLayers(
         for metadata: InteractionMetadataDocument,
         settings: EditorKeyboardOverlaySettings,
-        renderSize: CGSize
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
     ) -> [CALayer] {
         metadata.keystrokes.compactMap {
-            keyboardLayer(for: $0, settings: settings, renderSize: renderSize)
+            keyboardLayer(
+                for: $0,
+                settings: settings,
+                renderSize: renderSize,
+                timelineMapper: timelineMapper
+            )
         }
     }
 
     private func keyboardLayer(
         for event: KeyboardMetadataEvent,
         settings: EditorKeyboardOverlaySettings,
-        renderSize: CGSize
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
     ) -> CALayer? {
         guard event.phase == .down, !event.isRepeat, let label = keyboardLabel(for: event) else {
             return nil
@@ -1025,11 +1092,12 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let animation = CABasicAnimation(keyPath: "opacity")
         animation.fromValue = 1
         animation.toValue = 1
-        animation.beginTime = AVCoreAnimationBeginTimeAtZero + event.timestampSeconds
+        let timestampSeconds = timelineMapper.outputTime(forSourceTime: event.timestampSeconds)
+        animation.beginTime = AVCoreAnimationBeginTimeAtZero + timestampSeconds
         animation.duration = 0.9
         animation.fillMode = .removed
         animation.isRemovedOnCompletion = true
-        container.add(animation, forKey: "keyboard-\(event.timestampSeconds)-\(event.keyCode)")
+        container.add(animation, forKey: "keyboard-\(timestampSeconds)-\(event.keyCode)")
         return container
     }
 
@@ -1108,12 +1176,16 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     private func captionLayer(
         for segment: TranscriptSegment,
         settings: EditorCaptionSettings,
-        renderSize: CGSize
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
     ) -> CALayer? {
         let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, segment.endSeconds > segment.startSeconds else {
             return nil
         }
+        let mappedStartSeconds = timelineMapper.outputTime(forSourceTime: segment.startSeconds)
+        let mappedEndSeconds = timelineMapper.outputTime(forSourceTime: segment.endSeconds)
+        let mappedDurationSeconds = max(mappedEndSeconds - mappedStartSeconds, 0.05)
 
         let maxWidth = min(renderSize.width * 0.82, 980)
         let fontSize = min(max(settings.fontSize, 12), min(renderSize.height * 0.08, 96))
@@ -1161,15 +1233,20 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let animation = CABasicAnimation(keyPath: "opacity")
         animation.fromValue = 1
         animation.toValue = 1
-        animation.beginTime = AVCoreAnimationBeginTimeAtZero + segment.startSeconds
-        animation.duration = max(segment.endSeconds - segment.startSeconds, 0.05)
+        animation.beginTime = AVCoreAnimationBeginTimeAtZero + mappedStartSeconds
+        animation.duration = mappedDurationSeconds
         animation.fillMode = .removed
         animation.isRemovedOnCompletion = true
         container.add(animation, forKey: "caption-\(segment.id)")
         return container
     }
 
-    private func overlayLayer(for overlay: OverlayItem, projectURL: URL, renderSize: CGSize) -> CALayer {
+    private func overlayLayer(
+        for overlay: OverlayItem,
+        projectURL: URL,
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
+    ) -> CALayer {
         let rect = overlayFrame(overlay.frame, renderSize: renderSize)
         let layer: CALayer
 
@@ -1201,7 +1278,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             layer.shadowRadius = 10
             layer.shadowOffset = CGSize(width: 0, height: -4)
         }
-        applyTiming(to: layer, overlay: overlay)
+        applyTiming(to: layer, overlay: overlay, timelineMapper: timelineMapper)
         return layer
     }
 
@@ -1403,9 +1480,14 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         EditorNormalizedGeometry.renderFrame(for: normalizedFrame, renderSize: renderSize)
     }
 
-    private func applyTiming(to layer: CALayer, overlay: OverlayItem) {
-        let start = overlay.timeRange.startSeconds
-        let duration = max(overlay.timeRange.durationSeconds, 0.05)
+    private func applyTiming(
+        to layer: CALayer,
+        overlay: OverlayItem,
+        timelineMapper: TimelineRetimingMapper
+    ) {
+        let mappedRange = timelineMapper.outputRange(forSourceRange: overlay.timeRange)
+        let start = mappedRange.startSeconds
+        let duration = max(mappedRange.durationSeconds, 0.05)
         let fadeIn = min(overlay.animation.fadeInSeconds, duration / 2)
         let fadeOut = min(overlay.animation.fadeOutSeconds, duration / 2)
         layer.opacity = 0
@@ -1470,7 +1552,11 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    private func annotationLayer(for annotation: AnnotationItem, renderSize: CGSize) -> CALayer {
+    private func annotationLayer(
+        for annotation: AnnotationItem,
+        renderSize: CGSize,
+        timelineMapper: TimelineRetimingMapper
+    ) -> CALayer {
         let points = annotation.canvasPoints(for: renderSize)
         let layer: CALayer
         switch annotation.kind {
@@ -1516,7 +1602,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         case .text:
             layer = textLayer(for: annotation, points: points, renderSize: renderSize)
         }
-        applyTiming(to: layer, annotation: annotation)
+        applyTiming(to: layer, annotation: annotation, timelineMapper: timelineMapper)
         return layer
     }
 
@@ -1565,14 +1651,20 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         return layer
     }
 
-    private func applyTiming(to layer: CALayer, annotation: AnnotationItem) {
+    private func applyTiming(
+        to layer: CALayer,
+        annotation: AnnotationItem,
+        timelineMapper: TimelineRetimingMapper
+    ) {
         guard let timeRange = annotation.timeRange, timeRange.isValid else { return }
+        let startSeconds = timelineMapper.outputTime(forSourceTime: timeRange.startSeconds)
+        let endSeconds = timelineMapper.outputTime(forSourceTime: timeRange.endSeconds)
         layer.opacity = 0
         let animation = CABasicAnimation(keyPath: "opacity")
         animation.fromValue = 1
         animation.toValue = 1
-        animation.beginTime = AVCoreAnimationBeginTimeAtZero + timeRange.startSeconds
-        animation.duration = max(timeRange.endSeconds - timeRange.startSeconds, 0.05)
+        animation.beginTime = AVCoreAnimationBeginTimeAtZero + startSeconds
+        animation.duration = max(endSeconds - startSeconds, 0.05)
         animation.fillMode = .removed
         animation.isRemovedOnCompletion = true
         layer.add(animation, forKey: "annotation-\(annotation.id.uuidString)")
@@ -1663,7 +1755,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         into composition: AVMutableComposition,
         duration: CMTime,
         renderSize: CGSize,
-        camera: EditorCameraSettings
+        camera: EditorCameraSettings,
+        timelineMapper: TimelineRetimingMapper
     ) async throws -> WebcamOverlayComposition {
         let webcamAsset = AVURLAsset(url: overlay.source.url)
         let webcamVideoTracks = try await webcamAsset.loadTracks(withMediaType: .video)
@@ -1705,15 +1798,20 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             let startSeconds = min(max(region.range.startSeconds, 0), durationSeconds)
             let endSeconds = min(max(region.range.endSeconds, startSeconds), durationSeconds)
             guard endSeconds > startSeconds else { continue }
-            let start = CMTime(seconds: startSeconds, preferredTimescale: 600)
-            let end = CMTime(seconds: endSeconds, preferredTimescale: 600)
-            let transition = min(region.transitionSeconds, max(0, (endSeconds - startSeconds) / 2))
+            let mappedRange = timelineMapper.outputRange(
+                forSourceRange: EditTimeRange(startSeconds: startSeconds, endSeconds: endSeconds)
+            )
+            let mappedStartSeconds = mappedRange.startSeconds
+            let mappedEndSeconds = mappedRange.endSeconds
+            let start = CMTime(seconds: mappedStartSeconds, preferredTimescale: 600)
+            let end = CMTime(seconds: mappedEndSeconds, preferredTimescale: 600)
+            let transition = min(region.transitionSeconds, max(0, mappedRange.durationSeconds / 2))
 
             if region.preset == .hidden {
                 if region.animation == .fade, transition > 0 {
                     let inRange = CMTimeRange(start: start, duration: CMTime(seconds: transition, preferredTimescale: 600))
                     let outRange = CMTimeRange(
-                        start: CMTime(seconds: max(startSeconds, endSeconds - transition), preferredTimescale: 600),
+                        start: CMTime(seconds: max(mappedStartSeconds, mappedEndSeconds - transition), preferredTimescale: 600),
                         duration: CMTime(seconds: transition, preferredTimescale: 600)
                     )
                     instruction.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 0, timeRange: inRange)
@@ -1735,7 +1833,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 let inRange = CMTimeRange(start: start, duration: CMTime(seconds: transition, preferredTimescale: 600))
                 instruction.setTransformRamp(fromStart: defaultState.transform, toEnd: state.transform, timeRange: inRange)
                 let outRange = CMTimeRange(
-                    start: CMTime(seconds: max(startSeconds, endSeconds - transition), preferredTimescale: 600),
+                    start: CMTime(seconds: max(mappedStartSeconds, mappedEndSeconds - transition), preferredTimescale: 600),
                     duration: CMTime(seconds: transition, preferredTimescale: 600)
                 )
                 instruction.setTransformRamp(fromStart: state.transform, toEnd: defaultState.transform, timeRange: outRange)
@@ -1777,6 +1875,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         for clicks: [CursorClick],
         settings: EditorClickEffectSettings,
         duration: CMTime,
+        timelineMapper: TimelineRetimingMapper,
         into composition: AVMutableComposition,
         temporaryRenderFiles: inout [URL]
     ) async throws {
@@ -1785,7 +1884,17 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         guard durationSeconds.isFinite, durationSeconds > 0 else { return }
 
         let visibleClicks = clicks.filter {
-            $0.phase == .down && $0.timestampSeconds >= 0 && $0.timestampSeconds <= durationSeconds
+            $0.phase == .down && $0.timestampSeconds >= 0
+        }.map {
+            CursorClick(
+                timestampSeconds: timelineMapper.outputTime(forSourceTime: $0.timestampSeconds),
+                position: $0.position,
+                button: $0.button,
+                phase: $0.phase,
+                clickCount: $0.clickCount
+            )
+        }.filter {
+            $0.timestampSeconds <= durationSeconds
         }
         guard !visibleClicks.isEmpty else { return }
 
@@ -1954,6 +2063,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         for audioTracks: [InsertedAudioTrack],
         settings: EditorAudioSettings,
         duration: CMTime,
+        timelineMapper: TimelineRetimingMapper,
         hasVoiceAudio: Bool
     ) -> AVAudioMix? {
         guard !audioTracks.isEmpty else { return nil }
@@ -1981,6 +2091,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 applyVolumeRamp(
                     to: params,
                     range: region.range,
+                    timelineMapper: timelineMapper,
                     baseGain: baseGain,
                     targetGain: region.gain,
                     fadeInSeconds: region.fadeInSeconds,
@@ -2013,13 +2124,15 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
     private func applyVolumeRamp(
         to params: AVMutableAudioMixInputParameters,
         range: EditTimeRange,
+        timelineMapper: TimelineRetimingMapper = TimelineRetimingMapper(),
         baseGain: Double,
         targetGain: Double,
         fadeInSeconds: Double,
         fadeOutSeconds: Double
     ) {
-        let startSeconds = max(0, range.startSeconds)
-        let endSeconds = max(startSeconds, range.endSeconds)
+        let mappedRange = timelineMapper.outputRange(forSourceRange: range)
+        let startSeconds = max(0, mappedRange.startSeconds)
+        let endSeconds = max(startSeconds, mappedRange.endSeconds)
         let durationSeconds = max(0, endSeconds - startSeconds)
         guard durationSeconds > 0 else { return }
 

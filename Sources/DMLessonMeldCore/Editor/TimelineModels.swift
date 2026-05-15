@@ -58,6 +58,94 @@ public struct SpeedRegion: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct TimelineRetimingMapper: Equatable, Sendable {
+    private struct Segment: Equatable, Sendable {
+        var startSeconds: Double
+        var endSeconds: Double
+        var playbackRate: Double
+    }
+
+    private var segments: [Segment]
+    private var sourceDurationSeconds: Double?
+
+    public init(speedRegions: [SpeedRegion] = [], sourceDurationSeconds: Double? = nil) {
+        let normalizedDuration = sourceDurationSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        self.sourceDurationSeconds = normalizedDuration
+
+        var lastEndSeconds = 0.0
+        segments = speedRegions
+            .sorted { left, right in
+                if left.range.startSeconds == right.range.startSeconds {
+                    return left.id < right.id
+                }
+                return left.range.startSeconds < right.range.startSeconds
+            }
+            .compactMap { region in
+                guard region.playbackRate.isFinite, region.playbackRate > 0 else { return nil }
+                let startSeconds = max(0, region.range.startSeconds)
+                var endSeconds = max(startSeconds, region.range.endSeconds)
+                if let normalizedDuration {
+                    endSeconds = min(endSeconds, normalizedDuration)
+                }
+                guard endSeconds > startSeconds, startSeconds >= lastEndSeconds else { return nil }
+                lastEndSeconds = endSeconds
+                return Segment(
+                    startSeconds: startSeconds,
+                    endSeconds: endSeconds,
+                    playbackRate: region.playbackRate
+                )
+            }
+    }
+
+    public var isIdentity: Bool {
+        segments.isEmpty
+    }
+
+    public func outputTime(forSourceTime sourceTimeSeconds: Double) -> Double {
+        guard sourceTimeSeconds.isFinite else { return 0 }
+        let sourceTimeSeconds = clampedSourceTime(sourceTimeSeconds)
+        var outputSeconds = 0.0
+        var sourceCursorSeconds = 0.0
+
+        for segment in segments {
+            if sourceTimeSeconds < segment.startSeconds {
+                outputSeconds += sourceTimeSeconds - sourceCursorSeconds
+                return max(0, outputSeconds)
+            }
+
+            outputSeconds += segment.startSeconds - sourceCursorSeconds
+            if sourceTimeSeconds <= segment.endSeconds {
+                outputSeconds += (sourceTimeSeconds - segment.startSeconds) / segment.playbackRate
+                return max(0, outputSeconds)
+            }
+
+            outputSeconds += (segment.endSeconds - segment.startSeconds) / segment.playbackRate
+            sourceCursorSeconds = segment.endSeconds
+        }
+
+        outputSeconds += sourceTimeSeconds - sourceCursorSeconds
+        return max(0, outputSeconds)
+    }
+
+    public func outputRange(forSourceRange sourceRange: EditTimeRange) -> EditTimeRange {
+        let startSeconds = outputTime(forSourceTime: sourceRange.startSeconds)
+        let endSeconds = outputTime(forSourceTime: sourceRange.endSeconds)
+        return EditTimeRange(startSeconds: startSeconds, endSeconds: max(startSeconds, endSeconds))
+    }
+
+    public func outputDuration(forSourceDuration sourceDurationSeconds: Double) -> Double {
+        outputTime(forSourceTime: sourceDurationSeconds)
+    }
+
+    private func clampedSourceTime(_ seconds: Double) -> Double {
+        let nonNegativeSeconds = max(0, seconds)
+        guard let sourceDurationSeconds else {
+            return nonNegativeSeconds
+        }
+        return min(nonNegativeSeconds, sourceDurationSeconds)
+    }
+}
+
 public struct NormalizedEditRect: Codable, Equatable, Sendable {
     public var x: Double
     public var y: Double
