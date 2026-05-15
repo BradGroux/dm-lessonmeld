@@ -12,13 +12,6 @@ jobs:
   release:
     name: Build release
     runs-on: macos-15
-    env:
-      APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
-      APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-      APPLE_DEVELOPER_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
-      APPLE_NOTARIZATION_APPLE_ID: ${{ secrets.APPLE_NOTARIZATION_APPLE_ID }}
-      APPLE_NOTARIZATION_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
-      APPLE_NOTARIZATION_TEAM_ID: ${{ secrets.APPLE_NOTARIZATION_TEAM_ID }}
 
     steps:
       - name: Checkout
@@ -58,15 +51,22 @@ jobs:
           bash -n scripts/verify-dmg.sh
 
       - name: Validate signing configuration
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_DEVELOPER_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
+          APPLE_NOTARIZATION_KEY_BASE64: ${{ secrets.APPLE_NOTARIZATION_KEY_BASE64 }}
+          APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+          APPLE_NOTARIZATION_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
         run: |
           missing=()
           for secret_name in \
             APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 \
             APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD \
             APPLE_DEVELOPER_IDENTITY \
-            APPLE_NOTARIZATION_APPLE_ID \
-            APPLE_NOTARIZATION_PASSWORD \
-            APPLE_NOTARIZATION_TEAM_ID
+            APPLE_NOTARIZATION_KEY_BASE64 \
+            APPLE_NOTARIZATION_KEY_ID \
+            APPLE_NOTARIZATION_ISSUER_ID
           do
             if [[ -z "${!secret_name:-}" ]]; then
               missing+=("${secret_name}")
@@ -79,6 +79,9 @@ jobs:
           fi
 
       - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
         run: |
           certificate_path="${RUNNER_TEMP}/developer-id.p12"
           keychain_path="${RUNNER_TEMP}/app-signing.keychain-db"
@@ -89,18 +92,26 @@ jobs:
           security create-keychain -p "${keychain_password}" "${keychain_path}"
           security set-keychain-settings -lut 21600 "${keychain_path}"
           security unlock-keychain -p "${keychain_password}" "${keychain_path}"
-          security import "${certificate_path}" -P "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD}" -A -t cert -f pkcs12 -k "${keychain_path}"
+          security import "${certificate_path}" -P "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD}" -t cert -f pkcs12 -k "${keychain_path}" -T /usr/bin/codesign
           security list-keychains -d user -s "${keychain_path}"
           security set-key-partition-list -S apple-tool:,apple: -s -k "${keychain_password}" "${keychain_path}"
           security find-identity -v -p codesigning "${keychain_path}"
+
+      - name: Prepare notarization key
+        env:
+          APPLE_NOTARIZATION_KEY_BASE64: ${{ secrets.APPLE_NOTARIZATION_KEY_BASE64 }}
+        run: |
+          notarization_key_path="${RUNNER_TEMP}/notarization-key.p8"
+          echo "${APPLE_NOTARIZATION_KEY_BASE64}" | base64 --decode > "${notarization_key_path}"
+          chmod 600 "${notarization_key_path}"
+          echo "NOTARIZE_KEY_PATH=${notarization_key_path}" >> "${GITHUB_ENV}"
 
       - name: Package app
         id: package
         env:
           CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
-          NOTARIZE_APPLE_ID: ${{ secrets.APPLE_NOTARIZATION_APPLE_ID }}
-          NOTARIZE_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
-          NOTARIZE_TEAM_ID: ${{ secrets.APPLE_NOTARIZATION_TEAM_ID }}
+          NOTARIZE_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+          NOTARIZE_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
           DM_LESSONMELD_REQUIRE_NOTARIZATION: "1"
         run: |
           package_output="$(scripts/package-release.sh)"

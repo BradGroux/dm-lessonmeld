@@ -18,9 +18,21 @@ plutil -lint Packaging/Info.plist >/dev/null
 NOTARIZE_ARGS=()
 if [[ -n "${NOTARIZE_PROFILE:-}" ]]; then
   NOTARIZE_ARGS=(--keychain-profile "${NOTARIZE_PROFILE}")
+elif [[ -n "${NOTARIZE_KEY_PATH:-}" || -n "${NOTARIZE_KEY_ID:-}" || -n "${NOTARIZE_ISSUER_ID:-}" ]]; then
+  if [[ -z "${NOTARIZE_KEY_PATH:-}" || -z "${NOTARIZE_KEY_ID:-}" || -z "${NOTARIZE_ISSUER_ID:-}" ]]; then
+    echo "error: NOTARIZE_KEY_PATH, NOTARIZE_KEY_ID, and NOTARIZE_ISSUER_ID must be set together." >&2
+    exit 1
+  fi
+
+  NOTARIZE_ARGS=(--key "${NOTARIZE_KEY_PATH}" --key-id "${NOTARIZE_KEY_ID}" --issuer "${NOTARIZE_ISSUER_ID}")
 elif [[ -n "${NOTARIZE_APPLE_ID:-}" || -n "${NOTARIZE_TEAM_ID:-}" || -n "${NOTARIZE_PASSWORD:-}" ]]; then
   if [[ -z "${NOTARIZE_APPLE_ID:-}" || -z "${NOTARIZE_TEAM_ID:-}" || -z "${NOTARIZE_PASSWORD:-}" ]]; then
     echo "error: NOTARIZE_APPLE_ID, NOTARIZE_TEAM_ID, and NOTARIZE_PASSWORD must be set together." >&2
+    exit 1
+  fi
+
+  if [[ "${REQUIRE_NOTARIZATION}" == "1" ]]; then
+    echo "error: release notarization requires NOTARIZE_PROFILE or App Store Connect API key credentials; password arguments are not allowed." >&2
     exit 1
   fi
 

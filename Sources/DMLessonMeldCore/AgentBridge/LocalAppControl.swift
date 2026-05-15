@@ -33,9 +33,13 @@ public enum LocalAppControl {
     }
 
     public static func writeStatus(_ status: LocalAppControlStatus) throws {
-        let outputURL = try statusURL
+        try writeStatus(status, to: try statusURL)
+    }
+
+    public static func writeStatus(_ status: LocalAppControlStatus, to outputURL: URL) throws {
         let data = try DMLessonJSON.encoder().encode(status)
         try data.write(to: outputURL, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: outputURL.path)
     }
 
     public static func readStatus() throws -> LocalAppControlStatus {

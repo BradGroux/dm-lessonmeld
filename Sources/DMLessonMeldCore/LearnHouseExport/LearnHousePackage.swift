@@ -334,6 +334,8 @@ public enum LearnHousePackageError: Error, LocalizedError {
     case missingArchiveTool(String)
     case archiveSourceNotDirectory(String)
     case archiveFailed(status: Int32, output: String)
+    case unsafeDestination(String)
+    case unsafeSource(String)
 
     public var errorDescription: String? {
         switch self {
@@ -345,6 +347,10 @@ public enum LearnHousePackageError: Error, LocalizedError {
             "LearnHouse archive source is not a directory: \(path)."
         case .archiveFailed(let status, let output):
             "LearnHouse archive creation failed with status \(status): \(output)"
+        case .unsafeDestination(let path):
+            "LearnHouse package destination is not safe: \(path)"
+        case .unsafeSource(let path):
+            "LearnHouse package source is not safe: \(path)"
         }
     }
 }
@@ -423,7 +429,8 @@ public struct LearnHousePackageBuilder {
         let packageURL = outputDirectory.appendingPathComponent("\(packageName).learnhouse", isDirectory: true)
         let assetsURL = packageURL.appendingPathComponent("assets", isDirectory: true)
 
-        try FileManager.default.createDirectory(at: assetsURL, withIntermediateDirectories: true)
+        try ensureSafeDirectory(packageURL, within: outputDirectory)
+        try ensureSafeDirectory(assetsURL, within: packageURL)
         try writeProjectManifest(manifest, packageURL: packageURL)
 
         let packagedFiles = try copyPackageFiles(
@@ -499,6 +506,7 @@ public struct LearnHousePackageBuilder {
 
     private func writeProjectManifest(_ manifest: ProjectManifest, packageURL: URL) throws {
         let data = try DMLessonJSON.encoder().encode(manifest)
+        try ensureSafeDirectory(packageURL, within: packageURL.deletingLastPathComponent())
         try data.write(to: packageURL.appendingPathComponent("project-manifest.json"), options: [.atomic])
     }
 
@@ -511,7 +519,14 @@ public struct LearnHousePackageBuilder {
 
             let destinationURL = assetsURL.appendingPathComponent(sourceURL.lastPathComponent)
             if copyAssets {
+                guard !isSymbolicLink(sourceURL) else {
+                    throw LearnHousePackageError.unsafeSource(sourceURL.path)
+                }
+                try ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: assetsURL.deletingLastPathComponent())
                 if FileManager.default.fileExists(atPath: destinationURL.path) {
+                    guard !isSymbolicLink(destinationURL) else {
+                        throw LearnHousePackageError.unsafeDestination(destinationURL.path)
+                    }
                     try FileManager.default.removeItem(at: destinationURL)
                 }
                 try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
@@ -571,6 +586,7 @@ public struct LearnHousePackageBuilder {
             return "\(sha256)  \(file.relativePath)"
         }.joined(separator: "\n")
         let relativePath = "assets/checksums.sha256"
+        try ensureSafeDirectory(packageURL.appendingPathComponent("assets", isDirectory: true), within: packageURL)
         try "\(lines)\n".write(
             to: packageURL.appendingPathComponent(relativePath),
             atomically: true,
@@ -596,8 +612,8 @@ public struct LearnHousePackageBuilder {
         let activityURL = chapterURL.appendingPathComponent("activities/\(activityUUID)", isDirectory: true)
         let videoURL = activityURL.appendingPathComponent("files/video", isDirectory: true)
 
-        try FileManager.default.createDirectory(at: thumbnailURL, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: videoURL, withIntermediateDirectories: true)
+        try ensureSafeDirectory(thumbnailURL, within: packageURL)
+        try ensureSafeDirectory(videoURL, within: packageURL)
 
         let nativeManifest: [String: String] = [
             "format": "learnhouse-course-export",
@@ -636,7 +652,11 @@ public struct LearnHousePackageBuilder {
         if let video = packagedFiles.first(where: { $0.role == .screenVideo }) {
             let source = packageURL.appendingPathComponent(video.relativePath)
             let destination = videoURL.appendingPathComponent(source.lastPathComponent)
+            try ensureSafeDirectory(destination.deletingLastPathComponent(), within: packageURL)
             if FileManager.default.fileExists(atPath: destination.path) {
+                guard !isSymbolicLink(destination) else {
+                    throw LearnHousePackageError.unsafeDestination(destination.path)
+                }
                 try FileManager.default.removeItem(at: destination)
             }
             try FileManager.default.copyItem(at: source, to: destination)
@@ -645,7 +665,11 @@ public struct LearnHousePackageBuilder {
         if let thumbnail = packagedFiles.first(where: { $0.role == .thumbnail }) {
             let source = packageURL.appendingPathComponent(thumbnail.relativePath)
             let destination = thumbnailURL.appendingPathComponent(source.lastPathComponent)
+            try ensureSafeDirectory(destination.deletingLastPathComponent(), within: packageURL)
             if FileManager.default.fileExists(atPath: destination.path) {
+                guard !isSymbolicLink(destination) else {
+                    throw LearnHousePackageError.unsafeDestination(destination.path)
+                }
                 try FileManager.default.removeItem(at: destination)
             }
             try FileManager.default.copyItem(at: source, to: destination)
@@ -654,7 +678,42 @@ public struct LearnHousePackageBuilder {
 
     private func writeJSONObject<T: Encodable>(_ object: T, to url: URL) throws {
         let data = try DMLessonJSON.encoder().encode(object)
+        try ensureSafeDirectory(url.deletingLastPathComponent(), within: url.deletingLastPathComponent().deletingLastPathComponent())
         try data.write(to: url, options: [.atomic])
+    }
+
+    private func isSymbolicLink(_ url: URL) -> Bool {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
+    }
+
+    private func ensureSafeDirectory(_ directoryURL: URL, within rootURL: URL) throws {
+        let root = rootURL.standardizedFileURL.resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var current = root
+        let rootPath = root.standardizedFileURL.path
+        let targetPath = directoryURL.standardizedFileURL.path
+        guard targetPath == rootPath || targetPath.hasPrefix(rootPath + "/") else {
+            throw LearnHousePackageError.unsafeDestination(directoryURL.path)
+        }
+        let relativePath = targetPath == rootPath ? "" : String(targetPath.dropFirst(rootPath.count + 1))
+        for component in relativePath.split(separator: "/").map(String.init) where !component.isEmpty {
+            current.appendPathComponent(component, isDirectory: true)
+            if isSymbolicLink(current) {
+                throw LearnHousePackageError.unsafeDestination(current.path)
+            }
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: current.path, isDirectory: &isDirectory) {
+                guard isDirectory.boolValue else {
+                    throw LearnHousePackageError.unsafeDestination(current.path)
+                }
+                let resolved = current.resolvingSymlinksInPath()
+                guard resolved.path == root.path || resolved.path.hasPrefix(root.path + "/") else {
+                    throw LearnHousePackageError.unsafeDestination(current.path)
+                }
+            } else {
+                try FileManager.default.createDirectory(at: current, withIntermediateDirectories: false)
+            }
+        }
     }
 
     private func stableID(prefix: String, value: String) -> String {

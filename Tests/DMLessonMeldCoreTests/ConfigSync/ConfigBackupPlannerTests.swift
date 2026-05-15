@@ -23,6 +23,26 @@ struct ConfigBackupPlannerTests {
         #expect(plan.excludedPaths.contains { $0.path == "profiles/github-token.json" })
     }
 
+    @Test("Excludes common credential file names from config backups")
+    func excludesCommonCredentialNames() throws {
+        let temp = try TemporaryDirectory()
+        try write("{}", to: temp.url.appendingPathComponent("profiles/passwords.yaml"))
+        try write("{}", to: temp.url.appendingPathComponent("profiles/api-key.toml"))
+        try write("{}", to: temp.url.appendingPathComponent("profiles/private_key.json"))
+        try write("{}", to: temp.url.appendingPathComponent("profiles/oauth.json"))
+        try write("{}", to: temp.url.appendingPathComponent("profiles/session.json"))
+        try write("{}", to: temp.url.appendingPathComponent("templates/workshop.json"))
+
+        let plan = try ConfigBackupPlanner().plan(rootURL: temp.url)
+
+        #expect(plan.includePaths.contains("templates/workshop.json"))
+        #expect(!plan.includePaths.contains("profiles/passwords.yaml"))
+        #expect(!plan.includePaths.contains("profiles/api-key.toml"))
+        #expect(!plan.includePaths.contains("profiles/private_key.json"))
+        #expect(!plan.includePaths.contains("profiles/oauth.json"))
+        #expect(!plan.includePaths.contains("profiles/session.json"))
+    }
+
     @Test("Git backup initializes a local repository with safe ignore rules")
     func initializesLocalGitBackupRepository() throws {
         try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))

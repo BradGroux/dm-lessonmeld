@@ -119,6 +119,7 @@ public struct LocalSharePackageResult: Codable, Equatable, Sendable {
 
 public enum ShareExportError: Error, Equatable, LocalizedError, Sendable {
     case missingProjectAsset(String)
+    case unsafeSource(String)
     case unsafeDestination(String)
     case finalVideoMissing(String)
 
@@ -126,6 +127,8 @@ public enum ShareExportError: Error, Equatable, LocalizedError, Sendable {
         switch self {
         case .missingProjectAsset(let path):
             "Project asset is missing: \(path)"
+        case .unsafeSource(let path):
+            "Export source is not safe: \(path)"
         case .unsafeDestination(let path):
             "Export destination is not safe: \(path)"
         case .finalVideoMissing(let path):
@@ -140,7 +143,7 @@ public struct RawAssetExtractor {
     public func extract(projectURL: URL, outputDirectory: URL) throws -> RawAssetExtractionResult {
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
         let rootURL = outputDirectory.appendingPathComponent("\(Self.slug(manifest.metadata.lessonTitle))-raw-assets", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try ShareExportUtilities.ensureSafeDirectory(rootURL, within: outputDirectory, error: ShareExportError.unsafeDestination)
         let files = try Self.copyProjectFiles(
             manifest.media.allFiles,
             projectURL: projectURL,
@@ -176,9 +179,10 @@ public struct LocalSharePackageBuilder {
         let projectURLInPackage = packageURL.appendingPathComponent("project", isDirectory: true)
         let exportsURL = packageURL.appendingPathComponent("exports", isDirectory: true)
 
-        try FileManager.default.createDirectory(at: rawAssetsURL, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: projectURLInPackage, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: exportsURL, withIntermediateDirectories: true)
+        try ShareExportUtilities.ensureSafeDirectory(packageURL, within: outputDirectory, error: ShareExportError.unsafeDestination)
+        try ShareExportUtilities.ensureSafeDirectory(rawAssetsURL, within: packageURL, error: ShareExportError.unsafeDestination)
+        try ShareExportUtilities.ensureSafeDirectory(projectURLInPackage, within: packageURL, error: ShareExportError.unsafeDestination)
+        try ShareExportUtilities.ensureSafeDirectory(exportsURL, within: packageURL, error: ShareExportError.unsafeDestination)
 
         var files = try Self.copyProjectFiles(
             manifest.media.allFiles,
@@ -201,10 +205,14 @@ public struct LocalSharePackageBuilder {
             guard FileManager.default.fileExists(atPath: finalVideoURL.path) else {
                 throw ShareExportError.finalVideoMissing(finalVideoURL.path)
             }
+            guard !ShareExportUtilities.isSymbolicLink(finalVideoURL) else {
+                throw ShareExportError.unsafeSource(finalVideoURL.path)
+            }
             let relativePath = "exports/\(finalVideoURL.lastPathComponent)"
             files.append(try Self.copyFile(
                 sourceURL: finalVideoURL,
                 destinationURL: packageURL.appendingPathComponent(relativePath),
+                destinationRoot: packageURL,
                 role: .screenVideo,
                 relativePath: relativePath,
                 sourceRelativePath: nil
@@ -299,6 +307,7 @@ extension LocalSharePackageBuilder {
             return try ShareExportUtilities.copyFile(
                 sourceURL: sourceURL,
                 destinationURL: packageURL.appendingPathComponent(relativePath),
+                destinationRoot: packageURL,
                 role: nil,
                 relativePath: relativePath,
                 sourceRelativePath: fileName
@@ -309,6 +318,7 @@ extension LocalSharePackageBuilder {
     fileprivate static func copyFile(
         sourceURL: URL,
         destinationURL: URL,
+        destinationRoot: URL,
         role: ProjectFileRole?,
         relativePath: String,
         sourceRelativePath: String?
@@ -316,6 +326,7 @@ extension LocalSharePackageBuilder {
         try ShareExportUtilities.copyFile(
             sourceURL: sourceURL,
             destinationURL: destinationURL,
+            destinationRoot: destinationRoot,
             role: role,
             relativePath: relativePath,
             sourceRelativePath: sourceRelativePath
@@ -329,7 +340,7 @@ extension LocalSharePackageBuilder {
         rootURL: URL
     ) throws -> SharePackageFile {
         let destinationURL = rootURL.appendingPathComponent(relativePath)
-        try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ShareExportUtilities.ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: rootURL, error: ShareExportError.unsafeDestination)
         let data = try DMLessonJSON.encoder().encode(value)
         try data.write(to: destinationURL, options: [.atomic])
         return SharePackageFile(
@@ -380,6 +391,7 @@ private enum ShareExportUtilities {
             return try copyFile(
                 sourceURL: sourceURL,
                 destinationURL: destinationURL,
+                destinationRoot: destinationRoot,
                 role: file.role,
                 relativePath: relativePath,
                 sourceRelativePath: file.relativePath
@@ -390,12 +402,19 @@ private enum ShareExportUtilities {
     static func copyFile(
         sourceURL: URL,
         destinationURL: URL,
+        destinationRoot: URL,
         role: ProjectFileRole?,
         relativePath: String,
         sourceRelativePath: String?
     ) throws -> SharePackageFile {
-        try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard !isSymbolicLink(sourceURL) else {
+            throw ShareExportError.unsafeSource(sourceURL.path)
+        }
+        try ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: destinationRoot, error: ShareExportError.unsafeDestination)
         if FileManager.default.fileExists(atPath: destinationURL.path) {
+            guard !isSymbolicLink(destinationURL) else {
+                throw ShareExportError.unsafeDestination(destinationURL.path)
+            }
             try FileManager.default.removeItem(at: destinationURL)
         }
         try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
@@ -415,7 +434,7 @@ private enum ShareExportUtilities {
             .map { "\($0.sha256)  \($0.relativePath)" }
             .joined(separator: "\n")
         let checksumURL = rootURL.appendingPathComponent(relativePath)
-        try FileManager.default.createDirectory(at: checksumURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ensureSafeDirectory(checksumURL.deletingLastPathComponent(), within: rootURL, error: ShareExportError.unsafeDestination)
         try "\(lines)\n".write(to: checksumURL, atomically: true, encoding: .utf8)
         return relativePath
     }
@@ -429,5 +448,43 @@ private enum ShareExportUtilities {
     static func byteCount(for url: URL) throws -> Int64 {
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         return Int64(values.fileSize ?? 0)
+    }
+
+    static func isSymbolicLink(_ url: URL) -> Bool {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
+    }
+
+    static func ensureSafeDirectory<E: Error>(
+        _ directoryURL: URL,
+        within rootURL: URL,
+        error makeError: (String) -> E
+    ) throws {
+        let root = rootURL.standardizedFileURL.resolvingSymlinksInPath()
+        var current = root
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let rootPath = root.standardizedFileURL.path
+        let targetPath = directoryURL.standardizedFileURL.path
+        guard targetPath == rootPath || targetPath.hasPrefix(rootPath + "/") else {
+            throw makeError(directoryURL.path)
+        }
+        let relativePath = targetPath == rootPath ? "" : String(targetPath.dropFirst(rootPath.count + 1))
+        for component in relativePath.split(separator: "/").map(String.init) where !component.isEmpty {
+            current.appendPathComponent(component, isDirectory: true)
+            if isSymbolicLink(current) {
+                throw makeError(current.path)
+            }
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: current.path, isDirectory: &isDirectory) {
+                guard isDirectory.boolValue else {
+                    throw makeError(current.path)
+                }
+                let resolved = current.resolvingSymlinksInPath()
+                guard resolved.path == root.path || resolved.path.hasPrefix(root.path + "/") else {
+                    throw makeError(current.path)
+                }
+            } else {
+                try FileManager.default.createDirectory(at: current, withIntermediateDirectories: false)
+            }
+        }
     }
 }

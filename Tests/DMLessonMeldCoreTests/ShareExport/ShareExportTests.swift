@@ -50,6 +50,41 @@ struct ShareExportTests {
         #expect(FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("checksums.sha256").path))
     }
 
+    @Test("Rejects share package symlink destinations")
+    func rejectsSharePackageSymlinkDestinations() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = try makeProject(in: temp.url)
+        let outputURL = temp.url.appendingPathComponent("shares", isDirectory: true)
+        let outsideURL = temp.url.appendingPathComponent("outside", isDirectory: true)
+        let packageURL = outputURL.appendingPathComponent("share-lesson.lessonshare", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outsideURL, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: packageURL, withDestinationURL: outsideURL)
+
+        #expect(throws: ShareExportError.self) {
+            try LocalSharePackageBuilder().buildPackage(projectURL: projectURL, outputDirectory: outputURL)
+        }
+    }
+
+    @Test("Rejects symlinked project sidecars in share packages")
+    func rejectsSymlinkedProjectSidecars() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = try makeProject(in: temp.url)
+        let outsideURL = temp.url.appendingPathComponent("outside-edits.json")
+        try Data("{}".utf8).write(to: outsideURL)
+        try FileManager.default.createSymbolicLink(
+            at: projectURL.appendingPathComponent(EditDecisionListFile.defaultFileName),
+            withDestinationURL: outsideURL
+        )
+
+        #expect(throws: ShareExportError.self) {
+            try LocalSharePackageBuilder().buildPackage(
+                projectURL: projectURL,
+                outputDirectory: temp.url.appendingPathComponent("shares", isDirectory: true)
+            )
+        }
+    }
+
     private func makeProject(in rootURL: URL) throws -> URL {
         let projectURL = rootURL.appendingPathComponent("Share Lesson.dmlm", isDirectory: true)
         try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("media", isDirectory: true), withIntermediateDirectories: true)

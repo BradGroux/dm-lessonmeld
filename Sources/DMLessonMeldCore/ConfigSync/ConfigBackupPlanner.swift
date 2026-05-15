@@ -107,7 +107,23 @@ public struct ConfigBackupPlanner: Sendable {
             return "Binary media files are not part of config backup."
         }
 
-        if lowered.contains("token") || lowered.contains("credential") || lowered.contains("secret") {
+        let sensitiveTerms = [
+            "token",
+            "credential",
+            "secret",
+            "password",
+            "passwd",
+            "api-key",
+            "apikey",
+            "api_key",
+            "private-key",
+            "private_key",
+            "oauth",
+            "session",
+            "cookie",
+            "auth"
+        ]
+        if sensitiveTerms.contains(where: { lowered.contains($0) }) {
             return "Potential credential material must stay out of Git sync."
         }
 
