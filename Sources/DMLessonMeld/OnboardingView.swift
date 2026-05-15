@@ -1,7 +1,5 @@
-import ApplicationServices
 import AppKit
 import DMLessonMeldCore
-import IOKit.hid
 import SwiftUI
 
 struct OnboardingView: View {
@@ -13,6 +11,20 @@ struct OnboardingView: View {
     @State private var accessibilityGranted = AccessibilityPermission.isGranted
     @State private var inputMonitoringGranted = InputMonitoringPermission.isGranted
     var onOpenSettings: () -> Void = {}
+
+    private var preflight: PermissionPreflightSnapshot {
+        PermissionPreflight.snapshot(
+            screenGranted: screenGranted,
+            microphoneGranted: microphoneGranted,
+            cameraGranted: cameraGranted,
+            accessibilityGranted: accessibilityGranted,
+            inputMonitoringGranted: inputMonitoringGranted,
+            captureMicrophone: preferences.snapshot.capture.captureMicrophone,
+            captureWebcam: preferences.snapshot.capture.captureWebcam,
+            captureInteractionMetadata: preferences.snapshot.capture.captureInteractionMetadata,
+            includeAutomationPermissions: true
+        )
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -40,6 +52,9 @@ struct OnboardingView: View {
         }
         .frame(minWidth: 760, idealWidth: 980, minHeight: 640, idealHeight: 760)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refresh()
+        }
     }
 
     private var header: some View {
@@ -61,68 +76,16 @@ struct OnboardingView: View {
             Text("Capture Permissions")
                 .font(.headline)
 
-            PermissionSetupRow(
-                title: "Screen Recording",
-                detail: "Required for screen, window, and region recordings.",
-                granted: screenGranted,
-                actionTitle: screenGranted ? "Open Settings" : "Grant Access"
-            ) {
-                _ = ScreenCapturePermission.requestAccess()
-                open(ScreenCapturePermission.privacySettingsURL)
-                refresh()
-            }
-
-            PermissionSetupRow(
-                title: "Microphone",
-                detail: "Used for instructor voice tracks and local captions/transcripts.",
-                granted: microphoneGranted,
-                actionTitle: microphoneGranted ? "Open Settings" : "Grant Access"
-            ) {
-                Task {
-                    _ = await MicrophonePermission.requestAccess()
-                    await MainActor.run {
-                        open(MicrophonePermission.privacySettingsURL)
-                        refresh()
-                    }
+            ForEach(preflight.items) { item in
+                PermissionSetupRow(item: item, actionTitle: item.isGranted ? "Open Settings" : "Grant Access") {
+                    request(item.id)
                 }
             }
 
-            PermissionSetupRow(
-                title: "Camera",
-                detail: "Used for webcam picture-in-picture and talking-head segments.",
-                granted: cameraGranted,
-                actionTitle: cameraGranted ? "Open Settings" : "Grant Access"
-            ) {
-                Task {
-                    _ = await CameraPermission.requestAccess()
-                    await MainActor.run {
-                        open(CameraPermission.privacySettingsURL)
-                        refresh()
-                    }
-                }
-            }
-
-            PermissionSetupRow(
-                title: "Accessibility",
-                detail: "Used for reliable global shortcuts, overlay control, and future annotation automation.",
-                granted: accessibilityGranted,
-                actionTitle: accessibilityGranted ? "Open Settings" : "Grant Access"
-            ) {
-                AccessibilityPermission.requestAccess()
-                open(AccessibilityPermission.privacySettingsURL)
-                refresh()
-            }
-
-            PermissionSetupRow(
-                title: "Input Monitoring",
-                detail: "Used for local click, shortcut, and teaching interaction metadata.",
-                granted: inputMonitoringGranted,
-                actionTitle: inputMonitoringGranted ? "Open Settings" : "Grant Access"
-            ) {
-                _ = InputMonitoringPermission.requestAccess()
-                open(InputMonitoringPermission.privacySettingsURL)
-                refresh()
-            }
+            Text(preflight.summary)
+                .font(.caption)
+                .foregroundStyle(preflight.canContinue ? Color.secondary : Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -236,6 +199,39 @@ struct OnboardingView: View {
         NSWorkspace.shared.open(url)
     }
 
+    private func request(_ permission: AppPermissionID) {
+        switch permission {
+        case .screen:
+            _ = ScreenCapturePermission.requestAccess()
+            open(permission.settingsURL)
+            refresh()
+        case .microphone:
+            Task {
+                _ = await MicrophonePermission.requestAccess()
+                await MainActor.run {
+                    open(permission.settingsURL)
+                    refresh()
+                }
+            }
+        case .camera:
+            Task {
+                _ = await CameraPermission.requestAccess()
+                await MainActor.run {
+                    open(permission.settingsURL)
+                    refresh()
+                }
+            }
+        case .accessibility:
+            AccessibilityPermission.requestAccess()
+            open(permission.settingsURL)
+            refresh()
+        case .inputMonitoring:
+            _ = InputMonitoringPermission.requestAccess()
+            open(permission.settingsURL)
+            refresh()
+        }
+    }
+
     private func binding<Value>(_ keyPath: WritableKeyPath<LessonMeldPreferences, Value>) -> Binding<Value> {
         Binding {
             preferences.snapshot[keyPath: keyPath]
@@ -253,35 +249,8 @@ struct OnboardingView: View {
     }
 }
 
-private enum AccessibilityPermission {
-    static var isGranted: Bool {
-        AXIsProcessTrusted()
-    }
-
-    static let privacySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-
-    static func requestAccess() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-    }
-}
-
-private enum InputMonitoringPermission {
-    static var isGranted: Bool {
-        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
-    }
-
-    static let privacySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
-
-    static func requestAccess() -> Bool {
-        IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
-    }
-}
-
 private struct PermissionSetupRow: View {
-    var title: String
-    var detail: String
-    var granted: Bool
+    var item: PermissionPreflightItem
     var actionTitle: String
     var action: () -> Void
 
@@ -311,29 +280,34 @@ private struct PermissionSetupRow: View {
     }
 
     private var statusIcon: some View {
-        Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+        Image(systemName: item.isGranted ? "checkmark.circle.fill" : item.id.systemImage)
             .font(.system(size: 24, weight: .semibold))
-            .foregroundStyle(granted ? .green : .orange)
+            .foregroundStyle(item.isGranted ? Color.green : (item.isBlocking ? Color.orange : Color.secondary))
             .frame(width: 30)
     }
 
     private var rowText: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.headline)
-            Text(detail)
+            HStack(spacing: 8) {
+                Text(item.id.title)
+                    .font(.headline)
+                Text(item.need.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(item.need == .required ? Color.orange : Color.secondary)
+            }
+            Text(item.detail)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var statusBadge: some View {
-        Text(granted ? "Granted" : "Needed")
+        Text(item.statusTitle)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(granted ? .green : .orange)
+            .foregroundStyle(item.isGranted ? Color.green : (item.isBlocking ? Color.orange : Color.secondary))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background((granted ? Color.green : Color.orange).opacity(0.12), in: Capsule())
+            .background((item.isGranted ? Color.green : (item.isBlocking ? Color.orange : Color.secondary)).opacity(0.12), in: Capsule())
     }
 
     private var actionButton: some View {

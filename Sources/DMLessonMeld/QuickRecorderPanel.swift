@@ -376,17 +376,31 @@ private struct QuickRecordingControlBar: View {
     }
 
     @ViewBuilder private var permissionActions: some View {
-        if !model.screenGranted {
-            PermissionButton(title: "Screen") {
-                model.requestPermission()
+        let preflight = model.permissionPreflight
+        if let blocker = preflight.blockingItems.first {
+            PermissionButton(title: blocker.id.shortTitle) {
+                model.requestPermission(blocker.id)
             }
-        } else if model.captureMicrophone, !model.microphoneGranted {
-            PermissionButton(title: "Mic") {
-                model.requestMicrophonePermission()
+            if blocker.id == .microphone {
+                ControlBarButton(icon: "mic.slash", title: "No Mic") {
+                    model.captureMicrophone = false
+                    model.message = model.permissionPreflight.summary
+                }
+            } else if blocker.id == .camera {
+                ControlBarButton(icon: "video.slash", title: "No Camera") {
+                    model.captureWebcam = false
+                    model.message = model.permissionPreflight.summary
+                }
             }
-        } else if model.captureWebcam, !model.cameraGranted {
-            PermissionButton(title: "Camera") {
-                model.requestCameraPermission()
+        } else if let optional = preflight.optionalMissingItems.first {
+            PermissionButton(title: optional.id.shortTitle) {
+                model.requestPermission(optional.id)
+            }
+            if optional.id == .inputMonitoring {
+                ControlBarButton(icon: "keyboard.badge.ellipsis", title: "No Metadata") {
+                    model.captureInteractionMetadata = false
+                    model.message = model.permissionPreflight.summary
+                }
             }
         }
     }
@@ -1561,7 +1575,7 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     var canStart: Bool {
-        !isRecording && !isStopping
+        !isRecording && !isStopping && permissionPreflight.canContinue
     }
 
     var controlBarLayoutSignature: String {
@@ -1581,16 +1595,18 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     var startHelpText: String {
-        if !screenGranted {
-            return "Grant Screen Recording permission first."
+        if let blocker = permissionPreflight.blockingItems.first {
+            return "Grant \(blocker.id.title) permission first, or change the capture options."
         }
-        if captureMicrophone, !microphoneGranted {
-            return "Grant Microphone permission first."
-        }
-        if captureWebcam, !cameraGranted {
-            return "Grant Camera permission first."
-        }
-        return "Start recording with the selected capture inputs."
+        return permissionPreflight.summary
+    }
+
+    var permissionPreflight: PermissionPreflightSnapshot {
+        PermissionPreflight.recorder(
+            captureMicrophone: captureMicrophone,
+            captureWebcam: captureWebcam,
+            captureInteractionMetadata: captureInteractionMetadata
+        )
     }
 
     func applyPreferences(_ preferences: LessonMeldPreferences) {
@@ -1767,15 +1783,39 @@ final class QuickRecorderModel: ObservableObject {
             message = "Microphone permission is granted."
         } else if !wasCameraGranted, cameraGranted {
             message = "Camera permission is granted."
+        } else {
+            message = permissionPreflight.summary
         }
     }
 
     func requestPermission() {
-        _ = ScreenCapturePermission.requestAccess()
-        refreshPermissions()
-        message = screenGranted
-            ? "Screen Recording permission is granted."
-            : "macOS may require reopening the app after granting Screen Recording permission."
+        requestPermission(.screen)
+    }
+
+    func requestPermission(_ permission: AppPermissionID) {
+        switch permission {
+        case .screen:
+            _ = ScreenCapturePermission.requestAccess()
+            NSWorkspace.shared.open(permission.settingsURL)
+            refreshPermissions(updateMessage: true)
+            message = screenGranted
+                ? "Screen Recording permission is granted."
+                : "macOS may require reopening the app after granting Screen Recording permission."
+        case .microphone:
+            requestMicrophonePermission()
+        case .camera:
+            requestCameraPermission()
+        case .accessibility:
+            AccessibilityPermission.requestAccess()
+            NSWorkspace.shared.open(permission.settingsURL)
+            refreshPermissions(updateMessage: true)
+            message = "Accessibility permission is optional for the selected recording flow."
+        case .inputMonitoring:
+            _ = InputMonitoringPermission.requestAccess()
+            NSWorkspace.shared.open(permission.settingsURL)
+            refreshPermissions(updateMessage: true)
+            message = "Input Monitoring is optional. Continue without metadata if macOS has not granted it yet."
+        }
     }
 
     func requestMicrophonePermission() {
@@ -1805,16 +1845,8 @@ final class QuickRecorderModel: ObservableObject {
     func startRecording(_ preferences: LessonMeldPreferences) {
         guard !isRecording, !isStopping else { return }
         refreshPermissions()
-        guard screenGranted else {
-            requestPermission()
-            return
-        }
-        if captureMicrophone, !microphoneGranted {
-            requestMicrophonePermission()
-            return
-        }
-        if captureWebcam, !cameraGranted {
-            requestCameraPermission()
+        if let blocker = permissionPreflight.blockingItems.first {
+            requestPermission(blocker.id)
             return
         }
 
