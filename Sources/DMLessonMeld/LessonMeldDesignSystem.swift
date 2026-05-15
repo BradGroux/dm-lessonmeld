@@ -139,10 +139,20 @@ struct LessonMeldSidebarItem: View {
     var title: String
     var systemImage: String
     var isSelected = false
+    var isDirty = false
 
     var body: some View {
-        Label(title, systemImage: systemImage)
-            .font(.body.weight(isSelected ? .semibold : .regular))
+        HStack(spacing: 8) {
+            Label(title, systemImage: systemImage)
+                .font(.body.weight(isSelected ? .semibold : .regular))
+            Spacer(minLength: 0)
+            if isDirty {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 7, height: 7)
+                    .accessibilityLabel("Unsaved changes")
+            }
+        }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
