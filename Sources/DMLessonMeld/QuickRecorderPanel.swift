@@ -103,6 +103,7 @@ private struct QuickRecordingControlBar: View {
                 setupControls
             }
         }
+        .frame(minWidth: ControlBarPalette.stableContentWidth, alignment: .center)
         .padding(ControlBarPalette.outerPadding)
         .background(ControlBarPalette.background)
         .clipShape(RoundedRectangle(cornerRadius: ControlBarPalette.barCornerRadius))
@@ -301,6 +302,13 @@ private struct QuickRecordingControlBar: View {
                 .font(.system(.body, design: .monospaced).weight(.semibold))
                 .foregroundStyle(ControlBarPalette.primaryText)
                 .frame(minWidth: 68, alignment: .leading)
+
+            if model.isStopping {
+                Text(model.formattedStoppingElapsed)
+                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(ControlBarPalette.secondaryText)
+                    .frame(width: 52, alignment: .leading)
+            }
 
             HStack(spacing: 8) {
                 Image(systemName: model.recordTarget.iconName)
@@ -581,6 +589,7 @@ private struct ControlBarDivider: View {
 }
 
 private enum ControlBarPalette {
+    static let stableContentWidth: CGFloat = 624
     static let itemWidth: CGFloat = 38
     static let itemHeight: CGFloat = 38
     static let itemGap: CGFloat = 2
@@ -1467,6 +1476,7 @@ final class QuickRecorderModel: ObservableObject {
     @Published var recordRegionHeight = "720"
     @Published var recordWindowID = ""
     @Published var elapsedSeconds: TimeInterval = 0
+    @Published var stoppingElapsedSeconds: TimeInterval = 0
     @Published private(set) var recordingMarkerCount = 0
     @Published var completion: QuickRecordingCompletion?
     @Published var isPackagingCompletion = false
@@ -1485,11 +1495,17 @@ final class QuickRecorderModel: ObservableObject {
     private var restartAfterStop = false
     private var lastStartPreferences: LessonMeldPreferences?
     private var lastPublishedStatusSecond = -1
+    private var activeRecordingID: UUID?
+    private var stopTimeoutTask: Task<Void, Never>?
     var openProjectHandler: ((URL) -> Void)?
     var annotationOverlayHandler: ((LessonMeldPreferences) -> Void)?
 
     var formattedElapsed: String {
         Self.formatClock(elapsedSeconds)
+    }
+
+    var formattedStoppingElapsed: String {
+        Self.formatClock(stoppingElapsedSeconds)
     }
 
     var formattedMaxDuration: String {
@@ -1827,6 +1843,10 @@ final class QuickRecorderModel: ObservableObject {
                 microphoneRecorder: microphoneRecorder,
                 cameraRecorder: cameraRecorder
             )
+            let recordingID = UUID()
+            activeRecordingID = recordingID
+            stopTimeoutTask?.cancel()
+            stopTimeoutTask = nil
             lastStartPreferences = preferences
             deleteAfterStop = false
             restartAfterStop = false
@@ -1907,6 +1927,7 @@ final class QuickRecorderModel: ObservableObject {
                     }
                     await MainActor.run {
                         self.finishRecording(
+                            recordingID: recordingID,
                             projectURL: result.projectURL,
                             screenSize: result.screen.screenSize,
                             recordTarget: recordTarget,
@@ -1921,7 +1942,7 @@ final class QuickRecorderModel: ObservableObject {
                         }
                     }
                     await MainActor.run {
-                        self.failRecording(error)
+                        self.failRecording(error, recordingID: recordingID)
                     }
                 }
             }
@@ -1961,6 +1982,7 @@ final class QuickRecorderModel: ObservableObject {
         applyLifecycleSnapshot(lifecycle.requestStop())
         message = "Stopping recording and writing the project bundle..."
         publishStatus()
+        beginStopTimeout()
         recordingRuntime.requestStop()
     }
 
@@ -2108,11 +2130,13 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     private func finishRecording(
+        recordingID: UUID,
         projectURL: URL,
         screenSize: CGSize,
         recordTarget: QuickRecordTarget,
         warnings: [String]
     ) {
+        guard activeRecordingID == recordingID else { return }
         applyLifecycleSnapshot(lifecycle.finish())
         let shouldDelete = deleteAfterStop
         let shouldRestart = restartAfterStop
@@ -2145,7 +2169,10 @@ final class QuickRecorderModel: ObservableObject {
         publishStatus()
     }
 
-    private func failRecording(_ error: Error) {
+    private func failRecording(_ error: Error, recordingID: UUID? = nil) {
+        if let recordingID, activeRecordingID != recordingID {
+            return
+        }
         applyLifecycleSnapshot(lifecycle.fail())
         cleanupRecordingState()
         if let quickRecorderError = error as? QuickRecorderError,
@@ -2158,16 +2185,41 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     private func cleanupRecordingState() {
+        stopTimeoutTask?.cancel()
+        stopTimeoutTask = nil
+        activeRecordingID = nil
         applyLifecycleSnapshot(lifecycle.reset())
         recordingRuntime.clear()
         cameraPreviewSession = nil
         closeFloatingWebcamPreviewWindow()
         recordingMarkers = []
         recordingMarkerCount = 0
+        stoppingElapsedSeconds = 0
         deleteAfterStop = false
         restartAfterStop = false
         stopElapsedTimer()
         publishStatus()
+    }
+
+    private func beginStopTimeout() {
+        stopTimeoutTask?.cancel()
+        let recordingID = activeRecordingID
+        stopTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.stopTimeoutSeconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.handleStopTimeout(recordingID: recordingID)
+            }
+        }
+    }
+
+    private func handleStopTimeout(recordingID: UUID?) {
+        guard isStopping else { return }
+        if let recordingID, activeRecordingID != recordingID {
+            return
+        }
+        recordingRuntime.forceCancel()
+        failRecording(QuickRecorderError.stopTimedOut, recordingID: recordingID)
     }
 
     private func persistMarkers(_ markers: [ProjectTimelineMarker], to projectURL: URL) {
@@ -2194,6 +2246,7 @@ final class QuickRecorderModel: ObservableObject {
 
     private func updateElapsed() {
         elapsedSeconds = lifecycle.elapsed()
+        stoppingElapsedSeconds = lifecycle.stoppingElapsed()
         let wholeSecond = Int(elapsedSeconds.rounded(.down))
         if wholeSecond != lastPublishedStatusSecond {
             lastPublishedStatusSecond = wholeSecond
@@ -2206,6 +2259,7 @@ final class QuickRecorderModel: ObservableObject {
         isPaused = snapshot.isPaused
         isStopping = snapshot.isStopping
         elapsedSeconds = snapshot.elapsedSeconds
+        stoppingElapsedSeconds = lifecycle.stoppingElapsed()
     }
 
     func publishStatus() {
@@ -2848,6 +2902,7 @@ final class QuickRecorderModel: ObservableObject {
 
     private static let readyMessage = "Open the recording controls to choose screen, window, region, microphone, webcam, and system audio before recording."
     private static let manualStopDurationSeconds = 12 * 60 * 60
+    private static let stopTimeoutSeconds: TimeInterval = 12
 }
 
 @MainActor
@@ -2890,6 +2945,10 @@ private final class QuickRecordingRuntime {
 
     func requestStop() {
         taskRegistry.requestStop()
+    }
+
+    func forceCancel() {
+        taskRegistry.forceCancel()
     }
 
     func clear() {
@@ -2947,6 +3006,15 @@ private final class QuickRecordingTaskRegistry: @unchecked Sendable {
             snapshot.recordingTask?.cancel()
             snapshot.cameraRecorder?.stopRecording()
         }
+    }
+
+    func forceCancel() {
+        let snapshot = snapshot()
+        snapshot.screenTask?.cancel()
+        snapshot.microphoneTask?.cancel()
+        snapshot.webcamTask?.cancel()
+        snapshot.recordingTask?.cancel()
+        snapshot.cameraRecorder?.stopRecording()
     }
 
     func clear() {
@@ -3086,8 +3154,11 @@ private final class QuickRecordingControlBarWindow: NSPanel, NSWindowDelegate {
     private static func clampedSize(_ size: NSSize) -> NSSize {
         guard let screen = NSScreen.main else { return size }
         let frame = screen.visibleFrame
+        let stableWidth = ControlBarPalette.stableContentWidth + ControlBarPalette.outerPadding * 2
+        let maxWidth = max(frame.width - 48, 240)
+        let minWidth = min(stableWidth, maxWidth)
         return NSSize(
-            width: min(max(size.width, 240), max(frame.width - 48, 240)),
+            width: min(max(size.width, minWidth), maxWidth),
             height: min(max(size.height, ControlBarPalette.itemHeight + ControlBarPalette.outerPadding * 2), max(frame.height - 48, 80))
         )
     }
@@ -3251,12 +3322,15 @@ struct QuickWindowChoice: Identifiable, Equatable {
 
 private enum QuickRecorderError: Error, LocalizedError {
     case invalidNumber(String)
+    case stopTimedOut
     case recordingFailedButProjectPreserved(message: String, projectPath: String)
 
     var errorDescription: String? {
         switch self {
         case .invalidNumber(let message):
             message
+        case .stopTimedOut:
+            "Stopping timed out. Recording controls were reset; check the project folder for partial files before recording again."
         case .recordingFailedButProjectPreserved(let message, let projectPath):
             "Recording stopped before completion, but recoverable files were preserved at \(projectPath). \(message)"
         }
@@ -3266,7 +3340,7 @@ private enum QuickRecorderError: Error, LocalizedError {
         switch self {
         case .recordingFailedButProjectPreserved(_, let projectPath):
             projectPath
-        case .invalidNumber:
+        case .invalidNumber, .stopTimedOut:
             nil
         }
     }
