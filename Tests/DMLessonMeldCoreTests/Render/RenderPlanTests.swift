@@ -186,6 +186,34 @@ struct RenderPlanTests {
         })
     }
 
+    @Test("Timeline retiming mapper converts source times to output times")
+    func timelineRetimingMapperConvertsSourceTimesToOutputTimes() {
+        let mapper = TimelineRetimingMapper(
+            speedRegions: [
+                SpeedRegion(
+                    id: "fast",
+                    range: EditTimeRange(startSeconds: 2, endSeconds: 4),
+                    playbackRate: 2
+                ),
+                SpeedRegion(
+                    id: "slow",
+                    range: EditTimeRange(startSeconds: 6, endSeconds: 8),
+                    playbackRate: 0.5
+                )
+            ],
+            sourceDurationSeconds: 10
+        )
+
+        let mappedRange = mapper.outputRange(forSourceRange: EditTimeRange(startSeconds: 1, endSeconds: 5))
+
+        #expect(mapper.outputTime(forSourceTime: 1) == 1)
+        #expect(mapper.outputTime(forSourceTime: 3) == 2.5)
+        #expect(mapper.outputTime(forSourceTime: 5) == 4)
+        #expect(mapper.outputTime(forSourceTime: 7) == 7)
+        #expect(mapper.outputDuration(forSourceDuration: 10) == 11)
+        #expect(mappedRange == EditTimeRange(startSeconds: 1, endSeconds: 4))
+    }
+
     @Test("Validation can check missing media only when requested")
     func validationCanSkipFileExistence() throws {
         let temp = try TemporaryDirectory()
