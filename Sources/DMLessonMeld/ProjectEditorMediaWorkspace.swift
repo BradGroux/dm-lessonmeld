@@ -1260,7 +1260,7 @@ extension ProjectEditorView {
                 Button("2x") { model.addSpeedRegionAtPlayhead(rate: 2) }
             }
             if model.speedRows.isEmpty {
-                Text("No speed regions yet. Speed regions are saved and shown on the timeline. Full render retiming is blocked until the exporter supports AV retiming.")
+                Text("No speed regions yet. Add slow-motion or fast-forward ranges that carry through full export.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
