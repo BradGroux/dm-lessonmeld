@@ -127,8 +127,8 @@ All optional files should be referenced by the manifest or known sidecar names. 
 - Public source repo.
 - Homebrew Cask distribution.
 - Developer-preview builds can be ad-hoc signed.
-- Broad binary distribution should use Developer ID signing and notarization.
-- Release artifacts should include a zip and SHA256 checksum.
+- Broad binary distribution should use Developer ID signing, Apple notarization, and a DMG-first install path.
+- Release artifacts should include DMG, zip, and SHA256 checksums.
 
 ## Success Criteria for v0.0.1
 
@@ -147,5 +147,5 @@ All optional files should be referenced by the manifest or known sidecar names. 
 - Local transcription runtime.
 - More renderer controls and media formats.
 - More course and video-host package/export targets.
-- Signed/notarized distribution and DMG packaging.
+- Apple Developer account provisioning for signed/notarized public releases.
 - Accessibility and recording-safety pass.

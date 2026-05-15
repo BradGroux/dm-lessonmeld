@@ -1,6 +1,6 @@
 # Release Guide
 
-This project builds a local macOS app bundle and a versioned release zip. Public binary releases should be Developer ID signed and notarized before broad distribution.
+This project builds a local macOS app bundle plus versioned DMG and zip artifacts. Tagged public releases must be Developer ID signed and notarized; local preview builds can remain ad-hoc signed for development.
 
 ## macOS requirements
 
@@ -35,6 +35,7 @@ swift test
 plutil -lint Packaging/Info.plist
 bash -n scripts/build-app.sh
 bash -n scripts/package-app.sh
+bash -n scripts/package-dmg.sh
 bash -n scripts/package-release.sh
 ruby -c Casks/dm-lessonmeld.rb
 brew style Casks/dm-lessonmeld.rb
@@ -54,7 +55,7 @@ Output:
 Packaging/Digital Meld LessonMeld.app
 ```
 
-## Package a release zip
+## Package a local preview release
 
 ```sh
 scripts/package-release.sh
@@ -63,10 +64,11 @@ scripts/package-release.sh
 Output:
 
 ```text
+.build/dist/dm-lessonmeld-VERSION-macos.dmg
 .build/dist/dm-lessonmeld-VERSION-macos.zip
 ```
 
-Ad-hoc signed builds are suitable for local testing. General users should receive Developer ID signed and notarized builds.
+Ad-hoc signed preview builds are suitable for local testing. General users should receive the Developer ID signed and notarized DMG.
 
 ## Sign
 
@@ -83,6 +85,14 @@ NOTARIZE_PASSWORD="app-specific-password" \
 NOTARIZE_TEAM_ID="TEAMID" \
 scripts/package-release.sh
 ```
+
+For release-mode enforcement, add:
+
+```sh
+DM_LESSONMELD_REQUIRE_NOTARIZATION=1
+```
+
+When this flag is set, packaging fails unless both Developer ID signing and notarization credentials are present.
 
 ## GitHub release
 
@@ -108,11 +118,15 @@ The workflow runs:
 - `swift test`
 - `plutil -lint Packaging/Info.plist`
 - packaging script syntax checks
-- `scripts/package-release.sh`
-- SHA256 generation
+- `DM_LESSONMELD_REQUIRE_NOTARIZATION=1 scripts/package-release.sh`
+- Developer ID signing
+- Apple notarization and stapler validation
+- SHA256 generation for DMG and zip artifacts
 
 It then creates a GitHub Release and attaches:
 
+- `dm-lessonmeld-VERSION-macos.dmg`
+- `dm-lessonmeld-VERSION-macos.dmg.sha256`
 - `dm-lessonmeld-VERSION-macos.zip`
 - `dm-lessonmeld-VERSION-macos.zip.sha256`
 
@@ -154,9 +168,9 @@ VERSION="0.0.1"
 tmpdir="$(mktemp -d)"
 gh release download "v${VERSION}" \
   --repo BradGroux/dm-lessonmeld \
-  --pattern "dm-lessonmeld-${VERSION}-macos.zip" \
+  --pattern "dm-lessonmeld-${VERSION}-macos.dmg" \
   --dir "${tmpdir}"
-shasum -a 256 "${tmpdir}/dm-lessonmeld-${VERSION}-macos.zip"
+shasum -a 256 "${tmpdir}/dm-lessonmeld-${VERSION}-macos.dmg"
 rm -rf "${tmpdir}"
 ```
 
@@ -185,9 +199,9 @@ brew tap BradGroux/dm-lessonmeld https://github.com/BradGroux/dm-lessonmeld
 brew install --cask bradgroux/dm-lessonmeld/dm-lessonmeld
 ```
 
-## Opening developer preview builds
+## Opening local preview builds
 
-Ad-hoc signed preview builds are not notarized. Until Developer ID signed and notarized releases are available, macOS may block them.
+Ad-hoc signed preview builds are not notarized. macOS may block them if they are downloaded or moved between machines.
 
 For local testing only:
 

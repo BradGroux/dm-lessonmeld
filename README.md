@@ -4,7 +4,7 @@
 
 It records lessons into local `.dmlm` project bundles, lets you review and annotate them, renders teaching-ready videos, and packages exports for course workflows without accounts, telemetry, analytics, or cloud processing.
 
-> Status: v0.0.3 developer preview. The core app, CLI, project bundle, recording, annotation, render, export, settings, and packaging foundations are in place. Device-matrix QA, Developer ID signing, notarization, and broader distribution hardening are still release work.
+> Status: v0.0.3 developer preview. The core app, CLI, project bundle, recording, annotation, render, export, settings, and packaging foundations are in place. Release automation now supports Developer ID signed/notarized DMG and zip artifacts; device-matrix QA remains release work.
 
 ## Features
 
@@ -47,19 +47,17 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 
 The first-run onboarding window checks these permissions and links to the relevant **System Settings > Privacy & Security** panes. You can reopen onboarding from the app sidebar.
 
-## Developer Preview Gatekeeper Step
+## Install from a Release
 
-> [!IMPORTANT]
-> Current GitHub release downloads are ad-hoc signed and not notarized. macOS Gatekeeper may block them with an "Apple could not verify" dialog until Developer ID signing is configured.
->
-> After moving the app to `/Applications`, run:
->
-> ```sh
-> xattr -dr com.apple.quarantine "/Applications/Digital Meld LessonMeld.app"
-> open "/Applications/Digital Meld LessonMeld.app"
-> ```
->
-> Only do this for builds you trust. See [Opening developer preview builds](docs/RELEASE.md#opening-developer-preview-builds).
+For signed public releases, download the notarized DMG from GitHub Releases:
+
+```text
+dm-lessonmeld-VERSION-macos.dmg
+```
+
+Open the DMG, drag **Digital Meld LessonMeld.app** to Applications, then open the app and grant macOS permissions when prompted.
+
+The release zip remains attached for automation and cask update workflows. Local ad-hoc preview builds can still require the Gatekeeper workaround in [docs/RELEASE.md](docs/RELEASE.md#opening-local-preview-builds).
 
 ## Install with Homebrew
 
@@ -69,8 +67,6 @@ The intended public install path is the dedicated `BradGroux/tap` Homebrew tap:
 brew tap BradGroux/tap
 brew install --cask dm-lessonmeld
 ```
-
-Until releases are Developer ID signed and notarized, Homebrew installs may still need the Gatekeeper preview step above before first launch.
 
 Fallback direct tap path:
 
@@ -113,7 +109,10 @@ Optional release environment:
 ```sh
 CODESIGN_IDENTITY="Developer ID Application: Example" scripts/package-release.sh
 CODESIGN_IDENTITY="Developer ID Application: Example" NOTARIZE_PROFILE="dm-lessonmeld" scripts/package-release.sh
+DM_LESSONMELD_REQUIRE_NOTARIZATION=1 CODESIGN_IDENTITY="Developer ID Application: Example" NOTARIZE_PROFILE="dm-lessonmeld" scripts/package-release.sh
 ```
+
+Release packaging emits both `.zip` and `.dmg` paths and writes artifacts under `.build/dist`.
 
 See [docs/RELEASE.md](docs/RELEASE.md) for the full release checklist.
 
