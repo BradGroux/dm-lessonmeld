@@ -251,6 +251,14 @@ swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --json
 
 JSON output is intended to be stable enough for local agents and scripts. Metadata is safe by default; media paths and transcript contents should be included only when explicitly requested.
 
+For local release smoke checks across capture devices and permission states:
+
+```sh
+scripts/capture-device-matrix-smoke.sh --all --keep-output
+```
+
+See `docs/CAPTURE_DEVICE_QA.md` for the full matrix, safe dry-run mode, artifact expectations, and manual permission-revocation checks.
+
 ## Local-Only Posture
 
 Normal operation does not require accounts, telemetry, analytics, cloud sync, license activation, or hosted processing. Project files stay local until you move, publish, or back them up yourself.
