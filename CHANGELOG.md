@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Added DMG release packaging with optional Developer ID signing and notarization.
+- Added release workflow enforcement for signed/notarized tagged builds with DMG and zip checksums.
+- Added in-app About/version/build metadata and release-notes link.
+
 ## 0.0.1 - 2026-05-13
 
 - Initial developer preview.

@@ -73,6 +73,12 @@ struct DMLessonMeldApp: App {
         }
         .windowResizability(.contentMinSize)
 
+        Window(AppBrand.aboutTitle, id: "about") {
+            AboutLessonMeldView()
+                .disablesWindowRestoration()
+        }
+        .windowResizability(.contentSize)
+
         Window(AppBrand.commandPaletteTitle, id: "command-palette") {
             CommandPaletteWindowContent(
                 appRouter: appRouter,
@@ -120,6 +126,13 @@ private struct LessonMeldAppCommands: Commands {
     @ObservedObject var preferences: AppPreferencesController
 
     var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button(AppBrand.aboutTitle) {
+                openWindow(id: "about")
+                NSApplication.shared.activate()
+            }
+        }
+
         CommandGroup(replacing: .appSettings) {
             Button(commandTitle(.settings)) {
                 runCommand(.settings)

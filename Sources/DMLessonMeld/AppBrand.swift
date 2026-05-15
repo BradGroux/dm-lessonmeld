@@ -4,4 +4,5 @@ enum AppBrand {
     static let settingsTitle = "Settings"
     static let commandPaletteTitle = "Command Palette"
     static let onboardingTitle = "Onboarding"
+    static let aboutTitle = "About LessonMeld"
 }

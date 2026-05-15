@@ -7,23 +7,13 @@ APP_DIR="${ROOT_DIR}/Packaging/${APP_NAME}.app"
 DIST_DIR="${ROOT_DIR}/.build/dist"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${ROOT_DIR}/Packaging/Info.plist")"
 ZIP_PATH="${DIST_DIR}/dm-lessonmeld-${VERSION}-macos.zip"
+DMG_PATH="${DIST_DIR}/dm-lessonmeld-${VERSION}-macos.dmg"
+REQUIRE_NOTARIZATION="${DM_LESSONMELD_REQUIRE_NOTARIZATION:-0}"
 
 cd "${ROOT_DIR}"
 
 scripts/build-app.sh release >/dev/null
 plutil -lint Packaging/Info.plist >/dev/null
-
-if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
-  codesign --force --deep --options runtime --timestamp --sign "${CODESIGN_IDENTITY}" "${APP_DIR}"
-  codesign --verify --strict --deep --verbose=2 "${APP_DIR}"
-else
-  codesign --verify --strict --deep --verbose=2 "${APP_DIR}"
-  echo "warning: CODESIGN_IDENTITY is not set; packaging an ad-hoc signed, non-notarized app." >&2
-fi
-
-mkdir -p "${DIST_DIR}"
-rm -f "${ZIP_PATH}"
-ditto -c -k --keepParent "${APP_DIR}" "${ZIP_PATH}"
 
 NOTARIZE_ARGS=()
 if [[ -n "${NOTARIZE_PROFILE:-}" ]]; then
@@ -37,6 +27,29 @@ elif [[ -n "${NOTARIZE_APPLE_ID:-}" || -n "${NOTARIZE_TEAM_ID:-}" || -n "${NOTAR
   NOTARIZE_ARGS=(--apple-id "${NOTARIZE_APPLE_ID}" --team-id "${NOTARIZE_TEAM_ID}" --password "${NOTARIZE_PASSWORD}")
 fi
 
+if [[ "${REQUIRE_NOTARIZATION}" == "1" ]]; then
+  if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
+    echo "error: CODESIGN_IDENTITY is required when DM_LESSONMELD_REQUIRE_NOTARIZATION=1." >&2
+    exit 1
+  fi
+  if [[ "${#NOTARIZE_ARGS[@]}" -eq 0 ]]; then
+    echo "error: notarization credentials are required when DM_LESSONMELD_REQUIRE_NOTARIZATION=1." >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+  codesign --force --deep --options runtime --timestamp --sign "${CODESIGN_IDENTITY}" "${APP_DIR}"
+  codesign --verify --strict --deep --verbose=2 "${APP_DIR}"
+else
+  codesign --verify --strict --deep --verbose=2 "${APP_DIR}"
+  echo "warning: CODESIGN_IDENTITY is not set; packaging an ad-hoc signed, non-notarized app." >&2
+fi
+
+mkdir -p "${DIST_DIR}"
+rm -f "${ZIP_PATH}" "${DMG_PATH}"
+ditto -c -k --keepParent "${APP_DIR}" "${ZIP_PATH}"
+
 if [[ "${#NOTARIZE_ARGS[@]}" -gt 0 ]]; then
   if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
     echo "error: notarization requires CODESIGN_IDENTITY." >&2
@@ -45,8 +58,12 @@ if [[ "${#NOTARIZE_ARGS[@]}" -gt 0 ]]; then
 
   xcrun notarytool submit "${ZIP_PATH}" "${NOTARIZE_ARGS[@]}" --wait
   xcrun stapler staple "${APP_DIR}"
+  xcrun stapler validate "${APP_DIR}"
   rm -f "${ZIP_PATH}"
   ditto -c -k --keepParent "${APP_DIR}" "${ZIP_PATH}"
 fi
 
-echo "${ZIP_PATH}"
+scripts/package-dmg.sh >/dev/null
+
+echo "zip_path=${ZIP_PATH}"
+echo "dmg_path=${DMG_PATH}"

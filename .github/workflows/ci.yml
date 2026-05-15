@@ -30,8 +30,11 @@ jobs:
           test -f Packaging/AppIcon.icns
           bash -n scripts/build-app.sh
           bash -n scripts/package-app.sh
+          bash -n scripts/package-dmg.sh
           bash -n scripts/package-release.sh
           ruby -c Casks/dm-lessonmeld.rb
           brew style Casks/dm-lessonmeld.rb
           scripts/build-app.sh release >/dev/null
           codesign --verify --strict --deep "Packaging/Digital Meld LessonMeld.app"
+          scripts/package-dmg.sh >/dev/null
+          hdiutil verify .build/dist/dm-lessonmeld-*-macos.dmg

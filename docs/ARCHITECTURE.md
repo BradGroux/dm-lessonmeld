@@ -52,7 +52,7 @@ Tests/
 - iOS device capture.
 - Local transcription model download/runtime.
 - Higher-fidelity renderer support for caption styling, cursor styling, zoom/pan keyframes, GIF/ProRes, and parallel rendering.
-- Developer ID signed/notarized distribution and DMG packaging. Homebrew cask mirror and release workflow are wired.
+- Apple Developer account provisioning for public binary publication. Release packaging, DMG generation, Developer ID signing/notarization enforcement, and the Homebrew cask mirror are wired.
 
 ## Agent boundary
 

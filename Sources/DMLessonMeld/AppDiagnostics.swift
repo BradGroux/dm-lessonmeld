@@ -12,7 +12,7 @@ struct AppDiagnostics {
         let presets = LessonTemplateLibrary.defaultExportPresets
 
         return AppDiagnostics(
-            summary: "v0.0.1 recorder, annotation, project, package, CLI, and agent foundations are wired locally.",
+            summary: "\(AppMetadata.versionBuildText) recorder, editor, annotation, package, CLI, and agent foundations are wired locally.",
             modules: [
                 DiagnosticModule(
                     name: "Project bundles",
