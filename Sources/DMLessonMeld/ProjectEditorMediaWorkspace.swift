@@ -153,18 +153,24 @@ extension ProjectEditorView {
                     ),
                     in: 0...max(model.previewDurationSeconds, 1)
                 )
+                .accessibilityLabel("Playhead")
+                .accessibilityValue("\(model.formattedCurrentTime) of \(model.formattedDuration)")
 
                 Button {
                     model.setTrimStartToPlayhead()
                 } label: {
                     Label("Trim In", systemImage: "timeline.selection")
                 }
+                .keyboardShortcut("i", modifiers: [.option])
+                .accessibilityHint("Sets the trim start to the current playhead.")
 
                 Button {
                     model.setTrimEndToPlayhead()
                 } label: {
                     Label("Trim Out", systemImage: "timeline.selection")
                 }
+                .keyboardShortcut("o", modifiers: [.option])
+                .accessibilityHint("Sets the trim end to the current playhead.")
 
                 Button {
                     model.addCutAtPlayhead()
@@ -172,6 +178,8 @@ extension ProjectEditorView {
                 } label: {
                     Label("Cut", systemImage: "scissors")
                 }
+                .keyboardShortcut("b", modifiers: [.option])
+                .accessibilityHint("Adds a cut at the current playhead.")
 
                 Button {
                     model.addZoomAtPlayhead()
@@ -179,6 +187,8 @@ extension ProjectEditorView {
                 } label: {
                     Label("Zoom", systemImage: "plus.magnifyingglass")
                 }
+                .keyboardShortcut("z", modifiers: [.option])
+                .accessibilityHint("Adds a zoom region at the current playhead.")
             }
 
             ZStack {
@@ -210,6 +220,10 @@ extension ProjectEditorView {
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Video preview")
+            .accessibilityValue("\(model.formattedCurrentTime) of \(model.formattedDuration)")
+            .accessibilityHint("Use Space to play or pause. Use the timeline controls to edit video regions.")
 
             HStack(spacing: 10) {
                 Button {
@@ -302,12 +316,16 @@ extension ProjectEditorView {
                     } label: {
                         Label(tab.title, systemImage: tab.systemImage)
                     }
+                    .keyboardShortcut(tab.keyboardShortcut, modifiers: [.option])
                 }
             } label: {
                 Label("Panel", systemImage: "sidebar.right")
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .accessibilityLabel("Editor panel")
+            .accessibilityValue(editorInspectorTab.title)
+            .accessibilityHint("Choose the inspector panel. Use Option plus the panel number to switch quickly.")
         }
         .padding(.bottom, 2)
     }
@@ -328,6 +346,7 @@ extension ProjectEditorView {
                         .minimumScaleFactor(0.82)
                         .frame(maxWidth: .infinity, minHeight: 28)
                 }
+                .accessibilityHint("Runs \(action.title) in the active inspector.")
             }
         }
     }
@@ -1441,7 +1460,7 @@ extension ProjectEditorView {
                 } label: {
                     Label("Cut", systemImage: "scissors")
                 }
-                .keyboardShortcut("b", modifiers: [])
+                .keyboardShortcut("b", modifiers: [.option])
                 Button {
                     model.addZoomAtPlayhead()
                     persistTimelineEditChanges(for: .moveZoom)
@@ -1449,7 +1468,7 @@ extension ProjectEditorView {
                 } label: {
                     Label("Zoom", systemImage: "plus.magnifyingglass")
                 }
-                .keyboardShortcut("z", modifiers: [])
+                .keyboardShortcut("z", modifiers: [.option])
                 Button {
                     model.addAudioVolumeRegionAtPlayhead()
                     persistTimelineEditChanges(for: .moveAudioVolume)
@@ -1457,6 +1476,7 @@ extension ProjectEditorView {
                 } label: {
                     Label("Volume", systemImage: "speaker.wave.2")
                 }
+                .keyboardShortcut("v", modifiers: [.option])
                 Button {
                     model.addSpeedRegionAtPlayhead(rate: 2)
                     persistTimelineEditChanges(for: .moveSpeed)
@@ -1464,6 +1484,7 @@ extension ProjectEditorView {
                 } label: {
                     Label("Speed", systemImage: "speedometer")
                 }
+                .keyboardShortcut("s", modifiers: [.option])
                 Button {
                     model.addOverlayAtPlayhead(kind: .text)
                     persistTimelineEditChanges(for: .moveOverlay)
@@ -1471,6 +1492,7 @@ extension ProjectEditorView {
                 } label: {
                     Label("Overlay", systemImage: "textformat")
                 }
+                .keyboardShortcut("t", modifiers: [.option])
                 Button {
                     model.addCaptionAtPlayhead()
                     persistTimelineEditChanges(for: .moveCaption)
@@ -1478,6 +1500,7 @@ extension ProjectEditorView {
                 } label: {
                     Label("Caption", systemImage: "captions.bubble")
                 }
+                .keyboardShortcut("c", modifiers: [.option])
                 Button {
                     model.addCursorHiddenRangeAtPlayhead()
                     persistTimelineEditChanges(for: .moveCursorHide)
@@ -1485,6 +1508,7 @@ extension ProjectEditorView {
                 } label: {
                     Label("Hide Cursor", systemImage: "cursorarrow.slash")
                 }
+                .keyboardShortcut("h", modifiers: [.option])
                 Button {
                     deleteSelectedTimelineItem()
                 } label: {
@@ -1501,6 +1525,8 @@ extension ProjectEditorView {
                     .foregroundStyle(.secondary)
                 Slider(value: $timelineZoom, in: 1...6)
                     .frame(width: 120)
+                    .accessibilityLabel("Timeline scale")
+                    .accessibilityValue(String(format: "%.1fx", timelineZoom))
             }
             if !model.editValidationIssues.isEmpty {
                 Text(model.editValidationIssues.map(\.message).joined(separator: " "))
@@ -1623,6 +1649,23 @@ extension ProjectEditorView {
             }
         }
         .padding(.top, 12)
+        .focusable()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Video timeline")
+        .accessibilityHint("Use Left and Right Arrow to move the playhead. Use Delete to remove the selected timeline item.")
+        .onMoveCommand { direction in
+            switch direction {
+            case .left:
+                model.stepPlayhead(by: -1)
+            case .right:
+                model.stepPlayhead(by: 1)
+            default:
+                break
+            }
+        }
+        .onDeleteCommand {
+            deleteSelectedTimelineItem()
+        }
     }
 
     var editorTimelineDuration: Double {
@@ -1671,6 +1714,9 @@ extension ProjectEditorView {
                 .padding(.leading, 10)
         }
         .frame(width: width, height: height)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(title) timeline lane")
+        .accessibilityHint("Contains editable \(title.lowercased()) regions.")
     }
 
     func clipTimelineContent(width: CGFloat, duration: Double) -> some View {
@@ -1702,10 +1748,16 @@ extension ProjectEditorView {
                 .offset(x: timelineX(trimStart, width: width, duration: duration) - 5)
                 .gesture(timelineDragGesture(action: .trimStart, id: "trim-start", start: trimStart, end: trimEnd, width: width, duration: duration))
                 .help("Drag to set trim start")
+                .accessibilityLabel("Trim start handle")
+                .accessibilityValue(formatSeconds(trimStart))
+                .accessibilityHint("Drag to set trim start, or press Option I to set it to the playhead.")
             trimHandle("Out")
                 .offset(x: timelineX(trimEnd, width: width, duration: duration) - 5)
                 .gesture(timelineDragGesture(action: .trimEnd, id: "trim-end", start: trimStart, end: trimEnd, width: width, duration: duration))
                 .help("Drag to set trim end")
+                .accessibilityLabel("Trim end handle")
+                .accessibilityValue(formatSeconds(trimEnd))
+                .accessibilityHint("Drag to set trim end, or press Option O to set it to the playhead.")
         }
         .contextMenu {
             Button("Set Trim In to Playhead") {
@@ -2133,6 +2185,10 @@ extension ProjectEditorView {
                         RoundedRectangle(cornerRadius: 5)
                             .fill((selectedTimelineItem == .marker(marker.id) ? Color.blue.opacity(0.22) : Color.clear))
                     )
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(marker.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Timeline marker" : marker.title)
+                    .accessibilityValue("\(formatSeconds(seconds))\(selectedTimelineItem == .marker(marker.id) ? ", Selected" : "")")
+                    .accessibilityHint("Select to edit this marker. Use the context menu to jump, duplicate, or remove it.")
                     .onTapGesture {
                         selectedTimelineItem = .marker(marker.id)
                     }
@@ -2183,6 +2239,10 @@ extension ProjectEditorView {
             .offset(x: x)
             .opacity(isEnabled ? 1 : 0.55)
             .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(title) timeline item")
+            .accessibilityValue(timelineItemAccessibilityValue(start: start, end: end, isEnabled: isEnabled, isSelected: isSelected))
+            .accessibilityHint("Select to edit. Use the context menu for jump, enable, duplicate, or remove actions where available.")
     }
 
     func playheadLine(width: CGFloat, duration: Double) -> some View {
@@ -2226,6 +2286,19 @@ extension ProjectEditorView {
             .padding(.vertical, 3)
             .contentShape(Rectangle())
             .help("Drag to resize")
+            .accessibilityLabel("Resize timeline item")
+            .accessibilityHint("Drag horizontally to adjust this item's start or end time.")
+    }
+
+    func timelineItemAccessibilityValue(start: Double, end: Double, isEnabled: Bool, isSelected: Bool) -> String {
+        var parts = [
+            "\(formatSeconds(start)) to \(formatSeconds(end))",
+            isEnabled ? "Enabled" : "Disabled"
+        ]
+        if isSelected {
+            parts.append("Selected")
+        }
+        return parts.joined(separator: ", ")
     }
 
     func timelineDragGesture(
@@ -2461,12 +2534,30 @@ extension ProjectEditorView {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(title) \(accessibilityName(for: color))")
+                .accessibilityValue(selection.wrappedValue == color ? "Selected" : "Not selected")
             }
         }
     }
 
     var canvasColorSwatches: [RGBAColor] {
         [.black, .white, .purple, .blue, .cyan, .green, .amber, .pink]
+    }
+
+    func accessibilityName(for color: RGBAColor) -> String {
+        switch color {
+        case .black: "black"
+        case .white: "white"
+        case .purple: "purple"
+        case .blue: "blue"
+        case .cyan: "cyan"
+        case .green: "green"
+        case .amber: "amber"
+        case .pink: "pink"
+        case .red: "red"
+        case .yellow: "yellow"
+        default: "color"
+        }
     }
 
     @ViewBuilder var canvasPreviewBackground: some View {
@@ -2584,6 +2675,10 @@ extension ProjectEditorView {
                                 }
                             }
                             .contentShape(Rectangle())
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("\(overlay.kind.title) overlay")
+                            .accessibilityValue("Starts \(overlay.startSeconds), ends \(overlay.endSeconds)\(selectedTimelineItem == .overlay(overlay.id) ? ", selected" : "")")
+                            .accessibilityHint("Select to edit this overlay. Drag to move it, or use inspector fields for keyboard editing.")
                             .onTapGesture {
                                 selectedTimelineItem = .overlay(overlay.id)
                                 editorInspectorTab = .overlays
@@ -2639,6 +2734,10 @@ extension ProjectEditorView {
                             selectedTimelineItem = .caption(caption.id)
                             editorInspectorTab = .captions
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Caption overlay")
+                        .accessibilityValue(caption.text)
+                        .accessibilityHint("Select to edit this caption in the Captions panel.")
                     if model.captionPlacement == .top {
                         Spacer()
                     }
@@ -2725,6 +2824,8 @@ extension ProjectEditorView {
                     .stroke(Color.black.opacity(0.45), lineWidth: 1)
             )
             .contentShape(Rectangle())
+            .accessibilityLabel("Resize overlay")
+            .accessibilityHint("Drag to resize the selected overlay. Use Width and Height fields in the inspector for keyboard editing.")
     }
 
     @ViewBuilder func highlightPreview(_ overlay: EditableOverlayRow) -> some View {

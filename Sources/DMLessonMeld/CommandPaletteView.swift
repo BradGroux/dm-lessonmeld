@@ -4,6 +4,7 @@ import SwiftUI
 struct CommandPaletteView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @FocusState private var searchFocused: Bool
     var commands: [CommandPaletteCommand]
 
     var body: some View {
@@ -14,6 +15,9 @@ struct CommandPaletteView: View {
                 TextField("Search commands", text: $query)
                     .textFieldStyle(.plain)
                     .font(.title3)
+                    .focused($searchFocused)
+                    .accessibilityLabel("Command search")
+                    .accessibilityHint("Type a command name, workflow, or shortcut keyword.")
             }
             .padding(14)
 
@@ -21,22 +25,30 @@ struct CommandPaletteView: View {
 
             ScrollView {
                 LazyVStack(spacing: 6) {
-                    ForEach(filteredCommands) { command in
-                        Button {
-                            guard command.isEnabled else { return }
-                            command.action()
-                            dismiss()
-                        } label: {
-                            LessonMeldCommandRow(
-                                title: command.title,
-                                subtitle: command.disabledReason ?? command.subtitle,
-                                systemImage: command.systemImage,
-                                shortcut: command.shortcut
-                            )
+                    if filteredCommands.isEmpty {
+                        ContentUnavailableView("No Commands Found", systemImage: "command", description: Text("Try a different search."))
+                            .padding(.top, 48)
+                    } else {
+                        ForEach(filteredCommands) { command in
+                            Button {
+                                guard command.isEnabled else { return }
+                                command.action()
+                                dismiss()
+                            } label: {
+                                LessonMeldCommandRow(
+                                    title: command.title,
+                                    subtitle: command.disabledReason ?? command.subtitle,
+                                    systemImage: command.systemImage,
+                                    shortcut: command.shortcut
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!command.isEnabled)
+                            .opacity(command.isEnabled ? 1 : 0.62)
+                            .accessibilityLabel(command.title)
+                            .accessibilityValue(commandAccessibilityValue(command))
+                            .accessibilityHint(command.disabledReason ?? command.subtitle)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(!command.isEnabled)
-                        .opacity(command.isEnabled ? 1 : 0.62)
                     }
                 }
                 .padding(10)
@@ -44,6 +56,9 @@ struct CommandPaletteView: View {
             .frame(minHeight: 280)
         }
         .frame(minWidth: 560, minHeight: 360)
+        .onAppear {
+            searchFocused = true
+        }
     }
 
     private var filteredCommands: [CommandPaletteCommand] {
@@ -55,6 +70,12 @@ struct CommandPaletteView: View {
                 || $0.subtitle.localizedCaseInsensitiveContains(trimmed)
                 || $0.keywords.contains { $0.localizedCaseInsensitiveContains(trimmed) }
         }
+    }
+
+    private func commandAccessibilityValue(_ command: CommandPaletteCommand) -> String {
+        let state = command.isEnabled ? "Enabled" : "Disabled"
+        guard let shortcut = command.shortcut else { return state }
+        return "\(state), shortcut \(shortcut)"
     }
 }
 
