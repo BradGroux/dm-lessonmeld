@@ -46,6 +46,8 @@ final class ProjectEditorModel: ObservableObject {
     @Published var isExtractingRawAssets = false
     @Published var isBuildingSharePackage = false
     @Published var isExportingFrame = false
+    @Published var jobHistory: [EditorJobRecord] = []
+    @Published var selectedJobID: String?
     @Published var metadataLessonTitle = ""
     @Published var metadataCourseTitle = ""
     @Published var metadataModuleTitle = ""
@@ -144,6 +146,7 @@ final class ProjectEditorModel: ObservableObject {
     private var timeObserver: Any?
     private var lastEditDecisionList: EditDecisionList?
     private var renderTask: Task<Void, Never>?
+    private var activeRenderJobID: String?
     private var isLoadingProject = false
     private var savedDirtyFingerprints: [ProjectDirtyArea: String] = [:]
     private static let minimumTimelineRangeSeconds = 0.1
@@ -155,6 +158,29 @@ final class ProjectEditorModel: ObservableObject {
     var dirtySummary: String {
         let labels = dirtyAreas.sorted { $0.sortOrder < $1.sortOrder }.map(\.rawValue)
         return labels.isEmpty ? "None" : labels.joined(separator: ", ")
+    }
+
+    var activeEditorJob: EditorJobRecord? {
+        jobHistory.first { $0.isActive }
+    }
+
+    var hasActiveEditorJob: Bool {
+        activeEditorJob != nil
+    }
+
+    var recentEditorJobs: [EditorJobRecord] {
+        Array(jobHistory.prefix(8))
+    }
+
+    func canStartEditorJob(_ kind: EditorJobKind) -> Bool {
+        guard let projectPath = normalizedCurrentProjectPath else {
+            return false
+        }
+        return EditorJobConflictPolicy.conflictingActiveJob(
+            in: jobHistory,
+            projectPath: projectPath,
+            kind: kind
+        ) == nil
     }
 
     var metadataDirtyFingerprint: String {
@@ -360,6 +386,7 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     func closeProject() {
+        markActiveJobsCancelledForCurrentProject("Project closed before the job completed.")
         teardown()
         projectURL = nil
         manifest = nil
@@ -367,6 +394,9 @@ final class ProjectEditorModel: ObservableObject {
         renderInspection = nil
         editValidationIssues = []
         lastEditDecisionList = nil
+        jobHistory = []
+        selectedJobID = nil
+        activeRenderJobID = nil
         currentTimeSeconds = 0
         previewDurationSeconds = 0
         isPlaying = false
@@ -657,6 +687,9 @@ final class ProjectEditorModel: ObservableObject {
 
     func copyCurrentFrame() {
         guard !isExportingFrame else { return }
+        guard let jobID = beginEditorJob(kind: .frameCopy, detail: "Copy the current preview frame to the clipboard.") else {
+            return
+        }
         isExportingFrame = true
         setMessage("Copying current frame...")
         Task {
@@ -665,9 +698,11 @@ final class ProjectEditorModel: ObservableObject {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.writeObjects([image])
                 isExportingFrame = false
+                completeEditorJob(jobID, message: "Copied current frame to the clipboard.")
                 setMessage("Copied current frame.")
             } catch {
                 isExportingFrame = false
+                failEditorJob(jobID, error: error)
                 setError(error.localizedDescription)
             }
         }
@@ -686,6 +721,14 @@ final class ProjectEditorModel: ObservableObject {
             panel.canCreateDirectories = true
             panel.directoryURL = projectURL.appendingPathComponent("Exports", isDirectory: true)
             guard panel.runModal() == .OK, let outputURL = panel.url else { return }
+            guard let jobID = beginEditorJob(
+                kind: .frameExport,
+                detail: "Export the current preview frame as PNG.",
+                outputURL: outputURL,
+                projectURL: projectURL
+            ) else {
+                return
+            }
 
             isExportingFrame = true
             setMessage("Exporting current frame...")
@@ -695,10 +738,12 @@ final class ProjectEditorModel: ObservableObject {
                     try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try data.write(to: outputURL, options: [.atomic])
                     isExportingFrame = false
+                    completeEditorJob(jobID, outputURL: outputURL, message: "Exported frame to \(outputURL.path).")
                     setMessage("Exported frame \(outputURL.path).")
                     NSWorkspace.shared.activateFileViewerSelecting([outputURL])
                 } catch {
                     isExportingFrame = false
+                    failEditorJob(jobID, error: error)
                     setError(error.localizedDescription)
                 }
             }
@@ -1429,17 +1474,30 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     func exportCaptionSidecars() {
+        var jobID: String?
         do {
             guard let projectURL else {
                 throw ProjectEditorError.projectRequired
+            }
+            jobID = beginEditorJob(
+                kind: .captionSidecars,
+                detail: "Write VTT, SRT, and transcript text sidecars.",
+                projectURL: projectURL
+            )
+            guard let jobID else {
+                return
             }
             let transcript = try makeTranscriptDocument()
             try writeCaptionSidecars(transcript, projectURL: projectURL)
             let updated = try attachCaptionSidecars(projectURL: projectURL)
             manifest = updated
             summary = try ProjectBundle.inspect(at: projectURL)
+            completeEditorJob(jobID, outputURL: projectURL, message: "Exported caption sidecars into \(projectURL.path).")
             setMessage("Exported caption sidecars.")
         } catch {
+            if let jobID {
+                failEditorJob(jobID, error: error)
+            }
             setError(error.localizedDescription)
         }
     }
@@ -1471,6 +1529,14 @@ final class ProjectEditorModel: ObservableObject {
                     quality: ExportQuality(rawValue: renderQuality.rawValue) ?? .highest
                 )
             ).makePlan()
+            guard let jobID = beginEditorJob(
+                kind: .editDecisionExport,
+                detail: "Apply saved trim, cut, speed, and zoom decisions.",
+                outputURL: destinationURL,
+                projectURL: projectURL
+            ) else {
+                return
+            }
 
             isTrimming = true
             setMessage("Exporting cut list...")
@@ -1479,12 +1545,14 @@ final class ProjectEditorModel: ObservableObject {
                     let output = try await AVAssetTrimExportService().export(plan: plan)
                     await MainActor.run {
                         self.isTrimming = false
+                        self.completeEditorJob(jobID, outputURL: output, message: "Exported cut list to \(output.path).")
                         self.setMessage("Exported cut list \(output.path).")
                         NSWorkspace.shared.activateFileViewerSelecting([output])
                     }
                 } catch {
                     await MainActor.run {
                         self.isTrimming = false
+                        self.failEditorJob(jobID, error: error)
                         self.setError(error.localizedDescription)
                     }
                 }
@@ -1846,44 +1914,67 @@ final class ProjectEditorModel: ObservableObject {
             setError("Open a project before exporting.")
             return
         }
+        guard !isRendering else { return }
 
-        isRendering = true
-        renderProgress = 0
-        setMessage("Rendering full project...")
+        do {
+            let destinationURL = try destinationURL(path: renderDestinationPath)
+            guard let jobID = beginEditorJob(
+                kind: .renderVideo,
+                detail: "Render the edited lesson video.",
+                outputURL: destinationURL,
+                projectURL: projectURL
+            ) else {
+                return
+            }
 
-        renderTask = Task {
-            do {
-                let destinationURL = try destinationURL(path: renderDestinationPath)
-                let loadedManifest = try ProjectBundle.loadManifest(at: projectURL)
-                let plan = try renderPlan(
-                    projectURL: projectURL,
-                    manifest: loadedManifest,
-                    destinationURL: destinationURL,
-                    preferences: preferences
-                )
-                let output = try await AVFoundationRenderService().export(plan: plan) { [weak self] progress in
-                    self?.renderProgress = min(max(progress, 0), 1)
-                }
-                await MainActor.run {
-                    self.isRendering = false
-                    self.renderProgress = 1
-                    self.renderTask = nil
-                    self.setMessage("Rendered \(output.path).")
-                    NSWorkspace.shared.activateFileViewerSelecting([output])
-                }
-            } catch RenderExportError.exportCancelled {
-                await MainActor.run {
-                    self.isRendering = false
-                    self.renderTask = nil
-                    self.setMessage("Render cancelled.")
-                }
-            } catch {
-                await MainActor.run {
-                    self.isRendering = false
-                    self.renderTask = nil
-                    self.setError(error.localizedDescription)
+            isRendering = true
+            renderProgress = 0
+            activeRenderJobID = jobID
+            setMessage("Rendering full project...")
+
+            renderTask = Task {
+                do {
+                    let loadedManifest = try ProjectBundle.loadManifest(at: projectURL)
+                    let plan = try renderPlan(
+                        projectURL: projectURL,
+                        manifest: loadedManifest,
+                        destinationURL: destinationURL,
+                        preferences: preferences
+                    )
+                    let output = try await AVFoundationRenderService().export(plan: plan) { [weak self] progress in
+                        let clampedProgress = min(max(progress, 0), 1)
+                        self?.renderProgress = clampedProgress
+                        self?.updateEditorJobProgress(jobID, progress: clampedProgress)
+                    }
+                    await MainActor.run {
+                        self.isRendering = false
+                        self.renderProgress = 1
+                        self.renderTask = nil
+                        self.activeRenderJobID = nil
+                        self.completeEditorJob(jobID, outputURL: output, message: "Rendered video to \(output.path).")
+                        self.setMessage("Rendered \(output.path).")
+                        NSWorkspace.shared.activateFileViewerSelecting([output])
+                    }
+                } catch RenderExportError.exportCancelled {
+                    await MainActor.run {
+                        self.isRendering = false
+                        self.renderTask = nil
+                        self.activeRenderJobID = nil
+                        self.cancelEditorJob(jobID, message: "Render cancelled by user.")
+                        self.setMessage("Render cancelled.")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.isRendering = false
+                        self.renderTask = nil
+                        self.activeRenderJobID = nil
+                        self.failEditorJob(jobID, error: error)
+                        self.setError(error.localizedDescription)
+                    }
                 }
             }
+        } catch {
+            setError(error.localizedDescription)
         }
     }
 
@@ -1893,6 +1984,17 @@ final class ProjectEditorModel: ObservableObject {
             return
         }
         guard !isPackagingLearnHouse else { return }
+        let outputDirectory = projectURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("LearnHouse Exports", isDirectory: true)
+        guard let jobID = beginEditorJob(
+            kind: .learnHousePackage,
+            detail: "Build a LearnHouse course import package.",
+            outputURL: outputDirectory,
+            projectURL: projectURL
+        ) else {
+            return
+        }
 
         isPackagingLearnHouse = true
         setMessage("Packaging LearnHouse export...")
@@ -1900,9 +2002,6 @@ final class ProjectEditorModel: ObservableObject {
 
         Task.detached(priority: .userInitiated) {
             do {
-                let outputDirectory = projectURL
-                    .deletingLastPathComponent()
-                    .appendingPathComponent("LearnHouse Exports", isDirectory: true)
                 let result = try LearnHousePackageBuilder().buildPackage(
                     projectURL: projectURL,
                     outputDirectory: outputDirectory,
@@ -1911,12 +2010,18 @@ final class ProjectEditorModel: ObservableObject {
                 await MainActor.run {
                     self.isPackagingLearnHouse = false
                     let revealPath = result.archivePath ?? result.packagePath
+                    self.completeEditorJob(
+                        jobID,
+                        outputURL: URL(fileURLWithPath: revealPath),
+                        message: "Packaged LearnHouse export at \(revealPath)."
+                    )
                     self.setMessage("Packaged LearnHouse export.")
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: revealPath)])
                 }
             } catch {
                 await MainActor.run {
                     self.isPackagingLearnHouse = false
+                    self.failEditorJob(jobID, error: error)
                     self.setError(error.localizedDescription)
                 }
             }
@@ -1930,21 +2035,36 @@ final class ProjectEditorModel: ObservableObject {
         }
         guard !isExtractingRawAssets else { return }
 
+        let outputDirectory = directoryURL(path: rawAssetDestinationPath, fallback: projectURL.deletingLastPathComponent())
+        guard let jobID = beginEditorJob(
+            kind: .rawAssetExtract,
+            detail: "Copy original media, sidecars, and editable project assets.",
+            outputURL: outputDirectory,
+            projectURL: projectURL
+        ) else {
+            return
+        }
+
         isExtractingRawAssets = true
         setMessage("Extracting raw assets...")
-        let outputDirectory = directoryURL(path: rawAssetDestinationPath, fallback: projectURL.deletingLastPathComponent())
 
         Task.detached(priority: .userInitiated) {
             do {
                 let result = try RawAssetExtractor().extract(projectURL: projectURL, outputDirectory: outputDirectory)
                 await MainActor.run {
                     self.isExtractingRawAssets = false
+                    self.completeEditorJob(
+                        jobID,
+                        outputURL: URL(fileURLWithPath: result.outputDirectoryPath),
+                        message: "Extracted \(result.files.count) raw assets to \(result.outputDirectoryPath)."
+                    )
                     self.setMessage("Extracted \(result.files.count) raw asset\(result.files.count == 1 ? "" : "s").")
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.outputDirectoryPath)])
                 }
             } catch {
                 await MainActor.run {
                     self.isExtractingRawAssets = false
+                    self.failEditorJob(jobID, error: error)
                     self.setError(error.localizedDescription)
                 }
             }
@@ -1958,10 +2078,19 @@ final class ProjectEditorModel: ObservableObject {
         }
         guard !isBuildingSharePackage else { return }
 
-        isBuildingSharePackage = true
-        setMessage("Building local share package...")
         let outputDirectory = directoryURL(path: sharePackageDestinationPath, fallback: projectURL.deletingLastPathComponent())
         let finalVideoURL = optionalFileURL(path: shareFinalVideoPath)
+        guard let jobID = beginEditorJob(
+            kind: .sharePackage,
+            detail: "Bundle the project and optional final render for local sharing.",
+            outputURL: outputDirectory,
+            projectURL: projectURL
+        ) else {
+            return
+        }
+
+        isBuildingSharePackage = true
+        setMessage("Building local share package...")
 
         Task.detached(priority: .userInitiated) {
             do {
@@ -1972,12 +2101,18 @@ final class ProjectEditorModel: ObservableObject {
                 )
                 await MainActor.run {
                     self.isBuildingSharePackage = false
+                    self.completeEditorJob(
+                        jobID,
+                        outputURL: URL(fileURLWithPath: result.packagePath),
+                        message: "Built local share package at \(result.packagePath)."
+                    )
                     self.setMessage("Built local share package.")
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.packagePath)])
                 }
             } catch {
                 await MainActor.run {
                     self.isBuildingSharePackage = false
+                    self.failEditorJob(jobID, error: error)
                     self.setError(error.localizedDescription)
                 }
             }
@@ -1986,6 +2121,11 @@ final class ProjectEditorModel: ObservableObject {
 
     func cancelRender() {
         renderTask?.cancel()
+        if let activeRenderJobID {
+            updateEditorJob(activeRenderJobID) { job in
+                job.appendLog("Render cancellation requested.")
+            }
+        }
         setMessage("Cancelling render...")
     }
 
@@ -2067,6 +2207,14 @@ final class ProjectEditorModel: ObservableObject {
                 )
             )
             let plan = try job.makePlan()
+            guard let jobID = beginEditorJob(
+                kind: .trimExport,
+                detail: "Export the selected trim range.",
+                outputURL: destinationURL,
+                projectURL: projectURL
+            ) else {
+                return
+            }
 
             isTrimming = true
             setMessage("Exporting trim...")
@@ -2075,12 +2223,14 @@ final class ProjectEditorModel: ObservableObject {
                     let output = try await AVAssetTrimExportService().export(plan: plan)
                     await MainActor.run {
                         self.isTrimming = false
+                        self.completeEditorJob(jobID, outputURL: output, message: "Exported trim to \(output.path).")
                         self.setMessage("Exported trim \(output.path).")
                         NSWorkspace.shared.activateFileViewerSelecting([output])
                     }
                 } catch {
                     await MainActor.run {
                         self.isTrimming = false
+                        self.failEditorJob(jobID, error: error)
                         self.setError(error.localizedDescription)
                     }
                 }
@@ -2181,6 +2331,7 @@ final class ProjectEditorModel: ObservableObject {
         summary = try ProjectBundle.inspect(at: url)
         renderInspection = nil
         editValidationIssues = []
+        loadEditorJobHistory(projectURL: url)
         loadMetadataFields(loadedManifest.metadata)
         loadMarkerRows(loadedManifest.markers)
         loadAnnotationStatus(projectURL: url, manifest: loadedManifest)
@@ -2192,6 +2343,225 @@ final class ProjectEditorModel: ObservableObject {
         configurePreview(projectURL: url, manifest: loadedManifest)
         loadEditDecisions(projectURL: url, manifest: loadedManifest)
         setMessage("\(messagePrefix) \(loadedManifest.metadata.lessonTitle).")
+    }
+
+    private var normalizedCurrentProjectPath: String? {
+        Self.normalizedProjectPath(projectURL)
+    }
+
+    private static func normalizedProjectPath(_ url: URL?) -> String? {
+        url?.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    private func loadEditorJobHistory(projectURL: URL) {
+        do {
+            var loadedJobs = try EditorJobHistoryFile.load(fromProject: projectURL)
+            var didCancelStaleJobs = false
+            for index in loadedJobs.indices where loadedJobs[index].isActive {
+                loadedJobs[index].cancel("LessonMeld reopened before this job finished.")
+                didCancelStaleJobs = true
+            }
+            jobHistory = loadedJobs
+            selectedJobID = loadedJobs.first?.id
+            if didCancelStaleJobs {
+                persistEditorJobHistory(projectURL: projectURL)
+            }
+        } catch {
+            jobHistory = []
+            selectedJobID = nil
+            setError("Could not load job history: \(error.localizedDescription)")
+        }
+    }
+
+    private func persistEditorJobHistory(projectURL explicitProjectURL: URL? = nil) {
+        guard let targetProjectURL = explicitProjectURL ?? projectURL else { return }
+        try? EditorJobHistoryFile.save(jobHistory, toProject: targetProjectURL)
+    }
+
+    private func beginEditorJob(
+        kind: EditorJobKind,
+        detail: String? = nil,
+        outputURL: URL? = nil,
+        projectURL explicitProjectURL: URL? = nil
+    ) -> String? {
+        guard let targetProjectURL = explicitProjectURL ?? projectURL else {
+            setError("Open a project before starting \(kind.title.lowercased()).")
+            return nil
+        }
+        let projectPath = Self.normalizedProjectPath(targetProjectURL)
+        if let conflict = EditorJobConflictPolicy.conflictingActiveJob(
+            in: jobHistory,
+            projectPath: projectPath,
+            kind: kind
+        ) {
+            setError("Finish or cancel \(conflict.title) before starting \(kind.title).")
+            return nil
+        }
+
+        var job = EditorJobRecord(
+            kind: kind,
+            detail: detail,
+            projectPath: projectPath,
+            outputPath: outputURL?.path
+        )
+        job.start()
+        jobHistory.insert(job, at: 0)
+        selectedJobID = job.id
+        persistEditorJobHistory(projectURL: targetProjectURL)
+        return job.id
+    }
+
+    private func updateEditorJob(_ id: String, persist: Bool = true, _ update: (inout EditorJobRecord) -> Void) {
+        guard let index = jobHistory.firstIndex(where: { $0.id == id }) else { return }
+        update(&jobHistory[index])
+        if persist {
+            persistEditorJobHistory()
+        }
+    }
+
+    private func updateEditorJobProgress(_ id: String, progress: Double) {
+        guard let index = jobHistory.firstIndex(where: { $0.id == id }) else { return }
+        let clampedProgress = min(max(progress, 0), 1)
+        guard abs(jobHistory[index].progress - clampedProgress) >= 0.01 || clampedProgress >= 1 else {
+            return
+        }
+        jobHistory[index].updateProgress(clampedProgress)
+        persistEditorJobHistory()
+    }
+
+    private func completeEditorJob(_ id: String, outputURL: URL? = nil, message: String? = nil) {
+        updateEditorJob(id) { job in
+            job.complete(outputPath: outputURL?.path, message: message)
+        }
+    }
+
+    private func failEditorJob(_ id: String, error: Error) {
+        failEditorJob(id, message: error.localizedDescription)
+    }
+
+    private func failEditorJob(_ id: String, message: String) {
+        updateEditorJob(id) { job in
+            job.fail(message)
+        }
+    }
+
+    private func cancelEditorJob(_ id: String, message: String? = nil) {
+        updateEditorJob(id) { job in
+            job.cancel(message)
+        }
+    }
+
+    private func markActiveJobsCancelledForCurrentProject(_ message: String) {
+        guard let projectURL, let projectPath = normalizedCurrentProjectPath else { return }
+        var didChange = false
+        for index in jobHistory.indices where jobHistory[index].isActive && jobHistory[index].projectPath == projectPath {
+            jobHistory[index].cancel(message)
+            didChange = true
+        }
+        if didChange {
+            persistEditorJobHistory(projectURL: projectURL)
+        }
+    }
+
+    func cancelJob(_ job: EditorJobRecord) {
+        guard job.isActive else { return }
+        guard job.isCancellable else {
+            setError("\(job.title) cannot be cancelled after it starts.")
+            return
+        }
+        switch job.kind {
+        case .renderVideo:
+            cancelRender()
+        case .trimExport,
+             .editDecisionExport,
+             .learnHousePackage,
+             .rawAssetExtract,
+             .sharePackage,
+             .frameExport,
+             .frameCopy,
+             .captionSidecars:
+            setError("\(job.title) cannot be cancelled after it starts.")
+        }
+    }
+
+    func retryJob(_ job: EditorJobRecord, preferences: LessonMeldPreferences) {
+        guard job.isRetryable else {
+            setMessage("Only failed or cancelled jobs can be retried.")
+            return
+        }
+        if let outputPath = job.outputPath {
+            restoreDestinationPath(outputPath, for: job.kind)
+        }
+        switch job.kind {
+        case .renderVideo:
+            exportRender(preferences)
+        case .trimExport:
+            exportTrim()
+        case .editDecisionExport:
+            exportEditDecisions()
+        case .learnHousePackage:
+            packageLearnHouse(preferences)
+        case .rawAssetExtract:
+            extractRawAssets()
+        case .sharePackage:
+            buildLocalSharePackage()
+        case .frameExport:
+            exportCurrentFrame()
+        case .frameCopy:
+            copyCurrentFrame()
+        case .captionSidecars:
+            exportCaptionSidecars()
+        }
+    }
+
+    private func restoreDestinationPath(_ outputPath: String, for kind: EditorJobKind) {
+        switch kind {
+        case .renderVideo:
+            renderDestinationPath = outputPath
+        case .trimExport,
+             .editDecisionExport:
+            trimDestinationPath = outputPath
+        case .rawAssetExtract:
+            rawAssetDestinationPath = outputPath
+        case .sharePackage:
+            sharePackageDestinationPath = outputPath
+        case .learnHousePackage,
+             .frameExport,
+             .frameCopy,
+             .captionSidecars:
+            break
+        }
+    }
+
+    func revealJobOutput(_ job: EditorJobRecord) {
+        guard let outputPath = job.outputPath, !outputPath.isEmpty else {
+            setError("No output path is available for \(job.title).")
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: outputPath)])
+    }
+
+    func copyJobOutputPath(_ job: EditorJobRecord) {
+        guard let outputPath = job.outputPath, !outputPath.isEmpty else {
+            setError("No output path is available for \(job.title).")
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(outputPath, forType: .string)
+        setMessage("Copied \(job.title) output path.")
+    }
+
+    func copyJobLog(_ job: EditorJobRecord) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(jobLogText(job), forType: .string)
+        setMessage("Copied \(job.title) log.")
+    }
+
+    func jobLogText(_ job: EditorJobRecord) -> String {
+        if job.log.isEmpty {
+            return "\(job.title) has no log entries."
+        }
+        return job.log.joined(separator: "\n")
     }
 
     private func removeTimeObserver() {
