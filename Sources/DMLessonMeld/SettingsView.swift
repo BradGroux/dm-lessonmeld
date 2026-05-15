@@ -419,14 +419,15 @@ struct LessonMeldSettingsView: View {
 
     private var diagnosticsSection: some View {
         let diagnostics = AppDiagnostics.current
+        let preflight = PermissionPreflight.onboarding(preferences: draft)
         return SettingsSectionView(title: "Diagnostics", subtitle: "Current launch state and macOS permission health.") {
             diagnosticsRow("Onboarding", preferences.snapshot.onboardingCompleted ? "Completed" : "Pending")
             diagnosticsRow("Previous exit", preferences.previousExitWasClean ? "Clean" : "Recovered after abnormal exit")
             diagnosticsRow("Safe mode", preferences.launchDiagnostics.safeMode ? "Enabled" : "Disabled")
             diagnosticsRow("Launch count", "\(preferences.launchDiagnostics.launchCount)")
-            diagnosticsRow("Screen Recording", ScreenCapturePermission.isGranted ? "Granted" : "Missing")
-            diagnosticsRow("Microphone", MicrophonePermission.isGranted ? "Granted" : "Missing")
-            diagnosticsRow("Camera", CameraPermission.isGranted ? "Granted" : "Missing")
+            ForEach(preflight.items) { item in
+                diagnosticsRow(item.id.title, item.statusTitle)
+            }
             diagnosticsRow("Settings backup", draft.privacy.allowGitBackupsForSettings ? "Allowed for config only" : "Disabled")
 
             Divider()
@@ -463,6 +464,12 @@ struct LessonMeldSettingsView: View {
             }
             Button("Open Camera Settings") {
                 NSWorkspace.shared.open(CameraPermission.privacySettingsURL)
+            }
+            Button("Open Input Monitoring Settings") {
+                NSWorkspace.shared.open(InputMonitoringPermission.privacySettingsURL)
+            }
+            Button("Open Accessibility Settings") {
+                NSWorkspace.shared.open(AccessibilityPermission.privacySettingsURL)
             }
             Button("Review Onboarding") {
                 openWindow(id: "onboarding")

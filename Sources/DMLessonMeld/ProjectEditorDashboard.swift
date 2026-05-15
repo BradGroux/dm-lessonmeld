@@ -546,9 +546,9 @@ extension ProjectEditorView {
     var appToolsPanel: some View {
         EditorPanel(title: "App Tools", subtitle: "Setup, preferences, commands, and live annotation are always local.") {
             VStack(alignment: .leading, spacing: 10) {
-                permissionRow("Screen", isGranted: quickRecorder.screenGranted)
-                permissionRow("Mic", isGranted: quickRecorder.microphoneGranted)
-                permissionRow("Camera", isGranted: quickRecorder.cameraGranted)
+                ForEach(quickRecorder.permissionPreflight.items) { item in
+                    permissionRow(item)
+                }
 
                 Divider()
 
@@ -622,16 +622,19 @@ extension ProjectEditorView {
         .buttonStyle(.plain)
     }
 
-    func permissionRow(_ title: String, isGranted: Bool) -> some View {
+    func permissionRow(_ item: PermissionPreflightItem) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(isGranted ? .green : .orange)
-            Text(title)
+            Image(systemName: item.isGranted ? "checkmark.circle.fill" : item.id.systemImage)
+                .foregroundStyle(item.isGranted ? Color.green : (item.isBlocking ? Color.orange : Color.secondary))
+            Text(item.id.shortTitle)
                 .font(.subheadline.weight(.semibold))
-            Spacer()
-            Text(isGranted ? "Ready" : "Needs Access")
+            Text(item.need.title)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(isGranted ? .green : .orange)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(item.statusTitle)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(item.isGranted ? Color.green : (item.isBlocking ? Color.orange : Color.secondary))
         }
     }
 
