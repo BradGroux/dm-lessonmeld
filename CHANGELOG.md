@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.0.4 - 2026-05-16
+
+- Hardened recorder startup so pause during countdown blocks capture until recording is resumed.
+- Restricted local runtime status writes to owner-only file permissions.
+- Rejected symlink escapes in `.lessonshare` and LearnHouse package exports.
+- Expanded config backup exclusions for common credential filenames.
+- Rebound CLI edit exports to manifest-contained project media when loading edit-decision sidecars.
+- Scoped Apple release signing secrets to required workflow steps and switched required release notarization to App Store Connect API key or keychain profile credentials.
+
+## 0.0.3 - 2026-05-14
+
 - Added DMG release packaging with optional Developer ID signing and notarization.
 - Added release workflow enforcement for signed/notarized tagged builds with DMG and zip checksums.
 - Added in-app About/version/build metadata and release-notes link.
