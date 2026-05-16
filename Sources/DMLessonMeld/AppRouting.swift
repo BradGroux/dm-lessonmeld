@@ -40,6 +40,7 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
     case capture
     case camera
     case audio
+    case transcription
     case editor
     case annotations
     case export
@@ -57,6 +58,7 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
         case .capture: "Capture"
         case .camera: "Camera"
         case .audio: "Audio"
+        case .transcription: "Transcription"
         case .editor: "Editor"
         case .annotations: "Annotations"
         case .export: "Export"
@@ -74,6 +76,7 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
         case .capture: "record.circle"
         case .camera: "web.camera"
         case .audio: "waveform"
+        case .transcription: "captions.bubble"
         case .editor: "timeline.selection"
         case .annotations: "pencil.tip"
         case .export: "square.and.arrow.up"
@@ -89,7 +92,7 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general, .privacy, .shortcuts, .diagnostics:
             "App"
-        case .capture, .camera, .audio:
+        case .capture, .camera, .audio, .transcription:
             "Recording"
         case .editor, .annotations, .export, .presets:
             "Lesson Defaults"
@@ -108,6 +111,8 @@ enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
             "webcam camera picture in picture pip resolution fps mirror border shadow"
         case .audio:
             "microphone mic system audio voice input"
+        case .transcription:
+            "transcription transcript captions whisper model local language sidecars"
         case .editor:
             "editor video timeline canvas project level cuts zooms overlays captions"
         case .annotations:

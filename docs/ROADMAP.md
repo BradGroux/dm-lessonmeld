@@ -32,16 +32,16 @@
 - Extend cut-list export into the full render pipeline with webcam PiP/audio/cursor effects/zoom regions/annotations/captions, then add zoom/pan keyframes, webcam PiP controls, canvas styling, and richer render progress. Full render, ProRes MOV export, share packages, and raw asset extraction are wired; GIF/alpha/parallel execution remains behind explicit export gates.
 - Expand annotation overlay polish: horizontal/vertical toolbar, pen, highlighter, eraser, line, arrow, box, ellipse, text, spotlight, whiteboard, blackboard, swatches, line weights, text sizes, undo/redo, clear, and frame capture.
 - Expand presets/templates to cover capture sources, webcam layout, annotations, zoom behavior, captions, canvas/background, export, and LearnHouse packaging. Project/app preset files are wired; additional bundled preset templates remain.
-- Add local transcription model handling.
+- Add local transcription model handling. Settings and CLI model-readiness status are wired; runtime execution remains.
 - Add Homebrew distribution and signed/notarized DMG. Homebrew cask mirror plus signed/notarized DMG and zip release automation are in place; Apple Developer credentials are required before publishing public binaries.
 - Expand CLI recording control and JSON automation output.
 - Add optional GitHub remote setup/restore UX for settings and templates after the local Git workflow has more field use.
-- Expand agent workflows for OpenClaw, Codex, and Veritas Kanban.
+- Expand agent workflows for OpenClaw, Codex, and Veritas Kanban. Target-specific workflow JSON is wired; deeper app-control actions remain.
 - Add accessibility/compliance and recording-safety passes.
 
 ## Post-v1.0
 
 - Additional LMS/video-host connectors.
 - SCORM, xAPI, LTI 1.3, Common Cartridge, and H5P evaluation.
-- MCP server wrapping stable CLI commands.
+- MCP server wrapping stable CLI commands. A dependency-free stdio wrapper exists for safe read/plan commands; broader write tools remain gated.
 - Agent-suggested edits and lesson packaging.

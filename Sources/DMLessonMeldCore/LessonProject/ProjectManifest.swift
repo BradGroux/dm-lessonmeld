@@ -76,6 +76,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
     public var webcam: ProjectFile?
     public var microphoneAudio: ProjectFile?
     public var systemAudio: ProjectFile?
+    public var embeddedAudio: ProjectEmbeddedAudio?
     public var cursorMetadata: ProjectFile?
     public var annotations: ProjectFile?
     public var overlays: ProjectFile?
@@ -89,6 +90,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
         webcam: ProjectFile? = nil,
         microphoneAudio: ProjectFile? = nil,
         systemAudio: ProjectFile? = nil,
+        embeddedAudio: ProjectEmbeddedAudio? = nil,
         cursorMetadata: ProjectFile? = nil,
         annotations: ProjectFile? = nil,
         overlays: ProjectFile? = nil,
@@ -101,6 +103,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
         self.webcam = webcam
         self.microphoneAudio = microphoneAudio
         self.systemAudio = systemAudio
+        self.embeddedAudio = embeddedAudio
         self.cursorMetadata = cursorMetadata
         self.annotations = annotations
         self.overlays = overlays
@@ -115,6 +118,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
         webcam: ProjectFile? = nil,
         microphoneAudio: ProjectFile? = nil,
         systemAudio: ProjectFile? = nil,
+        embeddedAudio: ProjectEmbeddedAudio? = nil,
         captions: [ProjectFile] = [],
         transcripts: [ProjectFile] = [],
         thumbnail: ProjectFile? = nil,
@@ -125,6 +129,7 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
             webcam: webcam,
             microphoneAudio: microphoneAudio,
             systemAudio: systemAudio,
+            embeddedAudio: embeddedAudio,
             cursorMetadata: nil,
             annotations: nil,
             overlays: nil,
@@ -141,6 +146,26 @@ public struct ProjectMedia: Codable, Equatable, Sendable {
             + transcripts
             + attachments
     }
+
+    public var hasEmbeddedSystemAudio: Bool {
+        embeddedAudio?.screenVideo.contains(.systemAudio) == true
+    }
+}
+
+public struct ProjectEmbeddedAudio: Codable, Equatable, Sendable {
+    public var screenVideo: [ProjectEmbeddedAudioRole]
+
+    public init(screenVideo: [ProjectEmbeddedAudioRole] = []) {
+        self.screenVideo = Array(Set(screenVideo)).sorted { $0.rawValue < $1.rawValue }
+    }
+
+    public var isEmpty: Bool {
+        screenVideo.isEmpty
+    }
+}
+
+public enum ProjectEmbeddedAudioRole: String, Codable, CaseIterable, Hashable, Sendable {
+    case systemAudio
 }
 
 public struct ProjectFile: Codable, Equatable, Sendable {

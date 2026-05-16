@@ -6,16 +6,22 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build-release:
     name: Build release
     runs-on: macos-15
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Read version
         id: version
@@ -45,10 +51,13 @@ jobs:
         run: |
           plutil -lint Packaging/Info.plist
           bash -n scripts/build-app.sh
+          bash -n scripts/capture-device-matrix-smoke.sh
           bash -n scripts/package-app.sh
           bash -n scripts/package-dmg.sh
           bash -n scripts/package-release.sh
+          bash -n scripts/real-media-fixture-smoke.sh
           bash -n scripts/verify-dmg.sh
+          python3 -m py_compile scripts/dmlesson-mcp-server.py
 
       - name: Validate signing configuration
         env:
@@ -134,16 +143,15 @@ jobs:
           scripts/verify-dmg.sh "${dmg_path}"
           xcrun stapler validate "${dmg_path}"
 
-          {
-            echo "zip_path=${zip_path}"
-            echo "zip_sha_path=${zip_path}.sha256"
-            echo "dmg_path=${dmg_path}"
-            echo "dmg_sha_path=${dmg_path}.sha256"
-          } >> "${GITHUB_OUTPUT}"
+          mkdir -p .build/release-artifacts
+          cp "${dmg_path}" .build/release-artifacts/
+          cp "${dmg_path}.sha256" .build/release-artifacts/
+          cp "${zip_path}" .build/release-artifacts/
+          cp "${zip_path}.sha256" .build/release-artifacts/
 
       - name: Write release notes
         run: |
-          cat > .build/release-notes.md <<'EOF'
+          cat > .build/release-artifacts/release-notes.md <<'EOF'
           ## dm-lessonmeld ${{ steps.version.outputs.version }}
 
           Digital Meld LessonMeld is a local-first macOS recording suite for curriculum builders.
@@ -179,15 +187,37 @@ jobs:
           This release is Developer ID signed and notarized. The DMG is the primary install artifact; the zip remains attached for automation and cask update workflows.
           EOF
 
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dm-lessonmeld-release-${{ steps.version.outputs.version }}
+          path: .build/release-artifacts/
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish release
+    runs-on: macos-15
+    needs: build-release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dm-lessonmeld-release-${{ needs.build-release.outputs.version }}
+          path: release-artifacts
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build-release.outputs.version }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            "${{ steps.package.outputs.dmg_path }}" \
-            "${{ steps.package.outputs.dmg_sha_path }}" \
-            "${{ steps.package.outputs.zip_path }}" \
-            "${{ steps.package.outputs.zip_sha_path }}" \
+            "release-artifacts/dm-lessonmeld-${VERSION}-macos.dmg" \
+            "release-artifacts/dm-lessonmeld-${VERSION}-macos.dmg.sha256" \
+            "release-artifacts/dm-lessonmeld-${VERSION}-macos.zip" \
+            "release-artifacts/dm-lessonmeld-${VERSION}-macos.zip.sha256" \
             --repo "${GITHUB_REPOSITORY}" \
-            --title "dm-lessonmeld ${{ steps.version.outputs.version }}" \
-            --notes-file .build/release-notes.md
+            --title "dm-lessonmeld ${VERSION}" \
+            --notes-file release-artifacts/release-notes.md

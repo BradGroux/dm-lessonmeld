@@ -8,7 +8,6 @@ final class LocalAppControlBridge {
     private var observer: NSObjectProtocol?
     private weak var quickRecorder: QuickRecorderModel?
     private weak var preferences: AppPreferencesController?
-    private var seenNonces: Set<String> = []
 
     private init() {}
 
@@ -35,7 +34,6 @@ final class LocalAppControlBridge {
         guard let command, let quickRecorder else {
             return
         }
-        guard seenNonces.insert(command.nonce).inserted else { return }
 
         switch command.action {
         case .showControls:

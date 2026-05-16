@@ -30,12 +30,23 @@ Each run writes:
 - `logs/*.log` with full command output for each automated check.
 - Captured media and `.dmlm` projects when recording options are enabled.
 
+## Real-media Fixtures
+
+Keep real media fixtures outside the repository and point the fixture harness at them:
+
+```sh
+scripts/real-media-fixture-smoke.sh --video /path/to/sample.mp4 --project /path/to/captured.dmlm --render --keep-output
+```
+
+Use `--video` for raw MP4/MOV files and `--project` for existing `.dmlm` bundles. The harness builds the CLI, copies raw videos into disposable lesson bundles, runs project inspect and render-plan checks, and optionally exports final MP4 files with `--render`.
+
 ## Matrix
 
 | Area | Automated by harness | Expected artifact | Notes |
 | --- | --- | --- | --- |
 | CLI build | Always | `.build/debug/dmlesson` | Proves the current checkout can run smoke commands. |
 | Permission status | Always | JSON log | Does not request permissions or change OS state. |
+| Window listing | Always | JSON log | Runs `record windows --json` without starting capture. |
 | Display capture | `--record` or `--all` | `display.mp4` | Requires Screen Recording permission. |
 | Area capture | `--record` or `--all` | `region.mp4` | Captures a 640x360 region at display origin. |
 | Screen project capture | `--record` or `--all` | `project-screen.dmlm/screen.mp4` | Also runs `project inspect --json`. |
@@ -43,7 +54,7 @@ Each run writes:
 | Microphone capture | `--all` or `--record --with-microphone` | `microphone.m4a` | Requires Microphone permission and an input device. |
 | Webcam capture | `--all` or `--record --with-webcam` | `webcam.mov` | Requires Camera permission and a camera. |
 | Combined capture | `--all` or `--record --with-combined` | `project-combined.dmlm` with screen, mic, and webcam files | Exercises mixed capture orchestration. |
-| Window capture | Manual | `.dmlm/screen.mp4` | Use the app recorder Window mode until the CLI exposes window source selection. |
+| Window capture | Manual | `window.mp4` or `.dmlm/screen.mp4` | Run `record windows --json`, choose an ID, then run `record window --window-id <id> ...` or use the app recorder Window mode. |
 | Permission denied or revoked | Manual | Explicit error in app or CLI | Revoke Screen Recording, Microphone, or Camera in System Settings and rerun the relevant capture. |
 | Missing camera or microphone | Manual | Clear device failure or skipped check | Run on hardware without that device, or disable it at the OS/device layer. |
 | Stop timeout and cancel timing | Manual | App status leaves `Stopping` | Start from the app control bar, stop immediately, and verify the status transitions. |
@@ -54,3 +65,4 @@ Each run writes:
 - Treat permission or device failures as product bugs when the message is missing, vague, or leaves the app stuck.
 - Keep captured artifacts local unless the content is safe to share.
 - Do not commit generated media or `.dmlm` smoke projects.
+- Do not commit real fixture media; commit only scripts, fixture notes, and anonymized failure summaries.

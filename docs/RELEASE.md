@@ -38,11 +38,12 @@ bash -n scripts/package-app.sh
 bash -n scripts/package-dmg.sh
 bash -n scripts/package-release.sh
 bash -n scripts/capture-device-matrix-smoke.sh
+bash -n scripts/real-media-fixture-smoke.sh
 ruby -c Casks/dm-lessonmeld.rb
 brew style Casks/dm-lessonmeld.rb
 ```
 
-Run the app-level keyboard, VoiceOver, layout, and capture-device checklists in `docs/ACCESSIBILITY_QA.md`, `docs/UI_REGRESSION_QA.md`, and `docs/CAPTURE_DEVICE_QA.md` before tagging a public release. The capture smoke command is local-only and should run on a machine where recording permissions and test devices are available.
+Run the app-level keyboard, VoiceOver, layout, capture-device, and real-media fixture checklists in `docs/ACCESSIBILITY_QA.md`, `docs/UI_REGRESSION_QA.md`, and `docs/CAPTURE_DEVICE_QA.md` before tagging a public release. The capture and real-media smoke commands are local-only and should run on a machine where recording permissions, test devices, and representative fixture media are available.
 
 ## Build an app bundle
 
@@ -69,7 +70,7 @@ Output:
 .build/dist/dm-lessonmeld-VERSION-macos.zip
 ```
 
-Ad-hoc signed preview builds are suitable for local testing. General users should receive the Developer ID signed and notarized DMG.
+Ad-hoc signed preview builds and older zip-only preview releases are suitable for local testing. General users should receive the Developer ID signed and notarized DMG when a release includes one.
 
 ## Sign
 
@@ -174,16 +175,16 @@ This repository keeps a mirrored cask at:
 Casks/dm-lessonmeld.rb
 ```
 
-After publishing a GitHub Release, update the mirrored cask and the public tap cask with the release version and SHA256:
+After publishing a GitHub Release, update the mirrored cask and the public tap cask with the release version and SHA256. The current cask installs the zip artifact, so hash the zip unless the cask is intentionally switched to the DMG artifact:
 
 ```sh
 VERSION="0.0.4"
 tmpdir="$(mktemp -d)"
 gh release download "v${VERSION}" \
   --repo BradGroux/dm-lessonmeld \
-  --pattern "dm-lessonmeld-${VERSION}-macos.dmg" \
+  --pattern "dm-lessonmeld-${VERSION}-macos.zip" \
   --dir "${tmpdir}"
-shasum -a 256 "${tmpdir}/dm-lessonmeld-${VERSION}-macos.dmg"
+shasum -a 256 "${tmpdir}/dm-lessonmeld-${VERSION}-macos.zip"
 rm -rf "${tmpdir}"
 ```
 

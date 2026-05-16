@@ -33,6 +33,34 @@ struct ProjectBundleTests {
         #expect(summary.issues.isEmpty)
     }
 
+    @Test("Manifest records embedded system audio without a sidecar file")
+    func manifestRecordsEmbeddedSystemAudioWithoutSidecarFile() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Embedded Audio.dmlm", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        try Data("video".utf8).write(to: projectURL.appendingPathComponent("screen.mp4"))
+
+        let manifest = ProjectManifest(
+            metadata: LessonMetadata(lessonTitle: "Embedded Audio"),
+            media: ProjectMedia(
+                screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo, mimeType: "video/mp4"),
+                embeddedAudio: ProjectEmbeddedAudio(screenVideo: [.systemAudio, .systemAudio])
+            )
+        )
+
+        try ProjectBundle.writeManifest(manifest, to: projectURL)
+
+        let loaded = try ProjectBundle.loadManifest(at: projectURL)
+        let summary = try ProjectBundle.inspect(at: projectURL)
+
+        #expect(loaded.media.hasEmbeddedSystemAudio)
+        #expect(loaded.media.embeddedAudio?.screenVideo == [.systemAudio])
+        #expect(loaded.media.systemAudio == nil)
+        #expect(loaded.media.allFiles.map(\.relativePath) == ["screen.mp4"])
+        #expect(summary.fileCount == 1)
+        #expect(summary.issues.isEmpty)
+    }
+
     @Test("Validation reports missing referenced files as warnings")
     func validationReportsMissingFiles() {
         let manifest = ProjectManifest(

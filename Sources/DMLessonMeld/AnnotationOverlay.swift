@@ -13,6 +13,7 @@ final class AnnotationOverlayCoordinator: NSObject, ObservableObject {
     private var toolbarController: AnnotationOverlayToolbarWindowController?
     private var session: AnnotationOverlaySession?
     private var annotationStoreURL: URL?
+    private let annotationWriter = AnnotationSidecarWriter()
     private var cancellables: Set<AnyCancellable> = []
     private var localEscapeMonitor: Any?
 
@@ -97,6 +98,7 @@ final class AnnotationOverlayCoordinator: NSObject, ObservableObject {
 
     func close() {
         NSCursor.arrow.set()
+        flushAnnotationWrites()
         cancellables.removeAll()
         removeEscapeMonitors()
 
@@ -186,10 +188,18 @@ final class AnnotationOverlayCoordinator: NSObject, ObservableObject {
 
     private func persist(_ store: AnnotationStore) {
         guard let annotationStoreURL else { return }
-        do {
-            try Self.writeAnnotationStore(store, to: annotationStoreURL)
-        } catch {
-            NSLog("Digital Meld LessonMeld annotation store write failed: \(error.localizedDescription)")
+        Task {
+            await annotationWriter.schedule(store, to: annotationStoreURL)
+        }
+    }
+
+    private func flushAnnotationWrites() {
+        Task {
+            do {
+                try await annotationWriter.flush()
+            } catch {
+                NSLog("Digital Meld LessonMeld annotation store write failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -231,9 +241,7 @@ final class AnnotationOverlayCoordinator: NSObject, ObservableObject {
     }
 
     private static func writeAnnotationStore(_ store: AnnotationStore, to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try DMLessonJSON.encoder().encode(store)
-        try data.write(to: url, options: [.atomic])
+        try AnnotationSidecarWriter.write(store, to: url)
     }
 }
 
@@ -241,6 +249,7 @@ extension AnnotationOverlayCoordinator: NSWindowDelegate {
     nonisolated func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
             NSCursor.arrow.set()
+            flushAnnotationWrites()
             cancellables.removeAll()
             removeEscapeMonitors()
             overlayWindow = nil

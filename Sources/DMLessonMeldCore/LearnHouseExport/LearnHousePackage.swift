@@ -411,11 +411,9 @@ public struct LearnHouseArchiveBuilder {
 }
 
 public struct LearnHousePackageBuilder {
-    public var copyAssets: Bool
     public var archiveBuilder: LearnHouseArchiveBuilder
 
-    public init(copyAssets: Bool = true, archiveBuilder: LearnHouseArchiveBuilder = LearnHouseArchiveBuilder()) {
-        self.copyAssets = copyAssets
+    public init(archiveBuilder: LearnHouseArchiveBuilder = LearnHouseArchiveBuilder()) {
         self.archiveBuilder = archiveBuilder
     }
 
@@ -517,24 +515,23 @@ public struct LearnHousePackageBuilder {
                 return nil
             }
 
-            let destinationURL = assetsURL.appendingPathComponent(sourceURL.lastPathComponent)
-            if copyAssets {
-                guard !isSymbolicLink(sourceURL) else {
-                    throw LearnHousePackageError.unsafeSource(sourceURL.path)
-                }
-                try ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: assetsURL.deletingLastPathComponent())
-                if FileManager.default.fileExists(atPath: destinationURL.path) {
-                    guard !isSymbolicLink(destinationURL) else {
-                        throw LearnHousePackageError.unsafeDestination(destinationURL.path)
-                    }
-                    try FileManager.default.removeItem(at: destinationURL)
-                }
-                try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            let destinationRelativePath = "assets/\(file.relativePath)"
+            let destinationURL = assetsURL.appendingPathComponent(file.relativePath)
+            guard !isSymbolicLink(sourceURL) else {
+                throw LearnHousePackageError.unsafeSource(sourceURL.path)
             }
+            try ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: assetsURL)
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                guard !isSymbolicLink(destinationURL) else {
+                    throw LearnHousePackageError.unsafeDestination(destinationURL.path)
+                }
+                try FileManager.default.removeItem(at: destinationURL)
+            }
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
 
             return LearnHousePackageFile(
                 role: file.role,
-                relativePath: "assets/\(sourceURL.lastPathComponent)",
+                relativePath: destinationRelativePath,
                 sha256: try sha256Hex(for: destinationURL),
                 byteCount: try byteCount(for: destinationURL)
             )

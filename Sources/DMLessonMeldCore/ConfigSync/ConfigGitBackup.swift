@@ -81,13 +81,16 @@ public struct ConfigGitBackupManager: Sendable {
             return ConfigGitBackupStatus(rootPath: rootURL.path, repositoryInitialized: false, changedPaths: [])
         }
 
+        let plan = try planner.plan(rootURL: rootURL)
+        let reportablePaths = Set(plan.includePaths + [".gitignore"])
         let output = try runGit(["status", "--porcelain", "--untracked-files=all"], rootURL: rootURL)
         let changed = output
             .split(separator: "\n")
             .compactMap { line -> String? in
                 guard line.count >= 4 else { return nil }
                 let path = String(line.dropFirst(3))
-                return path.components(separatedBy: " -> ").last ?? path
+                let currentPath = path.components(separatedBy: " -> ").last ?? path
+                return reportablePaths.contains(currentPath) ? currentPath : nil
             }
             .sorted()
 

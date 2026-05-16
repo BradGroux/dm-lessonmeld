@@ -12,10 +12,10 @@ Sources/
   DMLessonMeld/            SwiftUI/AppKit app, windows, recorder UI, settings, onboarding
   DMLessonMeldCLI/         `dmlesson` command-line interface
   DMLessonMeldCore/        Shared local-first suite core
-    AgentBridge/           Agent-readable manifests and command catalog
+    AgentBridge/           Agent-readable manifests, command catalog, and target workflow catalog
     Annotation/            Shared annotation model and undoable store
     Audio/                 Microphone capture, audio models, waveform peaks
-    Captions/              Transcript and caption import/export helpers
+    Captions/              Transcript/caption import/export helpers plus local transcription model readiness
     Capture/               Screen, region, webcam, cursor/keystroke metadata
     ConfigSync/            Safe local Git config/template backup planning and commits
     Editor/                Edit decision lists, canvas/camera/audio settings, trim plans, AVFoundation trim export
@@ -35,6 +35,7 @@ Tests/
 
 - Normal operation has no backend.
 - Secrets belong in macOS Keychain, not project/config files.
+- Local app-control tokens are stored in Keychain, with a short-lived persisted nonce cache to reject replayed local commands.
 - Git sync is local-first, opt-in, and only for non-sensitive config/templates/presets. Adding a GitHub remote is left to the user or a future explicit integration.
 - The app owns the interactive permission/recording path. The CLI also supports direct local capture for automation, smoke tests, and agent workflows.
 - Settings are persisted locally through `UserDefaults` as a versioned `LessonMeldPreferences` snapshot.
@@ -50,10 +51,10 @@ Tests/
 
 - Effect controls beyond trims, cuts, zooms, markers, annotations, and export readiness.
 - iOS device capture.
-- Local transcription model download/runtime.
+- Local transcription model download/runtime. Model path preferences and readiness checks are in place.
 - Higher-fidelity renderer support for caption styling, cursor styling, zoom/pan keyframes, GIF/alpha output, and parallel rendering.
 - Apple Developer account provisioning for public binary publication. Release packaging, DMG generation, Developer ID signing/notarization enforcement, and the Homebrew cask mirror are wired.
 
 ## Agent boundary
 
-Agents should interact through deterministic project files and CLI JSON output. Commands must default to metadata-only output and require explicit flags before exposing transcript or media paths.
+Agents should interact through deterministic project files and CLI JSON output. Commands must default to metadata-only output and require explicit flags before exposing transcript or media paths. `agent workflows --target openclaw|codex|veritas-kanban --json` exposes safe command sequences for common automation handoffs. `scripts/dmlesson-mcp-server.py` wraps the safe read/plan subset as stdio MCP tools without exposing recording or export execution.

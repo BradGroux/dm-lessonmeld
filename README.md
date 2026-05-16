@@ -15,14 +15,14 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - Live annotation overlay with cursor, pen, highlighter, eraser, line, box, ellipse, arrow, text, laser pointer, whiteboard, blackboard, colors, line weights, text sizes, undo/redo, copy, and clear controls
 - Webcam picture-in-picture settings for aspect ratio, shape, corners, mirroring, border, shadow, timed layout regions, and reactions
 - Timeline edit-decision sidecars for trims, cuts, speed regions, markers, zoom regions, timed video overlays, masks, and highlights
-- Render planning/export with MP4, MOV, and ProRes MOV output, explicit resolution, frame-rate, codec, quality, concurrency, hardware acceleration, gated alpha/GIF states, webcam PiP, audio gain regions, background music, cursor/click/shortcut effects, zooms, masks/highlights, overlays, annotations, and styled caption burn-in
-- Caption and transcript import, timeline editing, styling, and sidecar exporters
+- Render planning/export with MP4, MOV, and ProRes MOV output, quality and codec controls, plan-recorded resolution/frame-rate/concurrency settings, hardware acceleration intent, gated alpha/GIF states, webcam PiP, audio gain regions, background music, cursor/click/shortcut effects, zooms, masks/highlights, overlays, annotations, and styled caption burn-in
+- Caption and transcript import, local transcription model readiness checks, timeline editing, styling, and sidecar exporters
 - Shareable `.dmlpreset` files for reusing project editor styles plus capture, annotation, and export defaults across lesson bundles
 - Raw asset extraction and local `.lessonshare` packages with final video, project sidecars, raw media, transcripts/captions, and checksums
 - Local package export for course publishing workflows
 - Git-safe settings/template backup planning for non-sensitive config
-- Agent-readable project manifests and signed local app-control messages for automation
-- `dmlesson` CLI for capture, project, edit, render, export, package, settings, config backup, annotations, and app-control workflows
+- Agent-readable project manifests, target-specific workflow JSON, a stdio MCP wrapper for safe CLI tools, and Keychain-backed signed local app-control messages for automation
+- `dmlesson` CLI for capture, project, edit, render, export, package, settings, config backup, annotations, transcription status, and app-control workflows
 
 ## Documentation
 
@@ -30,6 +30,7 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - [Architecture notes](docs/ARCHITECTURE.md)
 - [Release guide](docs/RELEASE.md)
 - [Capture device QA](docs/CAPTURE_DEVICE_QA.md)
+- [Codebase audit](docs/CODEBASE_AUDIT.md)
 - [Product requirements](docs/PRD.md)
 - [Roadmap](docs/ROADMAP.md)
 - [LearnHouse export](docs/LEARNHOUSE_EXPORT.md)
@@ -50,7 +51,7 @@ The first-run onboarding window checks these permissions and links to the releva
 
 ## Install from a Release
 
-For signed public releases, download the notarized DMG from GitHub Releases:
+For signed public releases that include a notarized DMG, download the DMG from GitHub Releases:
 
 ```text
 dm-lessonmeld-VERSION-macos.dmg
@@ -58,7 +59,7 @@ dm-lessonmeld-VERSION-macos.dmg
 
 Open the DMG, drag **Digital Meld LessonMeld.app** to Applications, then open the app and grant macOS permissions when prompted.
 
-The release zip remains attached for automation and cask update workflows. Local ad-hoc preview builds can still require the Gatekeeper workaround in [docs/RELEASE.md](docs/RELEASE.md#opening-local-preview-builds).
+The release zip remains attached for automation and cask update workflows. Older preview releases may be zip-only; those are not the DMG-first public distribution path. Local ad-hoc preview builds can still require the Gatekeeper workaround in [docs/RELEASE.md](docs/RELEASE.md#opening-local-preview-builds).
 
 ## Install with Homebrew
 
@@ -123,17 +124,30 @@ See [docs/RELEASE.md](docs/RELEASE.md) for the full release checklist.
 ```sh
 swift build
 swift test
+scripts/cli-smoke-tests.sh
+```
+
+MCP wrapper smoke:
+
+```sh
+scripts/dmlesson-mcp-server.py --self-test
 ```
 
 ## CLI Examples
 
+Safe JSON and docs-drift checks run in `scripts/cli-smoke-tests.sh`. Recording commands require local macOS permissions and real devices; use `scripts/capture-device-matrix-smoke.sh` for those capture passes.
+Use `scripts/real-media-fixture-smoke.sh` with local MP4/MOV or `.dmlm` fixtures when validating render behavior against representative media.
+Use `scripts/dmlesson-mcp-server.py` as a local stdio MCP wrapper for safe inspect, plan, manifest, workflow, and transcription-status tools.
+
 ```sh
 swift run dmlesson permissions status --json
 swift run dmlesson settings defaults --json
-swift run dmlesson record display --output /tmp/screen.mp4
-swift run dmlesson record region --output /tmp/region.mp4 --x 0 --y 0 --width 1280 --height 720
-swift run dmlesson record microphone --output /tmp/microphone.m4a --format m4a
-swift run dmlesson record webcam --output /tmp/webcam.mov
+swift run dmlesson record display --duration 10 --output /tmp/screen.mp4
+swift run dmlesson record region --duration 10 --output /tmp/region.mp4 --x 0 --y 0 --width 1280 --height 720
+swift run dmlesson record windows --json
+swift run dmlesson record window --window-id 123 --duration 10 --output /tmp/window.mp4
+swift run dmlesson record microphone --duration 10 --output /tmp/microphone.m4a --format m4a
+swift run dmlesson record webcam --duration 10 --output /tmp/webcam.mov
 swift run dmlesson project create --lesson-title "Intro" --output /tmp/Intro.dmlm
 swift run dmlesson edit validate /tmp/Intro.dmlm --json
 swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --json

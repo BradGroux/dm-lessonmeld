@@ -86,12 +86,6 @@ struct ProjectEditorView: View {
         .onReceive(model.$manifest) { _ in syncProjectCommandState() }
         .onReceive(model.$isRendering) { _ in syncProjectCommandState() }
         .onReceive(model.$dirtyAreas) { _ in syncProjectCommandState() }
-        .onChange(of: model.metadataDirtyFingerprint) { _, _ in model.refreshDirtyState(.metadata) }
-        .onChange(of: model.markerRows) { _, _ in model.refreshDirtyState(.markers) }
-        .onChange(of: model.editDecisionDirtyFingerprint) { _, _ in model.refreshDirtyState(.editDecisions) }
-        .onChange(of: model.editorSettingsDirtyFingerprint) { _, _ in model.refreshDirtyState(.editorSettings) }
-        .onChange(of: model.overlayRows) { _, _ in model.refreshDirtyState(.overlays) }
-        .onChange(of: model.captionDirtyFingerprint) { _, _ in model.refreshDirtyState(.captions) }
         .confirmsWindowClose(confirmWindowClose)
     }
 

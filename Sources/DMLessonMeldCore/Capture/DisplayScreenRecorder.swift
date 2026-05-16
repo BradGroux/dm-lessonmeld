@@ -32,6 +32,7 @@ public struct DisplayRecordingRequest: Sendable {
 public enum DisplayScreenRecorderError: Error, LocalizedError {
     case noDisplayAvailable
     case requestedDisplayNotFound(CGDirectDisplayID)
+    case alreadyRecording
     case cannotAddWriterInput
     case cannotAddAudioInput
     case writerFailed(String)
@@ -44,6 +45,8 @@ public enum DisplayScreenRecorderError: Error, LocalizedError {
             "No capturable display is available."
         case .requestedDisplayNotFound(let displayID):
             "Requested display was not found: \(displayID)."
+        case .alreadyRecording:
+            "A display recording is already in progress."
         case .cannotAddWriterInput:
             "Could not add video input to the asset writer."
         case .cannotAddAudioInput:
@@ -59,8 +62,8 @@ public enum DisplayScreenRecorderError: Error, LocalizedError {
 }
 
 public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    private let queue = DispatchQueue(label: "io.digitalmeld.dm-lessonmeld.display-recorder", qos: .userInitiated)
-    private let lock = NSLock()
+    private let stateQueue = DispatchQueue(label: "io.digitalmeld.dm-lessonmeld.display-recorder", qos: .userInitiated)
+    private let stateQueueKey = DispatchSpecificKey<Void>()
 
     private var stream: SCStream?
     private var writer: AVAssetWriter?
@@ -79,12 +82,13 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
 
     public override init() {
         super.init()
+        stateQueue.setSpecific(key: stateQueueKey, value: ())
     }
 
     public func setFirstFrameHandler(_ handler: (@Sendable () -> Void)?) {
-        lock.lock()
-        firstFrameHandler = handler
-        lock.unlock()
+        syncState {
+            firstFrameHandler = handler
+        }
     }
 
     public func record(_ request: DisplayRecordingRequest) async throws -> RecordingResult {
@@ -130,13 +134,20 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
         configuration.capturesAudio = request.options.captureSystemAudio
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
-        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
-        if request.options.captureSystemAudio {
-            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
-        }
-        try await stream.startCapture()
+        do {
+            try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: stateQueue)
+            if request.options.captureSystemAudio {
+                try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: stateQueue)
+            }
+            try await stream.startCapture()
 
-        self.stream = stream
+            syncState {
+                self.stream = stream
+            }
+        } catch {
+            resetStateAfterFailedStart()
+            throw error
+        }
 
         do {
             try await Task.sleep(nanoseconds: UInt64(request.durationSeconds * 1_000_000_000))
@@ -162,44 +173,40 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
     }
 
     public func pauseRecording() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard stream != nil, !isPaused else { return }
-        isPaused = true
-        pauseStartedAt = Date()
+        syncState {
+            guard stream != nil, !isPaused else { return }
+            isPaused = true
+            pauseStartedAt = Date()
+        }
     }
 
     public func resumeRecording() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard isPaused else { return }
-        if let pauseStartedAt {
-            totalPausedDuration += Date().timeIntervalSince(pauseStartedAt)
+        syncState {
+            guard isPaused else { return }
+            if let pauseStartedAt {
+                totalPausedDuration += Date().timeIntervalSince(pauseStartedAt)
+            }
+            isPaused = false
+            pauseStartedAt = nil
         }
-        isPaused = false
-        pauseStartedAt = nil
     }
 
     public func stopRecording(fps: Int, captureQuality: CaptureQuality, isHDR: Bool) async throws -> RecordingResult {
-        guard let stream else {
-            throw CaptureError.streamNotRunning
-        }
+        let stream = try activeStream()
 
         try await stream.stopCapture()
-        self.stream = nil
-        isPaused = false
-        pauseStartedAt = nil
-        totalPausedDuration = 0
+        clearStreamState()
 
-        let outputURL = try await finishWriter()
-        guard writtenFrames > 0 else {
+        let writerState = takeWriterState()
+        let outputURL = try await finishWriter(writerState)
+        guard writerState.writtenFrames > 0 else {
             throw DisplayScreenRecorderError.noFramesRecorded
         }
 
         return RecordingResult(
             screenVideoURL: outputURL,
-            systemAudioURL: writtenAudioSamples > 0 ? outputURL : nil,
-            screenSize: outputSize,
+            systemAudioURL: writerState.writtenAudioSamples > 0 ? outputURL : nil,
+            screenSize: writerState.outputSize,
             fps: fps,
             captureQuality: captureQuality,
             isHDR: isHDR,
@@ -211,9 +218,6 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
         guard sampleBuffer.isValid else {
             return
         }
-
-        lock.lock()
-        defer { lock.unlock() }
 
         guard !isPaused else {
             return
@@ -323,9 +327,9 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
     }
 
     public func stream(_ stream: SCStream, didStopWithError error: any Error) {
-        lock.lock()
-        writerError = error
-        lock.unlock()
+        syncState {
+            writerError = error
+        }
     }
 
     private func selectDisplay(from displays: [SCDisplay], displayID: CGDirectDisplayID?) throws -> SCDisplay {
@@ -389,22 +393,23 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             audioInput = nil
         }
 
-        lock.lock()
-        self.writer = writer
-        videoInput = input
-        self.audioInput = audioInput
-        firstPresentationTime = nil
-        writtenFrames = 0
-        writtenAudioSamples = 0
-        writerError = nil
-        self.outputURL = outputURL
-        outputSize = CGSize(width: width, height: height)
-        lock.unlock()
+        try syncState {
+            guard stream == nil, self.writer == nil else {
+                throw DisplayScreenRecorderError.alreadyRecording
+            }
+            self.writer = writer
+            videoInput = input
+            self.audioInput = audioInput
+            firstPresentationTime = nil
+            writtenFrames = 0
+            writtenAudioSamples = 0
+            writerError = nil
+            self.outputURL = outputURL
+            outputSize = CGSize(width: width, height: height)
+        }
     }
 
-    private func finishWriter() async throws -> URL {
-        let state = takeWriterState()
-
+    private func finishWriter(_ state: WriterState) async throws -> URL {
         if let writerError = state.writerError {
             throw DisplayScreenRecorderError.writerFailed(writerError.localizedDescription)
         }
@@ -428,24 +433,76 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
     }
 
     private func takeWriterState() -> WriterState {
-        let writer: AVAssetWriter?
-        let input: AVAssetWriterInput?
-        let outputURL: URL?
-        let writerError: Error?
+        syncState {
+            let writer = self.writer
+            let input = videoInput
+            let audioInput = self.audioInput
+            let outputURL = self.outputURL
+            let writerError = self.writerError
+            let writtenFrames = self.writtenFrames
+            let writtenAudioSamples = self.writtenAudioSamples
+            let outputSize = self.outputSize
 
-        lock.lock()
-        writer = self.writer
-        input = videoInput
-        let audioInput = self.audioInput
-        outputURL = self.outputURL
-        writerError = self.writerError
-        self.writer = nil
-        videoInput = nil
-        self.audioInput = nil
-        self.outputURL = nil
-        lock.unlock()
+            self.writer = nil
+            videoInput = nil
+            self.audioInput = nil
+            self.outputURL = nil
 
-        return WriterState(writer: writer, input: input, audioInput: audioInput, outputURL: outputURL, writerError: writerError)
+            return WriterState(
+                writer: writer,
+                input: input,
+                audioInput: audioInput,
+                outputURL: outputURL,
+                writerError: writerError,
+                writtenFrames: writtenFrames,
+                writtenAudioSamples: writtenAudioSamples,
+                outputSize: outputSize
+            )
+        }
+    }
+
+    private func activeStream() throws -> SCStream {
+        try syncState {
+            guard let stream else {
+                throw CaptureError.streamNotRunning
+            }
+            return stream
+        }
+    }
+
+    private func clearStreamState() {
+        syncState {
+            stream = nil
+            isPaused = false
+            pauseStartedAt = nil
+            totalPausedDuration = 0
+        }
+    }
+
+    private func resetStateAfterFailedStart() {
+        syncState {
+            writer?.cancelWriting()
+            stream = nil
+            writer = nil
+            videoInput = nil
+            audioInput = nil
+            firstPresentationTime = nil
+            writtenFrames = 0
+            writtenAudioSamples = 0
+            writerError = nil
+            outputURL = nil
+            outputSize = .zero
+            isPaused = false
+            pauseStartedAt = nil
+            totalPausedDuration = 0
+        }
+    }
+
+    private func syncState<T>(_ work: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: stateQueueKey) != nil {
+            return try work()
+        }
+        return try stateQueue.sync(execute: work)
     }
 
     private func frameIsComplete(_ sampleBuffer: CMSampleBuffer) -> Bool {
@@ -464,6 +521,9 @@ private struct WriterState {
     var audioInput: AVAssetWriterInput?
     var outputURL: URL?
     var writerError: Error?
+    var writtenFrames: Int
+    var writtenAudioSamples: Int
+    var outputSize: CGSize
 }
 
 private final class AssetWriterBox: @unchecked Sendable {

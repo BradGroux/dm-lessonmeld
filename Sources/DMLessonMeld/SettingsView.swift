@@ -194,6 +194,8 @@ struct LessonMeldSettingsView: View {
             cameraSection
         case .audio:
             audioSection
+        case .transcription:
+            transcriptionSection
         case .editor:
             editorSection
         case .annotations:
@@ -255,6 +257,39 @@ struct LessonMeldSettingsView: View {
             .pickerStyle(.menu)
             .disabled(!draft.capture.captureMicrophone)
             Toggle("Capture system audio by default", isOn: binding(\.capture.captureSystemAudio))
+        }
+    }
+
+    private var transcriptionSection: some View {
+        let status = TranscriptionModelInspector.status(for: draft.transcription)
+        return SettingsSectionView(title: "Transcription", subtitle: "Local model readiness for future transcript generation.", scope: .futureRecordings) {
+            Toggle("Enable local transcription workflow", isOn: binding(\.transcription.enabled))
+            Picker("Runtime", selection: binding(\.transcription.runtime)) {
+                ForEach(TranscriptionRuntime.allCases) { runtime in
+                    Text(runtime.displayName).tag(runtime)
+                }
+            }
+            TextField("Model file", text: binding(\.transcription.modelPath))
+                .font(.system(.body, design: .monospaced))
+            HStack {
+                Button("Choose Model...") {
+                    chooseTranscriptionModelFile()
+                }
+                Button("Use Default Path") {
+                    draft.transcription.modelPath = TranscriptionPreferences.defaultModelFilePath
+                    saveMessage = "Unsaved"
+                }
+            }
+            TextField("Language", text: binding(\.transcription.language))
+                .frame(width: 140)
+            Toggle("Transcribe after recording", isOn: binding(\.transcription.autoTranscribeAfterRecording))
+                .disabled(!draft.transcription.enabled)
+            Toggle("Write caption sidecars after transcription", isOn: binding(\.transcription.writeCaptionSidecars))
+                .disabled(!draft.transcription.enabled)
+            Label(status.message, systemImage: status.isReady ? "checkmark.circle" : (draft.transcription.enabled ? "exclamationmark.triangle" : "pause.circle"))
+                .foregroundStyle(status.isReady ? .green : (draft.transcription.enabled ? .orange : .secondary))
+            diagnosticsRow("Expanded model path", status.expandedModelPath)
+            diagnosticsRow("Recommended model folder", status.recommendedDirectory)
         }
     }
 
@@ -737,6 +772,8 @@ struct LessonMeldSettingsView: View {
             return draft.capture.captureMicrophone != saved.capture.captureMicrophone
                 || draft.capture.microphoneDeviceID != saved.capture.microphoneDeviceID
                 || draft.capture.captureSystemAudio != saved.capture.captureSystemAudio
+        case .transcription:
+            return draft.transcription != saved.transcription
         case .editor:
             return false
         case .annotations:
@@ -784,6 +821,8 @@ struct LessonMeldSettingsView: View {
             draft.capture.captureMicrophone = saved.capture.captureMicrophone
             draft.capture.microphoneDeviceID = saved.capture.microphoneDeviceID
             draft.capture.captureSystemAudio = saved.capture.captureSystemAudio
+        case .transcription:
+            draft.transcription = saved.transcription
         case .editor:
             break
         case .annotations:
@@ -812,6 +851,18 @@ struct LessonMeldSettingsView: View {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         draft = LessonMeldPreferences()
         saveMessage = "Defaults staged"
+    }
+
+    private func chooseTranscriptionModelFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Transcription Model"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        draft.transcription.modelPath = url.path
+        saveMessage = "Unsaved"
     }
 }
 

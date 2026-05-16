@@ -361,6 +361,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
     public var screenVideo: RenderMediaSource
     public var webcamOverlay: PictureInPictureOverlay?
     public var audioSources: [RenderMediaSource]
+    public var embeddedAudio: ProjectEmbeddedAudio?
     public var cursorSource: RenderMediaSource?
     public var annotationSource: RenderMediaSource?
     public var overlaySource: RenderMediaSource?
@@ -381,6 +382,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         screenVideo: RenderMediaSource,
         webcamOverlay: PictureInPictureOverlay? = nil,
         audioSources: [RenderMediaSource] = [],
+        embeddedAudio: ProjectEmbeddedAudio? = nil,
         cursorSource: RenderMediaSource? = nil,
         annotationSource: RenderMediaSource? = nil,
         overlaySource: RenderMediaSource? = nil,
@@ -400,6 +402,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         self.screenVideo = screenVideo
         self.webcamOverlay = webcamOverlay
         self.audioSources = audioSources
+        self.embeddedAudio = embeddedAudio
         self.cursorSource = cursorSource
         self.annotationSource = annotationSource
         self.overlaySource = overlaySource
@@ -519,6 +522,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             screenVideo: screenSource,
             webcamOverlay: webcamOverlay,
             audioSources: audioSources,
+            embeddedAudio: manifest.media.embeddedAudio,
             cursorSource: cursorSource,
             annotationSource: annotationSource,
             overlaySource: overlaySource,
@@ -535,7 +539,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
     }
 
     private static func transcriptRenderSource(manifest: ProjectManifest, projectURL: URL) throws -> RenderMediaSource? {
-        if let transcript = manifest.media.transcripts.first {
+        if let transcript = manifest.media.transcripts.first(where: isJSONSidecar) {
             return RenderMediaSource(
                 role: .transcript,
                 relativePath: transcript.relativePath,
@@ -544,9 +548,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             )
         }
 
-        guard let captions = manifest.media.captions.first(where: {
-            $0.mimeType == "application/json" || $0.relativePath.lowercased().hasSuffix(".json")
-        }) else {
+        guard let captions = manifest.media.captions.first(where: isJSONSidecar) else {
             return nil
         }
         return RenderMediaSource(
@@ -555,6 +557,10 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             url: try ProjectBundle.projectLocalFileURL(for: captions, in: projectURL),
             mimeType: captions.mimeType
         )
+    }
+
+    private static func isJSONSidecar(_ file: ProjectFile) -> Bool {
+        file.mimeType == "application/json" || file.relativePath.lowercased().hasSuffix(".json")
     }
 
     public func validate(options: RenderValidationOptions = RenderValidationOptions()) -> [RenderValidationIssue] {

@@ -151,6 +151,7 @@ cd "$repo_root" || exit 2
 echo "Output: $output_root"
 run_step "build CLI" "$swift_bin" build --product dmlesson
 run_step "permissions status" "$cli_path" permissions status --json
+run_step "window listing" "$cli_path" record windows --json
 
 if [[ "$record" -eq 1 ]]; then
   display_file="$output_root/display.mp4"
@@ -214,7 +215,7 @@ else
   skip_capture "combined capture" "pass --all or --with-combined with --record"
 fi
 
-record_status "MANUAL" "window capture" "use the app recorder Window mode and verify screen.mp4 in the resulting project"
+record_status "MANUAL" "window capture" "choose an ID from record windows --json, run record window --window-id <id>, and verify the output"
 record_status "MANUAL" "permission denied or revoked" "revoke Screen Recording, Microphone, or Camera in System Settings, rerun the relevant capture, and verify the error is explicit"
 record_status "MANUAL" "missing camera or microphone" "run on hardware without that device or disable it at the OS/device layer and verify the row reports a clear failure"
 record_status "MANUAL" "stop timeout and cancel timing" "start from the app control bar, stop immediately, and verify the status leaves Stopping"

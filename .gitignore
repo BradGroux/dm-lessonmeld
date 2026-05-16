@@ -27,3 +27,4 @@ Secrets/
 
 # Keep source-owned documentation assets explicit if they are added later.
 !docs/assets/
+!docs/assets/**

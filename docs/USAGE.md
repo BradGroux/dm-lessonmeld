@@ -43,7 +43,7 @@ When you press **Stop**, LessonMeld opens the saved lesson in the editor. The `.
 
 Use **Import Video** in the sidebar, **File > Import Video**, the command palette, or the menu bar extra to import an existing MP4 or MOV.
 
-LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the timeline editor immediately. Imported videos use the full editing workspace: a large preview canvas, custom playback controls, trim in/out points, cut blocks, zoom blocks, overlays, markers, annotation controls, export controls, and a bottom timeline. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle.
+LessonMeld copies the source video into a local `.dmlm` bundle as the primary screen video, writes the project manifest, and opens the timeline editor immediately. Imported videos use the full editing workspace: a large preview canvas, custom playback controls, trim in/out points, cut blocks, zoom blocks, overlays, markers, annotation controls, export controls, and a bottom timeline. Recording-only tracks such as webcam picture-in-picture, cursor metadata, microphone, and system audio are available only when they were captured or added to the bundle. ScreenCaptureKit system audio is stored as embedded audio in `screen.mp4` and marked in the manifest rather than written as a separate sidecar.
 
 ## Edit a Project
 
@@ -102,14 +102,14 @@ Search **Timeline Editing Shortcuts** in the command palette for the active keyb
 
 Use the **Audio** inspector tab to adjust captured sound and lesson pacing.
 
-- Control screen, microphone, and system audio gain with mute and solo toggles.
+- Control screen, microphone, and system audio gain with mute and solo toggles. Embedded system audio follows the screen audio controls; separate system audio controls are available when the bundle has a system audio sidecar.
 - Import background music into `audio/assets/` inside the `.dmlm` bundle.
 - Set music start time, source offset, duration, loop behavior, fade in/out, and duck-under-voice volume.
 - Add volume regions at the playhead, then drag or resize them in the **Audio** timeline lane.
 - Choose whether each volume region targets all tracks, screen audio, microphone, system audio, or music.
 - Add speed regions for slow-downs, fast review, typing cleanup, or dead-air cleanup.
 
-Volume and music settings are saved in `editor-settings.json` and are applied by the full render exporter. Speed regions are saved in `edit-decisions.json`; render inspection blocks export while speed regions exist until AV retiming support is implemented, so the unsupported state is explicit instead of silently producing the wrong video.
+Volume and music settings are saved in `editor-settings.json` and are applied by the full render exporter. Speed regions are saved in `edit-decisions.json` and applied by the render exporter through AV retiming, so fast-review and dead-air cleanup regions produce a retimed output instead of a sidecar-only edit.
 
 ## Edit Captions
 
@@ -124,11 +124,27 @@ Use the **Captions** inspector tab to review, retime, style, and export caption 
 
 Render/export uses the JSON transcript source for styled burned-in captions. LearnHouse packaging includes the project-local caption and transcript sidecars because they are attached to the lesson manifest.
 
+## Configure Local Transcription
+
+Use **Settings > Transcription** to configure the local transcription workflow before transcript generation is wired into recording completion.
+
+- Local transcription is disabled by default.
+- The default model path is `~/Library/Application Support/DMLessonMeld/Models/ggml-base.en.bin`.
+- The current runtime setting is `whisper.cpp`; the app validates that the configured model path exists and is readable.
+- Automatic post-recording transcription is stored as a preference but stays inert until a runtime runner is connected.
+- Caption sidecar export remains available from imported or manually edited transcripts.
+
+CLI status check:
+
+```sh
+swift run dmlesson transcript model-status --settings /tmp/settings.json --json
+```
+
 ## Export and Share Locally
 
 Use the **Export** inspector tab to keep export actions separate:
 
-- **Render Settings** controls quality, container, resolution, frame rate, codec, hardware acceleration, concurrency, ProRes MOV output, and explicit unavailable states for alpha/GIF.
+- **Render Settings** controls quality, container, codec, ProRes MOV output, and explicit unavailable states for alpha/GIF. Resolution, frame-rate, hardware acceleration, and concurrency settings are recorded in the render plan for queue/pipeline support, but the current single-render exporter may not apply every value yet.
 - **Local Render** writes a final MP4/MOV, including ProRes MOV when Codec is set to ProRes.
 - **Local Share Package** builds a `.lessonshare` directory with project metadata, editable sidecars, raw assets, optional final video, and checksums.
 - **Raw Assets** extracts source files from the `.dmlm` bundle into a standalone raw-assets folder.
@@ -245,11 +261,41 @@ Use `dmlesson` for automation and smoke tests:
 ```sh
 swift run dmlesson --help
 swift run dmlesson permissions status --json
+swift run dmlesson record windows --json
+swift run dmlesson record window --window-id 123 --duration 10 --output /tmp/window.mp4
 swift run dmlesson project create --lesson-title "Intro" --output /tmp/Intro.dmlm
 swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --json
+swift run dmlesson transcript model-status --settings /tmp/settings.json --json
+swift run dmlesson agent workflows --target codex --json
 ```
 
 JSON output is intended to be stable enough for local agents and scripts. Metadata is safe by default; media paths and transcript contents should be included only when explicitly requested.
+
+Agent workflow JSON is available for `openclaw`, `codex`, and `veritas-kanban` targets. These workflows list safe command sequences for inspection, validation, packaging, and handoff without exposing media paths unless explicit flags are used.
+
+## MCP Wrapper
+
+`scripts/dmlesson-mcp-server.py` exposes a small stdio MCP server around safe `dmlesson` JSON commands:
+
+- `dmlesson_project_inspect`
+- `dmlesson_render_plan`
+- `dmlesson_agent_manifest`
+- `dmlesson_agent_workflows`
+- `dmlesson_transcript_model_status`
+
+The wrapper defaults to `.build/debug/dmlesson` when it exists, falls back to `swift run dmlesson`, and accepts `DMLESSON_CLI=/path/to/dmlesson` for packaged binaries. It does not expose recording or export execution tools.
+
+Smoke-test it locally:
+
+```sh
+scripts/dmlesson-mcp-server.py --self-test
+```
+
+Run the non-capturing CLI regression smoke before changing documented commands or JSON output:
+
+```sh
+scripts/cli-smoke-tests.sh
+```
 
 For local release smoke checks across capture devices and permission states:
 

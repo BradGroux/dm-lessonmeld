@@ -1,5 +1,7 @@
 import CryptoKit
 import Foundation
+import LocalAuthentication
+import Security
 
 public enum LocalAppControl {
     public static let notificationName = Notification.Name("io.digitalmeld.lessonmeld.app-control")
@@ -17,6 +19,13 @@ public enum LocalAppControl {
         get throws {
             let directory = try applicationSupportDirectory()
             return directory.appendingPathComponent("local-control-token")
+        }
+    }
+
+    public static var replayCacheURL: URL {
+        get throws {
+            let directory = try applicationSupportDirectory()
+            return directory.appendingPathComponent("local-control-replay-cache.json")
         }
     }
 
@@ -48,13 +57,28 @@ public enum LocalAppControl {
     }
 
     public static func ensureControlToken() throws -> String {
-        let tokenURL = try controlTokenURL
-        if FileManager.default.fileExists(atPath: tokenURL.path) {
-            return try readControlToken(at: tokenURL)
+        try ensureControlToken(
+            store: KeychainControlTokenStore(),
+            legacyTokenURL: try controlTokenURL
+        )
+    }
+
+    static func ensureControlToken(store: LocalAppControlTokenStore, legacyTokenURL: URL?) throws -> String {
+        if let token = try store.readControlToken() {
+            try removeLegacyControlToken(at: legacyTokenURL)
+            return token
+        }
+
+        if let legacyTokenURL,
+           FileManager.default.fileExists(atPath: legacyTokenURL.path) {
+            let token = try readControlToken(at: legacyTokenURL)
+            try store.writeControlToken(token)
+            try removeLegacyControlToken(at: legacyTokenURL)
+            return token
         }
 
         let token = generateControlToken()
-        try writeControlToken(token, to: tokenURL)
+        try store.writeControlToken(token)
         return token
     }
 
@@ -70,7 +94,25 @@ public enum LocalAppControl {
             return nil
         }
 
-        return isAuthentic(command, token: token, now: now) ? command : nil
+        return authenticatedCommand(
+            command,
+            token: token,
+            replayCacheURL: try? replayCacheURL,
+            now: now
+        )
+    }
+
+    static func authenticatedCommand(
+        from userInfo: [AnyHashable: Any]?,
+        token: String,
+        replayCacheURL: URL,
+        now: Date = Date()
+    ) -> LocalAppControlCommand? {
+        guard let command = LocalAppControlCommand(userInfo: userInfo) else {
+            return nil
+        }
+
+        return authenticatedCommand(command, token: token, replayCacheURL: replayCacheURL, now: now)
     }
 
     public static func signedCommand(
@@ -102,6 +144,21 @@ public enum LocalAppControl {
         return constantTimeEqual(command.signature, expectedSignature)
     }
 
+    private static func authenticatedCommand(
+        _ command: LocalAppControlCommand,
+        token: String,
+        replayCacheURL: URL?,
+        now: Date
+    ) -> LocalAppControlCommand? {
+        guard isAuthentic(command, token: token, now: now),
+              let replayCacheURL,
+              (try? consumeReplayNonce(command.nonce, issuedAt: command.issuedAt, now: now, cacheURL: replayCacheURL)) == true else {
+            return nil
+        }
+
+        return command
+    }
+
     private static func readControlToken(at url: URL) throws -> String {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         let token = try String(contentsOf: url, encoding: .utf8)
@@ -112,9 +169,39 @@ public enum LocalAppControl {
         return token
     }
 
-    private static func writeControlToken(_ token: String, to url: URL) throws {
+    private static func removeLegacyControlToken(at url: URL?) throws {
+        guard let url, FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
+    }
+
+    static func consumeReplayNonce(_ nonce: String, issuedAt: Int, now: Date = Date(), cacheURL: URL) throws -> Bool {
+        let nowSeconds = Int(now.timeIntervalSince1970.rounded(.down))
+        let oldestAllowed = nowSeconds - commandMaxAgeSeconds
+        var cache = try loadReplayCache(from: cacheURL)
+        cache.nonces = cache.nonces.filter { $0.value >= oldestAllowed }
+
+        guard cache.nonces[nonce] == nil else {
+            try writeReplayCache(cache, to: cacheURL)
+            return false
+        }
+
+        cache.nonces[nonce] = issuedAt
+        try writeReplayCache(cache, to: cacheURL)
+        return true
+    }
+
+    private static func loadReplayCache(from url: URL) throws -> LocalAppControlReplayCache {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return LocalAppControlReplayCache()
+        }
+        let data = try Data(contentsOf: url)
+        return try DMLessonJSON.decoder().decode(LocalAppControlReplayCache.self, from: data)
+    }
+
+    private static func writeReplayCache(_ cache: LocalAppControlReplayCache, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data((token + "\n").utf8).write(to: url, options: [.atomic])
+        let data = try DMLessonJSON.encoder().encode(cache)
+        try data.write(to: url, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
@@ -143,6 +230,98 @@ public enum LocalAppControl {
         }
 
         return difference == 0
+    }
+}
+
+struct LocalAppControlReplayCache: Codable, Equatable, Sendable {
+    var schemaVersion: Int
+    var nonces: [String: Int]
+
+    init(schemaVersion: Int = 1, nonces: [String: Int] = [:]) {
+        self.schemaVersion = schemaVersion
+        self.nonces = nonces
+    }
+}
+
+protocol LocalAppControlTokenStore: Sendable {
+    func readControlToken() throws -> String?
+    func writeControlToken(_ token: String) throws
+}
+
+struct KeychainControlTokenStore: LocalAppControlTokenStore {
+    private let service = "io.digitalmeld.lessonmeld.local-app-control"
+    private let account = "control-token"
+
+    func readControlToken() throws -> String? {
+        var query = keychainQuery(failAuthenticationUI: true)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound {
+            return nil
+        }
+        if status == errSecInteractionNotAllowed || status == errSecAuthFailed {
+            throw LocalAppControlError.keychainNeedsUserInteraction(status)
+        }
+        guard status == errSecSuccess else {
+            throw LocalAppControlError.keychainReadFailed(status)
+        }
+        guard let data = result as? Data,
+              let token = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            throw LocalAppControlError.emptyControlToken
+        }
+        return token
+    }
+
+    func writeControlToken(_ token: String) throws {
+        guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw LocalAppControlError.emptyControlToken
+        }
+
+        let data = Data(token.utf8)
+        let updateStatus = SecItemUpdate(
+            keychainQuery(failAuthenticationUI: true) as CFDictionary,
+            [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ] as CFDictionary
+        )
+
+        if updateStatus == errSecSuccess {
+            return
+        }
+        if updateStatus == errSecInteractionNotAllowed || updateStatus == errSecAuthFailed {
+            throw LocalAppControlError.keychainNeedsUserInteraction(updateStatus)
+        }
+        if updateStatus != errSecItemNotFound {
+            throw LocalAppControlError.keychainWriteFailed(updateStatus)
+        }
+
+        var addQuery = keychainQuery()
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw LocalAppControlError.keychainWriteFailed(addStatus)
+        }
+    }
+
+    private func keychainQuery(failAuthenticationUI: Bool = false) -> [String: Any] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        if failAuthenticationUI {
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext as String] = context
+        }
+        return query
     }
 }
 
@@ -207,8 +386,24 @@ public struct LocalAppControlCommand: Codable, Equatable, Sendable {
     }
 }
 
-public enum LocalAppControlError: Error, Equatable {
+public enum LocalAppControlError: Error, Equatable, LocalizedError {
     case emptyControlToken
+    case keychainNeedsUserInteraction(OSStatus)
+    case keychainReadFailed(OSStatus)
+    case keychainWriteFailed(OSStatus)
+
+    public var errorDescription: String? {
+        switch self {
+        case .emptyControlToken:
+            "Local app-control token is empty."
+        case .keychainNeedsUserInteraction(let status):
+            "Local app-control token needs Keychain user interaction (OSStatus \(status))."
+        case .keychainReadFailed(let status):
+            "Could not read local app-control token from Keychain (OSStatus \(status))."
+        case .keychainWriteFailed(let status):
+            "Could not write local app-control token to Keychain (OSStatus \(status))."
+        }
+    }
 }
 
 public struct LocalAppControlStatus: Codable, Equatable, Sendable {

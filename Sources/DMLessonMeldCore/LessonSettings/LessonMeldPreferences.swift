@@ -1,12 +1,13 @@
 import Foundation
 
 public struct LessonMeldPreferences: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 8
+    public static let currentSchemaVersion = 9
 
     public var schemaVersion: Int
     public var firstRunCompletedAt: Date?
     public var general: GeneralPreferences
     public var capture: CapturePreferences
+    public var transcription: TranscriptionPreferences
     public var annotation: AnnotationPreferences
     public var export: ExportPreferences
     public var integrations: IntegrationPreferences
@@ -18,6 +19,7 @@ public struct LessonMeldPreferences: Codable, Equatable, Sendable {
         case firstRunCompletedAt
         case general
         case capture
+        case transcription
         case annotation
         case export
         case integrations
@@ -30,6 +32,7 @@ public struct LessonMeldPreferences: Codable, Equatable, Sendable {
         firstRunCompletedAt: Date? = nil,
         general: GeneralPreferences = GeneralPreferences(),
         capture: CapturePreferences = CapturePreferences(),
+        transcription: TranscriptionPreferences = TranscriptionPreferences(),
         annotation: AnnotationPreferences = AnnotationPreferences(),
         export: ExportPreferences = ExportPreferences(),
         integrations: IntegrationPreferences = IntegrationPreferences(),
@@ -40,6 +43,7 @@ public struct LessonMeldPreferences: Codable, Equatable, Sendable {
         self.firstRunCompletedAt = firstRunCompletedAt
         self.general = general.normalized()
         self.capture = capture.normalized()
+        self.transcription = transcription.normalized()
         self.annotation = annotation.normalized()
         self.export = export.normalized()
         self.integrations = integrations
@@ -72,6 +76,7 @@ public struct LessonMeldPreferences: Codable, Equatable, Sendable {
             firstRunCompletedAt: try container.decodeIfPresent(Date.self, forKey: .firstRunCompletedAt),
             general: try container.decodeIfPresent(GeneralPreferences.self, forKey: .general) ?? GeneralPreferences(),
             capture: capture,
+            transcription: try container.decodeIfPresent(TranscriptionPreferences.self, forKey: .transcription) ?? TranscriptionPreferences(),
             annotation: try container.decodeIfPresent(AnnotationPreferences.self, forKey: .annotation) ?? AnnotationPreferences(),
             export: try container.decodeIfPresent(ExportPreferences.self, forKey: .export) ?? ExportPreferences(),
             integrations: try container.decodeIfPresent(IntegrationPreferences.self, forKey: .integrations) ?? IntegrationPreferences(),
@@ -86,6 +91,7 @@ public struct LessonMeldPreferences: Codable, Equatable, Sendable {
         try container.encodeIfPresent(firstRunCompletedAt, forKey: .firstRunCompletedAt)
         try container.encode(general, forKey: .general)
         try container.encode(capture, forKey: .capture)
+        try container.encode(transcription, forKey: .transcription)
         try container.encode(annotation, forKey: .annotation)
         try container.encode(export, forKey: .export)
         try container.encode(integrations, forKey: .integrations)
@@ -106,6 +112,7 @@ public struct LessonMeldPreferences: Codable, Equatable, Sendable {
             firstRunCompletedAt: firstRunCompletedAt,
             general: general,
             capture: capture,
+            transcription: transcription,
             annotation: annotation,
             export: export,
             integrations: integrations,
@@ -251,7 +258,7 @@ public struct CapturePreferences: Codable, Equatable, Sendable {
         quickRecordDurationSeconds: Int = Self.defaultQuickRecordDurationSeconds,
         fps: Int = 60,
         includeCursor: Bool = true,
-        captureInteractionMetadata: Bool = true,
+        captureInteractionMetadata: Bool = false,
         captureSystemAudio: Bool = false,
         captureMicrophone: Bool = true,
         microphoneDeviceID: String? = nil,
@@ -301,7 +308,7 @@ public struct CapturePreferences: Codable, Equatable, Sendable {
             quickRecordDurationSeconds: try container.decodeIfPresent(Int.self, forKey: .quickRecordDurationSeconds) ?? Self.defaultQuickRecordDurationSeconds,
             fps: try container.decodeIfPresent(Int.self, forKey: .fps) ?? 60,
             includeCursor: try container.decodeIfPresent(Bool.self, forKey: .includeCursor) ?? true,
-            captureInteractionMetadata: try container.decodeIfPresent(Bool.self, forKey: .captureInteractionMetadata) ?? true,
+            captureInteractionMetadata: try container.decodeIfPresent(Bool.self, forKey: .captureInteractionMetadata) ?? false,
             captureSystemAudio: try container.decodeIfPresent(Bool.self, forKey: .captureSystemAudio) ?? false,
             captureMicrophone: try container.decodeIfPresent(Bool.self, forKey: .captureMicrophone) ?? true,
             microphoneDeviceID: try container.decodeIfPresent(String.self, forKey: .microphoneDeviceID),

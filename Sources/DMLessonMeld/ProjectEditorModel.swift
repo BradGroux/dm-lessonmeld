@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import AVKit
+import Combine
 import DMLessonMeldCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -148,8 +149,14 @@ final class ProjectEditorModel: ObservableObject {
     private var renderTask: Task<Void, Never>?
     private var activeRenderJobID: String?
     private var isLoadingProject = false
+    private var isDirtyRefreshScheduled = false
     private var savedDirtyFingerprints: [ProjectDirtyArea: String] = [:]
+    private var dirtyStateCancellables: Set<AnyCancellable> = []
     private static let minimumTimelineRangeSeconds = 0.1
+
+    init() {
+        bindDirtyStateRefresh()
+    }
 
     var hasUnsavedChanges: Bool {
         !dirtyAreas.isEmpty
@@ -301,10 +308,24 @@ final class ProjectEditorModel: ObservableObject {
     func refreshDirtyState(_ area: ProjectDirtyArea) {
         guard projectURL != nil, !isLoadingProject else { return }
         let current = dirtyFingerprint(for: area)
+        var updated = dirtyAreas
         if savedDirtyFingerprints[area] == current {
-            dirtyAreas.remove(area)
+            updated.remove(area)
         } else {
-            dirtyAreas.insert(area)
+            updated.insert(area)
+        }
+        if updated != dirtyAreas {
+            dirtyAreas = updated
+        }
+    }
+
+    func refreshAllDirtyStates() {
+        guard projectURL != nil, !isLoadingProject else { return }
+        let updated = Set(ProjectDirtyArea.allCases.filter { area in
+            savedDirtyFingerprints[area] != dirtyFingerprint(for: area)
+        })
+        if updated != dirtyAreas {
+            dirtyAreas = updated
         }
     }
 
@@ -369,6 +390,24 @@ final class ProjectEditorModel: ObservableObject {
 
     private func updateSavedFingerprint(for area: ProjectDirtyArea) {
         savedDirtyFingerprints[area] = dirtyFingerprint(for: area)
+    }
+
+    private func bindDirtyStateRefresh() {
+        objectWillChange
+            .sink { [weak self] _ in
+                self?.scheduleDirtyStateRefresh()
+            }
+            .store(in: &dirtyStateCancellables)
+    }
+
+    private func scheduleDirtyStateRefresh() {
+        guard !isDirtyRefreshScheduled else { return }
+        isDirtyRefreshScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            isDirtyRefreshScheduled = false
+            refreshAllDirtyStates()
+        }
     }
 
     func apply(_ preferences: LessonMeldPreferences) {
@@ -492,20 +531,34 @@ final class ProjectEditorModel: ObservableObject {
 
         guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
 
-        do {
-            let didAccess = sourceURL.startAccessingSecurityScopedResource()
+        let sourceName = sourceURL.lastPathComponent
+        let request = ProjectVideoImportRequest(
+            sourceURL: sourceURL,
+            defaultProjectDirectory: preferences.general.defaultProjectDirectory,
+            defaultTemplateID: preferences.general.defaultTemplateID,
+            existingProjectURL: projectURL,
+            existingManifest: manifest
+        )
+        let didAccess = sourceURL.startAccessingSecurityScopedResource()
+
+        setMessage("Importing \(sourceName)...")
+        let importTask = Task.detached(priority: .userInitiated) { () throws -> ProjectVideoImportResult in
             defer {
                 if didAccess {
                     sourceURL.stopAccessingSecurityScopedResource()
                 }
             }
+            return try ProjectVideoImportService.importVideo(request)
+        }
 
-            setMessage("Importing \(sourceURL.lastPathComponent)...")
-            let projectURL = try importVideo(sourceURL, preferences: preferences)
-            loadProject(projectURL)
-            setMessage("Imported \(sourceURL.lastPathComponent) for editing.")
-        } catch {
-            setError(error.localizedDescription)
+        Task { @MainActor [weak self] in
+            do {
+                let result = try await importTask.value
+                self?.loadProject(result.projectURL)
+                self?.setMessage("Imported \(sourceName) for editing.")
+            } catch {
+                self?.setError(error.localizedDescription)
+            }
         }
     }
 
@@ -554,65 +607,6 @@ final class ProjectEditorModel: ObservableObject {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         loadProject(url)
-    }
-
-    private func importVideo(_ sourceURL: URL, preferences: LessonMeldPreferences) throws -> URL {
-        let sourceExtension = sourceURL.pathExtension.lowercased()
-        guard Self.supportedEditableVideoExtensions.contains(sourceExtension) else {
-            throw ProjectEditorError.unsupportedVideoType(sourceURL.lastPathComponent)
-        }
-
-        let existingProjectURL = projectURL
-        let existingManifest = manifest
-        let shouldAttachToCurrentProject = existingProjectURL != nil && existingManifest?.media.screen == nil
-        let destinationProjectURL: URL
-        var nextManifest: ProjectManifest
-
-        if shouldAttachToCurrentProject, let existingProjectURL, let existingManifest {
-            destinationProjectURL = existingProjectURL
-            nextManifest = existingManifest
-            try FileManager.default.createDirectory(at: destinationProjectURL, withIntermediateDirectories: true)
-        } else {
-            let defaultDirectory = Self.expandedURL(preferences.general.defaultProjectDirectory)
-            try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
-            destinationProjectURL = try Self.makeImportedVideoProjectURL(for: sourceURL, in: defaultDirectory)
-
-            guard let template = LessonTemplateLibrary.template(id: preferences.general.defaultTemplateID)
-                ?? LessonTemplateLibrary.defaultTemplates.first else {
-                throw ProjectEditorError.templateNotFound(preferences.general.defaultTemplateID)
-            }
-            nextManifest = template.seedManifest(lessonTitle: Self.lessonTitle(fromImportedVideo: sourceURL))
-            try FileManager.default.createDirectory(at: destinationProjectURL, withIntermediateDirectories: true)
-        }
-
-        let mediaFileName = Self.uniqueScreenMediaFileName(fileExtension: sourceExtension, in: destinationProjectURL)
-        let destinationMediaURL = destinationProjectURL.appendingPathComponent(mediaFileName)
-        let sourcePath = sourceURL.resolvingSymlinksInPath().standardizedFileURL.path
-        let destinationPath = destinationMediaURL.resolvingSymlinksInPath().standardizedFileURL.path
-        if sourcePath != destinationPath {
-            try FileManager.default.copyItem(at: sourceURL, to: destinationMediaURL)
-        }
-
-        nextManifest.media.screen = Self.projectFile(
-            for: destinationMediaURL,
-            role: .screenVideo,
-            projectURL: destinationProjectURL,
-            mimeType: Self.videoMimeType(for: sourceExtension)
-        )
-        if !nextManifest.tracks.contains(where: { $0.id == "screen" || $0.kind == .screen }) {
-            nextManifest.tracks.append(TimelineTrack(id: "screen", kind: .screen, displayName: "Screen"))
-        }
-        if nextManifest.metadata.lessonTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || nextManifest.metadata.lessonTitle == "Untitled Lesson" {
-            nextManifest.metadata.lessonTitle = Self.lessonTitle(fromImportedVideo: sourceURL)
-        }
-        if !nextManifest.exportPresets.contains("learnhouse-1080p") {
-            nextManifest.exportPresets.append("learnhouse-1080p")
-        }
-        nextManifest.updatedAt = Date()
-
-        try ProjectBundle.writeManifest(nextManifest, to: destinationProjectURL)
-        return destinationProjectURL
     }
 
     func loadProject(_ url: URL) {
@@ -3139,9 +3133,7 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     private func writeAnnotationStore(_ store: AnnotationStore, to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try DMLessonJSON.encoder().encode(store)
-        try data.write(to: url, options: [.atomic])
+        try AnnotationSidecarWriter.write(store, to: url)
     }
 
     private func makeOverlayStore() throws -> OverlayStore {
@@ -3556,41 +3548,6 @@ final class ProjectEditorModel: ObservableObject {
         ].joined(separator: "\n")
     }
 
-    private static let supportedEditableVideoExtensions: Set<String> = ["mp4", "mov"]
-
-    private static func makeImportedVideoProjectURL(for sourceURL: URL, in root: URL) throws -> URL {
-        let baseName = fileSlug(lessonTitle(fromImportedVideo: sourceURL))
-        for attempt in 0..<100 {
-            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
-            let projectURL = root.appendingPathComponent("\(baseName)\(suffix).dmlm", isDirectory: true)
-            if !FileManager.default.fileExists(atPath: projectURL.path) {
-                return projectURL
-            }
-        }
-        return root.appendingPathComponent("\(baseName)-\(UUID().uuidString.lowercased()).dmlm", isDirectory: true)
-    }
-
-    private static func uniqueScreenMediaFileName(fileExtension: String, in projectURL: URL) -> String {
-        let normalizedExtension = supportedEditableVideoExtensions.contains(fileExtension.lowercased())
-            ? fileExtension.lowercased()
-            : "mp4"
-        for attempt in 0..<100 {
-            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
-            let fileName = "screen\(suffix).\(normalizedExtension)"
-            if !FileManager.default.fileExists(atPath: projectURL.appendingPathComponent(fileName).path) {
-                return fileName
-            }
-        }
-        return "screen-\(UUID().uuidString.lowercased()).\(normalizedExtension)"
-    }
-
-    private static func videoMimeType(for fileExtension: String) -> String {
-        switch fileExtension.lowercased() {
-        case "mov": "video/quicktime"
-        default: "video/mp4"
-        }
-    }
-
     private static func imageMimeType(for fileExtension: String) -> String {
         switch fileExtension.lowercased() {
         case "jpg", "jpeg": "image/jpeg"
@@ -3659,11 +3616,6 @@ final class ProjectEditorModel: ObservableObject {
     private static func lessonTitle(from projectURL: URL) -> String {
         let title = projectURL.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
         return title.isEmpty ? "Untitled Lesson" : title
-    }
-
-    private static func lessonTitle(fromImportedVideo url: URL) -> String {
-        let title = url.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "Imported Video" : title
     }
 
     private static func optionalText(_ value: String) -> String? {

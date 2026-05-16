@@ -1138,11 +1138,18 @@ extension ProjectEditorView {
     }
 
     func editorAudioInspector(manifest: ProjectManifest) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let hasEmbeddedSystemAudio = manifest.media.hasEmbeddedSystemAudio
+        let screenAudioDetail = hasEmbeddedSystemAudio
+            ? "Includes embedded system audio from the screen recording."
+            : "Audio embedded in the screen recording when present."
+        let systemAudioDetail = manifest.media.systemAudio?.relativePath
+            ?? (hasEmbeddedSystemAudio ? "Embedded in screen video. Use Screen controls for gain, mute, and solo." : "No system audio sidecar in this project.")
+
+        return VStack(alignment: .leading, spacing: 12) {
             inspectorSectionTitle("Tracks")
             audioTrackControls(
                 title: "Screen",
-                detail: "Audio embedded in the screen recording when present.",
+                detail: screenAudioDetail,
                 gain: $model.screenAudioGain,
                 muted: $model.screenAudioMuted,
                 soloed: $model.screenAudioSoloed,
@@ -1158,7 +1165,7 @@ extension ProjectEditorView {
             )
             audioTrackControls(
                 title: "System",
-                detail: manifest.media.systemAudio?.relativePath ?? "No system audio sidecar in this project.",
+                detail: systemAudioDetail,
                 gain: $model.systemAudioGain,
                 muted: $model.systemAudioMuted,
                 soloed: $model.systemAudioSoloed,

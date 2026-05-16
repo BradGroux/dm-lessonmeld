@@ -18,7 +18,7 @@ struct LessonMeldPreferencesTests {
         #expect(preferences.capture.captureMicrophone)
         #expect(preferences.capture.microphoneDeviceID == nil)
         #expect(preferences.capture.captureWebcam)
-        #expect(preferences.capture.captureInteractionMetadata)
+        #expect(preferences.capture.captureInteractionMetadata == false)
         #expect(preferences.capture.quickRecordDurationSeconds == 300)
         #expect(preferences.capture.webcamFPS == 30)
         #expect(preferences.capture.webcamAspectRatio == .widescreen16x9)
@@ -26,6 +26,10 @@ struct LessonMeldPreferencesTests {
         #expect(preferences.capture.showFloatingWebcamPreview)
         #expect(preferences.capture.hideRecorderControlsFromCapture == false)
         #expect(preferences.capture.showRecorderControlTooltips)
+        #expect(preferences.transcription.enabled == false)
+        #expect(preferences.transcription.runtime == .whisperCPP)
+        #expect(preferences.transcription.modelPath == TranscriptionPreferences.defaultModelFilePath)
+        #expect(preferences.transcription.language == "en")
         #expect(preferences.annotation.paletteHexColors.count == 8)
         #expect(preferences.export.createArchiveByDefault)
         #expect(preferences.onboardingCompleted == false)
@@ -44,6 +48,12 @@ struct LessonMeldPreferencesTests {
                 webcamRelativeSize: 0.01,
                 countdownSeconds: 99
             ),
+            transcription: TranscriptionPreferences(
+                enabled: false,
+                modelPath: "   ",
+                language: "  EN-US  ",
+                autoTranscribeAfterRecording: true
+            ),
             annotation: AnnotationPreferences(defaultColorHex: "nope", paletteHexColors: ["00ff00", "invalid"], lineWidth: 100),
             shortcuts: [.quickRecord: "  Option+Command+R  "]
         )
@@ -57,6 +67,9 @@ struct LessonMeldPreferencesTests {
         #expect(preferences.capture.webcamCornerRadius == 64)
         #expect(preferences.capture.webcamRelativeSize == 0.10)
         #expect(preferences.capture.countdownSeconds == 10)
+        #expect(preferences.transcription.modelPath == TranscriptionPreferences.defaultModelFilePath)
+        #expect(preferences.transcription.language == "en-us")
+        #expect(preferences.transcription.autoTranscribeAfterRecording == false)
         #expect(preferences.annotation.defaultColorHex == "#FFD733")
         #expect(preferences.annotation.paletteHexColors == ["#00FF00"])
         #expect(preferences.annotation.lineWidth == 24)
@@ -75,6 +88,12 @@ struct LessonMeldPreferencesTests {
                 captureMicrophone: true,
                 microphoneDeviceID: "external-mic",
                 captureWebcam: true
+            ),
+            transcription: TranscriptionPreferences(
+                enabled: true,
+                modelPath: "/tmp/ggml-base.en.bin",
+                language: "en",
+                autoTranscribeAfterRecording: true
             ),
             privacy: PrivacyPreferences(includeMediaPathsInAgentManifests: true)
         )
@@ -122,5 +141,45 @@ struct LessonMeldPreferencesTests {
 
         #expect(shortcuts["showSettings"] == "command+,")
         #expect(shortcuts["quickRecord"] == "option+command+r")
+    }
+
+    @Test("Transcription model status reports disabled missing and ready states")
+    func transcriptionModelStatus() throws {
+        let disabled = TranscriptionModelInspector.status(
+            for: TranscriptionPreferences(enabled: false)
+        )
+        #expect(disabled.state == TranscriptionModelState.disabled)
+        #expect(disabled.isReady == false)
+
+        let temp = try TranscriptionPreferenceTestDirectory()
+        let modelURL = temp.url.appendingPathComponent("ggml-base.en.bin")
+        try Data("model".utf8).write(to: modelURL)
+
+        let ready = TranscriptionModelInspector.status(
+            for: TranscriptionPreferences(enabled: true, modelPath: modelURL.path)
+        )
+        #expect(ready.state == TranscriptionModelState.ready)
+        #expect(ready.isReady)
+        #expect(ready.expandedModelPath == modelURL.path)
+
+        let missing = TranscriptionModelInspector.status(
+            for: TranscriptionPreferences(enabled: true, modelPath: temp.url.appendingPathComponent("missing.bin").path)
+        )
+        #expect(missing.state == TranscriptionModelState.modelNotFound)
+        #expect(missing.isReady == false)
+    }
+}
+
+private final class TranscriptionPreferenceTestDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dm-lessonmeld-transcription-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }

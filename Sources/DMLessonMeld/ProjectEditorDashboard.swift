@@ -321,24 +321,28 @@ extension ProjectEditorView {
     }
 
     func hasAudio(_ manifest: ProjectManifest) -> Bool {
-        manifest.media.microphoneAudio != nil || manifest.media.systemAudio != nil
+        manifest.media.microphoneAudio != nil || manifest.media.systemAudio != nil || manifest.media.hasEmbeddedSystemAudio
     }
 
     func audioStatus(_ manifest: ProjectManifest) -> String {
-        if manifest.media.microphoneAudio != nil, manifest.media.systemAudio != nil {
+        let hasSystemAudio = manifest.media.systemAudio != nil || manifest.media.hasEmbeddedSystemAudio
+        if manifest.media.microphoneAudio != nil, hasSystemAudio {
             return "Mic + System"
         }
         if manifest.media.microphoneAudio != nil {
             return "Mic"
         }
-        if manifest.media.systemAudio != nil {
+        if hasSystemAudio {
             return "System"
         }
         return "Optional"
     }
 
     func audioDetail(_ manifest: ProjectManifest) -> String {
-        let files = [manifest.media.microphoneAudio?.relativePath, manifest.media.systemAudio?.relativePath].compactMap { $0 }
+        var files = [manifest.media.microphoneAudio?.relativePath, manifest.media.systemAudio?.relativePath].compactMap { $0 }
+        if manifest.media.hasEmbeddedSystemAudio {
+            files.append("screen.mp4 (embedded system audio)")
+        }
         return files.isEmpty ? "No voice or system audio has been captured yet." : files.joined(separator: " + ")
     }
 

@@ -45,6 +45,22 @@ struct RecordingOptionsTests {
         #expect(CameraPermission.privacySettingsURL.scheme == "x-apple.systempreferences")
     }
 
+    @Test("Window capture source keeps stable JSON fields")
+    func windowCaptureSourceJSONFields() throws {
+        let source = WindowCaptureSource(
+            id: 123,
+            title: "Lesson Browser",
+            ownerName: "Safari",
+            bounds: WindowCaptureBounds(x: 10, y: 20, width: 1280, height: 720)
+        )
+
+        let data = try DMLessonJSON.encoder().encode(source)
+        let decoded = try DMLessonJSON.decoder().decode(WindowCaptureSource.self, from: data)
+
+        #expect(decoded == source)
+        #expect(decoded.sizeLabel == "1280x720")
+    }
+
     @Test("Camera permission request does not crash without bundled usage description")
     func cameraPermissionRequestNeedsUsageDescription() async {
         guard Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") == nil else {

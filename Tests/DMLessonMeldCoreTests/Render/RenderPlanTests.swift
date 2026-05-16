@@ -44,6 +44,31 @@ struct RenderPlanTests {
         #expect(plan.markers.map(\.id) == ["chapter-1"])
     }
 
+    @Test("Render plan preserves embedded system audio metadata")
+    func renderPlanPreservesEmbeddedSystemAudioMetadata() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let destinationURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+
+        let manifest = ProjectManifest(
+            metadata: LessonMetadata(lessonTitle: "Embedded Audio"),
+            media: ProjectMedia(
+                screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo, mimeType: "video/mp4"),
+                embeddedAudio: ProjectEmbeddedAudio(screenVideo: [.systemAudio])
+            )
+        )
+
+        let plan = try RenderPlan.make(
+            manifest: manifest,
+            projectURL: projectURL,
+            destinationURL: destinationURL
+        )
+
+        #expect(plan.embeddedAudio?.screenVideo == [.systemAudio])
+        #expect(plan.audioSources.isEmpty)
+        #expect(plan.screenVideo.relativePath == "screen.mp4")
+    }
+
     @Test("Render inspection loads project editor canvas settings")
     func renderInspectionLoadsEditorCanvasSettings() throws {
         let temp = try TemporaryDirectory()
@@ -184,6 +209,37 @@ struct RenderPlanTests {
                 $0.path == "speedRegions[1].range" &&
                 $0.message == "Speed regions must not overlap."
         })
+    }
+
+    @Test("Render caption source ignores non JSON transcript sidecars")
+    func renderCaptionSourceIgnoresNonJSONTranscriptSidecars() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let destinationURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+        try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("media"), withIntermediateDirectories: true)
+        try Data("video".utf8).write(to: projectURL.appendingPathComponent("media/screen.mp4"))
+        try Data("# Transcript".utf8).write(to: projectURL.appendingPathComponent("transcript.md"))
+        try Data(#"{"title":"Transcript","segments":[]}"#.utf8).write(to: projectURL.appendingPathComponent("transcript.json"))
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Caption Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo, mimeType: "video/mp4"),
+                    transcripts: [
+                        ProjectFile(relativePath: "transcript.md", role: .transcript, mimeType: "text/markdown"),
+                        ProjectFile(relativePath: "transcript.json", role: .transcript, mimeType: "application/json")
+                    ]
+                )
+            ),
+            to: projectURL
+        )
+
+        let inspection = try AVFoundationRenderService().inspect(
+            projectURL: projectURL,
+            destinationURL: destinationURL
+        )
+
+        #expect(inspection.plan?.captionSource?.relativePath == "transcript.json")
     }
 
     @Test("Timeline retiming mapper converts source times to output times")

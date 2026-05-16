@@ -238,9 +238,13 @@ struct DMLessonMeldCLI {
 
     static func runRecord(_ arguments: [String]) async throws {
         guard let mode = arguments.first else {
-            throw CLIError.usage("Usage: dmlesson record display|region|project ...")
+            throw CLIError.usage("Usage: dmlesson record display|region|window|windows|project ...")
         }
 
+        if mode == "windows" || mode == "list-windows" {
+            try runWindowListing(Array(arguments.dropFirst()))
+            return
+        }
         if mode == "project" {
             try await runProjectRecording(Array(arguments.dropFirst()))
             return
@@ -254,17 +258,18 @@ struct DMLessonMeldCLI {
             return
         }
 
-        guard arguments.count >= 4, ["display", "region"].contains(mode) else {
-            throw CLIError.usage("Usage: dmlesson record display|region --duration <seconds> --output <screen.mp4> [--system-audio] [--display-id <id>] [--x <points> --y <points> --width <points> --height <points>] [--json]")
+        guard arguments.count >= 4, ["display", "region", "window"].contains(mode) else {
+            throw CLIError.usage("Usage: dmlesson record display|region|window --duration <seconds> --output <screen.mp4> [--system-audio] [--display-id <id>] [--window-id <id>] [--x <points> --y <points> --width <points> --height <points>] [--json]")
         }
         guard let durationValue = optionValue("--duration", in: arguments),
               let duration = TimeInterval(durationValue),
               let output = optionValue("--output", in: arguments) else {
-            throw CLIError.usage("Usage: dmlesson record display|region --duration <seconds> --output <screen.mp4> [--system-audio] [--display-id <id>] [--x <points> --y <points> --width <points> --height <points>] [--json]")
+            throw CLIError.usage("Usage: dmlesson record display|region|window --duration <seconds> --output <screen.mp4> [--system-audio] [--display-id <id>] [--window-id <id>] [--x <points> --y <points> --width <points> --height <points>] [--json]")
         }
 
         let displayID = optionValue("--display-id", in: arguments).flatMap { CGDirectDisplayID($0) }
         let sourceRect: CGRect?
+        let windowID: UInt32?
         if mode == "region" {
             guard let x = optionValue("--x", in: arguments).flatMap(Double.init),
                   let y = optionValue("--y", in: arguments).flatMap(Double.init),
@@ -273,8 +278,13 @@ struct DMLessonMeldCLI {
                 throw CLIError.usage("Usage: dmlesson record region --duration <seconds> --output <screen.mp4> --x <points> --y <points> --width <points> --height <points> [--display-id <id>] [--json]")
             }
             sourceRect = CGRect(x: x, y: y, width: width, height: height)
+            windowID = nil
+        } else if mode == "window" {
+            windowID = try positiveUInt32Option("--window-id", in: arguments, required: true)
+            sourceRect = nil
         } else {
             sourceRect = nil
+            windowID = nil
         }
 
         let result = try await DisplayScreenRecorder().record(
@@ -283,14 +293,34 @@ struct DMLessonMeldCLI {
                 outputURL: URL(fileURLWithPath: output),
                 durationSeconds: duration,
                 options: RecordingOptions(captureSystemAudio: arguments.contains("--system-audio")),
-                sourceRect: sourceRect
+                sourceRect: sourceRect,
+                windowID: windowID
             )
         )
 
         if arguments.contains("--json") {
             try printJSON(result)
         } else {
-            print("Recorded screen: \(result.screenVideoURL.path)")
+            let label = mode == "window" ? "window" : "screen"
+            print("Recorded \(label): \(result.screenVideoURL.path)")
+        }
+    }
+
+    static func runWindowListing(_ arguments: [String]) throws {
+        let windows = WindowCaptureSourceProvider.availableSources()
+        if arguments.contains("--json") {
+            try printJSON(windows)
+            return
+        }
+
+        if windows.isEmpty {
+            print("No recordable windows found.")
+            return
+        }
+
+        for window in windows {
+            let size = window.sizeLabel.map { " \($0)" } ?? ""
+            print("\(window.id)\t\(window.ownerName)\t\(window.title)\(size)")
         }
     }
 
@@ -346,7 +376,7 @@ struct DMLessonMeldCLI {
               let duration = TimeInterval(durationValue),
               let output = optionValue("--output", in: arguments),
               let lessonTitle = optionValue("--lesson-title", in: arguments) else {
-            throw CLIError.usage("Usage: dmlesson record project --duration <seconds> --output <project.dmlm> --lesson-title <title> [--course-title <title>] [--region x,y,w,h] [--microphone] [--microphone-device-id <id>] [--webcam] [--camera-fps 24|30|40|50|60] [--webcam-format original|1:1|2:3|3:2|16:9] [--webcam-frame rounded|square|circle] [--mirror-webcam] [--webcam-border] [--system-audio] [--json]")
+            throw CLIError.usage("Usage: dmlesson record project --duration <seconds> --output <project.dmlm> --lesson-title <title> [--course-title <title>] [--region x,y,w,h] [--window-id <id>] [--microphone] [--microphone-device-id <id>] [--webcam] [--camera-fps 24|30|40|50|60] [--webcam-format original|1:1|2:3|3:2|16:9] [--webcam-frame rounded|square|circle] [--mirror-webcam] [--webcam-border] [--system-audio] [--json]")
         }
 
         let projectURL = URL(fileURLWithPath: output)
@@ -355,6 +385,10 @@ struct DMLessonMeldCLI {
         let microphoneURL = projectURL.appendingPathComponent("microphone.m4a")
         let webcamURL = projectURL.appendingPathComponent("webcam.mov")
         let sourceRect = optionValue("--region", in: arguments).flatMap(parseRegion)
+        let windowID = try positiveUInt32Option("--window-id", in: arguments)
+        if sourceRect != nil, windowID != nil {
+            throw CLIError.usage("--region and --window-id cannot be used together.")
+        }
         let captureSystemAudio = arguments.contains("--system-audio")
         let shouldCaptureMicrophone = arguments.contains("--microphone") || optionValue("--microphone-device-id", in: arguments) != nil
         let shouldCaptureWebcam = arguments.contains("--webcam") || optionValue("--camera-id", in: arguments) != nil
@@ -395,7 +429,8 @@ struct DMLessonMeldCLI {
                     cameraDeviceID: optionValue("--camera-id", in: arguments),
                     cameraResolution: cameraResolution.rawValue
                 ),
-                sourceRect: sourceRect
+                sourceRect: sourceRect,
+                windowID: windowID
             )
         )
         let microphoneResult = try await microphoneTask?.value
@@ -409,10 +444,12 @@ struct DMLessonMeldCLI {
                 media: ProjectMedia(
                     screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo, mimeType: "video/mp4"),
                     webcam: webcamResult.map { _ in ProjectFile(relativePath: "webcam.mov", role: .webcamVideo, mimeType: "video/quicktime") },
-                    microphoneAudio: microphoneResult.map { _ in ProjectFile(relativePath: "microphone.m4a", role: .microphoneAudio, mimeType: "audio/mp4") }
+                    microphoneAudio: microphoneResult.map { _ in ProjectFile(relativePath: "microphone.m4a", role: .microphoneAudio, mimeType: "audio/mp4") },
+                    embeddedAudio: result.systemAudioURL == nil ? nil : ProjectEmbeddedAudio(screenVideo: [.systemAudio])
                 ),
                 capture: ProjectCaptureSettings(
-                    target: sourceRect == nil ? .screen : .region,
+                    target: windowID == nil ? (sourceRect == nil ? .screen : .region) : .window,
+                    windowID: windowID,
                     region: sourceRect.map(ProjectCaptureRegion.init),
                     screenFPS: 60,
                     includeCursor: true,
@@ -455,7 +492,7 @@ struct DMLessonMeldCLI {
                 print("Webcam: \(webcamResult.outputURL.path)")
             }
             if result.systemAudioURL != nil {
-                print("System audio: muxed into screen.mp4")
+                print("System audio: embedded in screen.mp4")
             }
         }
     }
@@ -502,6 +539,8 @@ struct DMLessonMeldCLI {
             } else {
                 print("Default project folder: \(preferences.general.defaultProjectDirectory)")
                 print("Default template: \(preferences.general.defaultTemplateID)")
+                print("Local transcription: \(preferences.transcription.enabled ? "enabled" : "disabled")")
+                print("Transcription runtime: \(preferences.transcription.runtime.rawValue)")
                 print("Local-only mode: \(preferences.privacy.localOnlyMode)")
                 print("LearnHouse enabled: \(preferences.integrations.learnHouseEnabled)")
                 print("Agent manifests enabled: \(preferences.integrations.agentManifestsEnabled)")
@@ -810,35 +849,55 @@ struct DMLessonMeldCLI {
     }
 
     static func runTranscript(_ arguments: [String]) throws {
-        guard arguments.count >= 2, arguments[0] == "export" else {
-            throw CLIError.usage("Usage: dmlesson transcript export <project.dmlm|transcript.json> --format vtt|srt|md|txt --output <path>")
-        }
-        guard let format = optionValue("--format", in: arguments),
-              let output = optionValue("--output", in: arguments) else {
-            throw CLIError.usage("Usage: dmlesson transcript export <project.dmlm|transcript.json> --format vtt|srt|md|txt --output <path>")
+        guard let subcommand = arguments.first else {
+            throw CLIError.usage("Usage: dmlesson transcript export|model-status [options]")
         }
 
-        let transcript = try loadTranscript(from: URL(fileURLWithPath: arguments[1]))
-        let rendered: String
-        switch format {
-        case "vtt":
-            rendered = TranscriptExporter.vtt(transcript)
-        case "srt":
-            rendered = TranscriptExporter.srt(transcript)
-        case "md", "markdown":
-            rendered = TranscriptExporter.markdown(transcript)
-        case "txt", "text":
-            rendered = TranscriptExporter.plainText(transcript)
+        switch subcommand {
+        case "export":
+            guard arguments.count >= 2,
+                  let format = optionValue("--format", in: arguments),
+                  let output = optionValue("--output", in: arguments) else {
+                throw CLIError.usage("Usage: dmlesson transcript export <project.dmlm|transcript.json> --format vtt|srt|md|txt --output <path>")
+            }
+
+            let transcript = try loadTranscript(from: URL(fileURLWithPath: arguments[1]))
+            let rendered: String
+            switch format {
+            case "vtt":
+                rendered = TranscriptExporter.vtt(transcript)
+            case "srt":
+                rendered = TranscriptExporter.srt(transcript)
+            case "md", "markdown":
+                rendered = TranscriptExporter.markdown(transcript)
+            case "txt", "text":
+                rendered = TranscriptExporter.plainText(transcript)
+            default:
+                throw CLIError.usage("Unsupported transcript format: \(format)")
+            }
+            let outputURL = URL(fileURLWithPath: output)
+            try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(rendered.utf8).write(to: outputURL, options: [.atomic])
+            if arguments.contains("--json") {
+                try printJSON(["output": outputURL.path, "format": format])
+            } else {
+                print("Transcript exported: \(outputURL.path)")
+            }
+        case "model-status":
+            let preferences = try loadPreferences(from: optionValue("--settings", in: arguments))
+            let status = TranscriptionModelInspector.status(for: preferences.transcription)
+            if arguments.contains("--json") {
+                try printJSON(status)
+            } else {
+                print("Runtime: \(status.runtime.rawValue)")
+                print("Enabled: \(status.enabled ? "yes" : "no")")
+                print("Language: \(status.language)")
+                print("Model: \(status.expandedModelPath)")
+                print("State: \(status.state.rawValue)")
+                print(status.message)
+            }
         default:
-            throw CLIError.usage("Unsupported transcript format: \(format)")
-        }
-        let outputURL = URL(fileURLWithPath: output)
-        try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(rendered.utf8).write(to: outputURL, options: [.atomic])
-        if arguments.contains("--json") {
-            try printJSON(["output": outputURL.path, "format": format])
-        } else {
-            print("Transcript exported: \(outputURL.path)")
+            throw CLIError.invalidCommand(subcommand)
         }
     }
 
@@ -1182,16 +1241,43 @@ struct DMLessonMeldCLI {
     }
 
     static func runAgent(_ arguments: [String]) throws {
-        guard arguments.count >= 2, arguments[0] == "manifest" else {
-            throw CLIError.usage("Usage: dmlesson agent manifest <project> [--include-media-paths] [--json]")
+        guard let subcommand = arguments.first else {
+            throw CLIError.usage("Usage: dmlesson agent manifest|workflows [options]")
         }
 
-        let options = AgentManifestOptions(
-            includeMediaPaths: arguments.contains("--include-media-paths"),
-            includeTranscriptReferences: arguments.contains("--include-transcript-references")
-        )
-        let manifest = try AgentManifestBuilder.build(projectURL: URL(fileURLWithPath: arguments[1]), options: options)
-        try printJSON(manifest)
+        switch subcommand {
+        case "manifest":
+            guard arguments.count >= 2 else {
+                throw CLIError.usage("Usage: dmlesson agent manifest <project> [--include-media-paths] [--include-transcript-references] [--json]")
+            }
+            let options = AgentManifestOptions(
+                includeMediaPaths: arguments.contains("--include-media-paths"),
+                includeTranscriptReferences: arguments.contains("--include-transcript-references")
+            )
+            let manifest = try AgentManifestBuilder.build(projectURL: URL(fileURLWithPath: arguments[1]), options: options)
+            try printJSON(manifest)
+        case "workflows":
+            let target = try optionValue("--target", in: arguments).map { rawTarget in
+                guard let target = AgentTarget.matching(rawTarget) else {
+                    throw CLIError.usage("Unknown agent target: \(rawTarget)")
+                }
+                return target
+            }
+            let workflows = AgentWorkflowCatalog.defaultWorkflows(target: target)
+            if arguments.contains("--json") {
+                try printJSON(workflows)
+            } else {
+                for workflow in workflows {
+                    print("\(workflow.target.rawValue) (\(workflow.targetSlug))")
+                    print(workflow.summary)
+                    for step in workflow.steps {
+                        print("- \(step.command): \(step.purpose)")
+                    }
+                }
+            }
+        default:
+            throw CLIError.invalidCommand(subcommand)
+        }
     }
 
     static func runApp(_ arguments: [String]) throws {
@@ -1219,8 +1305,10 @@ struct DMLessonMeldCLI {
             throw CLIError.invalidCommand(subcommand)
         }
 
-        try postAppControl(action)
-        Thread.sleep(forTimeInterval: 0.18)
+        if action != .status {
+            try postAppControl(action)
+            Thread.sleep(forTimeInterval: 0.18)
+        }
 
         let status = (try? LocalAppControl.readStatus()) ?? LocalAppControlStatus(
             pid: 0,
@@ -1265,9 +1353,11 @@ struct DMLessonMeldCLI {
           settings validate <settings.json> [--json]
           record display --duration <seconds> --output <screen.mp4> [--display-id <id>] [--system-audio] [--json]
           record region --duration <seconds> --output <screen.mp4> --x <points> --y <points> --width <points> --height <points> [--display-id <id>] [--system-audio] [--json]
+          record windows [--json]
+          record window --window-id <id> --duration <seconds> --output <screen.mp4> [--system-audio] [--json]
           record microphone --duration <seconds> --output <audio.caf|audio.m4a|audio.wav> [--format caf|m4a|wav] [--microphone-device-id <id>] [--json]
           record webcam --duration <seconds> --output <webcam.mov> [--camera-id <id>] [--resolution 720p|1080p|4K] [--fps 24|30|40|50|60] [--json]
-          record project --duration <seconds> --output <project.dmlm> --lesson-title <title> [--course-title <title>] [--region x,y,w,h] [--microphone] [--microphone-device-id <id>] [--webcam] [--camera-resolution 720p|1080p|4K] [--camera-fps 24|30|40|50|60] [--webcam-format original|1:1|2:3|3:2|16:9] [--webcam-frame rounded|square|circle] [--webcam-corner-radius <points>] [--webcam-size 0.10...0.40] [--mirror-webcam] [--webcam-border] [--no-webcam-shadow] [--system-audio] [--json]
+          record project --duration <seconds> --output <project.dmlm> --lesson-title <title> [--course-title <title>] [--region x,y,w,h] [--window-id <id>] [--microphone] [--microphone-device-id <id>] [--webcam] [--camera-resolution 720p|1080p|4K] [--camera-fps 24|30|40|50|60] [--webcam-format original|1:1|2:3|3:2|16:9] [--webcam-frame rounded|square|circle] [--webcam-corner-radius <points>] [--webcam-size 0.10...0.40] [--mirror-webcam] [--webcam-border] [--no-webcam-shadow] [--system-audio] [--json]
           edit decisions|validate <project.dmlm> [--json]
           edit add-cut <project.dmlm> --start <seconds> --end <seconds> [--reason <text>] [--disabled] [--duration <seconds>] [--json]
           edit add-zoom <project.dmlm> --start <seconds> --end <seconds> --scale <factor> [--x 0...1] [--y 0...1] [--size 0...1] [--disabled] [--duration <seconds>] [--json]
@@ -1277,6 +1367,7 @@ struct DMLessonMeldCLI {
           annotations init|list <project.dmlm> [--json]
           annotations add-text <project.dmlm> --text <text> (--x <points> --y <points> | --normalized-x 0...1 --normalized-y 0...1) [--start <seconds>] [--end <seconds>] [--display-id <id>] [--json]
           transcript export <project.dmlm|transcript.json> --format vtt|srt|md|txt --output <path> [--json]
+          transcript model-status [--settings <settings.json>] [--json]
           chapters export <project.dmlm> --format youtube|md|json --output <path> [--json]
           render plan|export <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--concurrency 1...8] [--prores] [--json]
           export <project> --preset <id> [--json]
@@ -1290,6 +1381,7 @@ struct DMLessonMeldCLI {
           config plan|init|status <config-root> [--json]
           config commit <config-root> --message <message> [--json]
           agent manifest <project> [--include-media-paths] [--include-transcript-references]
+          agent workflows [--target openclaw|codex|veritas-kanban] [--json]
           app status|show-controls|start|pause|resume|toggle-pause|stop [--json]
         """)
     }
@@ -1309,6 +1401,12 @@ struct DMLessonMeldCLI {
                 print("Settings: \(permission.settingsURL)")
             }
         }
+    }
+
+    static func loadPreferences(from path: String?) throws -> LessonMeldPreferences {
+        guard let path else { return LessonMeldPreferences() }
+        let data = try Data(contentsOf: URL(fileURLWithPath: path))
+        return try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data).normalized()
     }
 
     static func printConfigStatus(_ status: ConfigGitBackupStatus, json: Bool) throws {
@@ -1449,6 +1547,19 @@ struct DMLessonMeldCLI {
         return number
     }
 
+    static func positiveUInt32Option(_ name: String, in arguments: [String], required: Bool = false) throws -> UInt32? {
+        guard let value = optionValue(name, in: arguments) else {
+            if required {
+                throw CLIError.usage("\(name) is required.")
+            }
+            return nil
+        }
+        guard let number = UInt32(value), number > 0 else {
+            throw CLIError.usage("\(name) must be a positive integer.")
+        }
+        return number
+    }
+
     struct AnnotationPointPayload {
         var points: [CGPoint]
         var normalizedPoints: [NormalizedAnnotationPoint]?
@@ -1556,7 +1667,7 @@ struct DMLessonMeldCLI {
             tracks.append(TimelineTrack(id: "microphone", kind: .microphone, displayName: "Microphone"))
         }
         if hasSystemAudio {
-            tracks.append(TimelineTrack(id: "system-audio", kind: .systemAudio, displayName: "System Audio"))
+            tracks.append(TimelineTrack(id: "system-audio", kind: .systemAudio, displayName: "System Audio (Embedded)"))
         }
         return tracks
     }
@@ -1683,9 +1794,7 @@ struct DMLessonMeldCLI {
     }
 
     static func writeAnnotationStore(_ store: AnnotationStore, to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try DMLessonJSON.encoder().encode(store)
-        try data.write(to: url, options: [.atomic])
+        try AnnotationSidecarWriter.write(store, to: url)
     }
 
     static func attachAnnotationStore(projectURL: URL, storeURL: URL) throws -> ProjectManifest {

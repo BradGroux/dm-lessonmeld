@@ -202,6 +202,70 @@ struct AnnotationStoreTests {
         #expect(Set(AnnotationTool.allCases.map(\.rawValue)) == expected)
         #expect(Set(AnnotationKind.allCases.map(\.rawValue)) == expected)
     }
+
+    @Test("Sidecar writer coalesces debounced writes")
+    func sidecarWriterCoalescesDebouncedWrites() async throws {
+        let temp = try TemporaryDirectory()
+        let url = temp.url.appendingPathComponent("annotations.json")
+        let writer = AnnotationSidecarWriter(
+            configuration: AnnotationSidecarWriter.Configuration(debounceNanoseconds: 10_000_000)
+        )
+        var first = AnnotationStore()
+        first.add(annotation(kind: .pen, points: [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 10)]))
+        var second = first
+        second.add(annotation(kind: .text, points: [CGPoint(x: 20, y: 20)], text: "Final"))
+
+        await writer.schedule(first, to: url)
+        await writer.schedule(second, to: url)
+
+        let decoded = try await waitForAnnotationStore(at: url)
+        #expect(decoded == second)
+    }
+
+    @Test("Sidecar writer flushes pending writes immediately")
+    func sidecarWriterFlushesPendingWrites() async throws {
+        let temp = try TemporaryDirectory()
+        let url = temp.url.appendingPathComponent("annotations.json")
+        let writer = AnnotationSidecarWriter(
+            configuration: AnnotationSidecarWriter.Configuration(debounceNanoseconds: 60_000_000_000)
+        )
+        var store = AnnotationStore()
+        store.add(annotation(kind: .rectangle, points: [CGPoint(x: 0, y: 0), CGPoint(x: 20, y: 20)]))
+
+        await writer.schedule(store, to: url)
+        try await writer.flush()
+
+        let data = try Data(contentsOf: url)
+        let decoded = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+        #expect(decoded == store)
+    }
+}
+
+private final class TemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dm-lessonmeld-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
+private func waitForAnnotationStore(at url: URL) async throws -> AnnotationStore {
+    for _ in 0..<50 {
+        if let data = try? Data(contentsOf: url),
+           let store = try? DMLessonJSON.decoder().decode(AnnotationStore.self, from: data) {
+            return store
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+
+    let data = try Data(contentsOf: url)
+    return try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
 }
 
 private func annotation(

@@ -174,6 +174,11 @@ private struct QuickRecordingControlBar: View {
             }
             .disabled(model.isPackagingCompletion)
 
+            ControlBarButton(icon: "captions.bubble", title: model.isExportingCompletionCaptions ? "Exporting" : "Captions") {
+                model.exportCompletionCaptionSidecars()
+            }
+            .disabled(model.isExportingCompletionCaptions)
+
             ControlBarDivider()
 
             PrimaryControlBarButton(icon: "record.circle.fill", title: "New Recording") {
@@ -715,6 +720,7 @@ final class QuickRecorderModel: ObservableObject {
     @Published var completion: QuickRecordingCompletion?
     @Published var isPackagingCompletion = false
     @Published var isRenderingCompletion = false
+    @Published var isExportingCompletionCaptions = false
     @Published var completionRenderProgress = 0.0
     @Published var cameraPreviewSession: CameraPreviewSessionBox?
 
@@ -810,7 +816,8 @@ final class QuickRecorderModel: ObservableObject {
             recordTarget.rawValue,
             "\(recordingMarkerCount)",
             isRenderingCompletion ? "rendering" : "not-rendering",
-            isPackagingCompletion ? "packaging" : "not-packaging"
+            isPackagingCompletion ? "packaging" : "not-packaging",
+            isExportingCompletionCaptions ? "captions-exporting" : "captions-idle"
         ].joined(separator: "|")
     }
 
@@ -1361,6 +1368,29 @@ final class QuickRecorderModel: ObservableObject {
         }
     }
 
+    func exportCompletionCaptionSidecars() {
+        guard let completion, !isExportingCompletionCaptions else { return }
+        isExportingCompletionCaptions = true
+        message = "Exporting caption and transcript sidecars..."
+        let projectURL = completion.projectURL
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                let outputDirectory = try Self.exportCompletionCaptionSidecars(projectURL: projectURL)
+                await MainActor.run {
+                    self.isExportingCompletionCaptions = false
+                    self.message = "Exported caption and transcript sidecars."
+                    NSWorkspace.shared.activateFileViewerSelecting([outputDirectory])
+                }
+            } catch {
+                await MainActor.run {
+                    self.isExportingCompletionCaptions = false
+                    self.message = error.localizedDescription
+                }
+            }
+        }
+    }
+
     func saveCompletionVideo(_ preferences: LessonMeldPreferences) {
         guard let completion, !isRenderingCompletion else { return }
         isRenderingCompletion = true
@@ -1753,7 +1783,8 @@ final class QuickRecorderModel: ObservableObject {
                     },
                     microphoneAudio: microphoneResult.map { _ in
                         ProjectFile(relativePath: "microphone.m4a", role: .microphoneAudio, mimeType: "audio/mp4")
-                    }
+                    },
+                    embeddedAudio: screenResult.systemAudioURL == nil ? nil : ProjectEmbeddedAudio(screenVideo: [.systemAudio])
                 ),
                 capture: projectCaptureSettings(
                     preferences: preferences,
@@ -2009,7 +2040,7 @@ final class QuickRecorderModel: ObservableObject {
             tracks.append(TimelineTrack(id: "microphone", kind: .microphone, displayName: "Microphone"))
         }
         if hasSystemAudio {
-            tracks.append(TimelineTrack(id: "system-audio", kind: .systemAudio, displayName: "System Audio"))
+            tracks.append(TimelineTrack(id: "system-audio", kind: .systemAudio, displayName: "System Audio (Embedded)"))
         }
         return tracks
     }
@@ -2070,6 +2101,37 @@ final class QuickRecorderModel: ObservableObject {
             }
         }
         return try await AVFoundationRenderService().export(plan: plan, progress: progress)
+    }
+
+    nonisolated private static func exportCompletionCaptionSidecars(projectURL: URL) throws -> URL {
+        let manifest = try ProjectBundle.loadManifest(at: projectURL)
+        guard let transcriptFile = completionTranscriptSource(in: manifest) else {
+            throw QuickRecorderError.noTranscriptSidecar
+        }
+
+        let transcriptURL = try ProjectBundle.projectLocalFileURL(for: transcriptFile, in: projectURL)
+        let transcriptData = try Data(contentsOf: transcriptURL)
+        let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: transcriptData)
+        let outputDirectory = projectURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("Caption Exports", isDirectory: true)
+            .appendingPathComponent(projectURL.deletingPathExtension().lastPathComponent, isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+        try Data(TranscriptExporter.vtt(transcript).utf8).write(to: outputDirectory.appendingPathComponent("captions.vtt"), options: [.atomic])
+        try Data(TranscriptExporter.srt(transcript).utf8).write(to: outputDirectory.appendingPathComponent("captions.srt"), options: [.atomic])
+        try Data(TranscriptExporter.markdown(transcript).utf8).write(to: outputDirectory.appendingPathComponent("transcript.md"), options: [.atomic])
+        try Data(TranscriptExporter.plainText(transcript).utf8).write(to: outputDirectory.appendingPathComponent("transcript.txt"), options: [.atomic])
+        return outputDirectory
+    }
+
+    nonisolated private static func completionTranscriptSource(in manifest: ProjectManifest) -> ProjectFile? {
+        manifest.media.transcripts.first(where: isJSONSidecar)
+            ?? manifest.media.captions.first(where: isJSONSidecar)
+    }
+
+    nonisolated private static func isJSONSidecar(_ file: ProjectFile) -> Bool {
+        file.mimeType == "application/json" || file.relativePath.lowercased().hasSuffix(".json")
     }
 
     private static func renderPreset(from preferences: ExportPreferences) -> RenderPreset {
@@ -2133,33 +2195,12 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     private static func availableWindowChoices() -> [QuickWindowChoice] {
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return []
-        }
-
-        return windows.compactMap { info in
-            guard let id = info[kCGWindowNumber as String] as? UInt32,
-                  let layer = info[kCGWindowLayer as String] as? Int,
-                  layer == 0 else {
-                return nil
-            }
-
-            let owner = (info[kCGWindowOwnerName as String] as? String)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown App"
-            let name = (info[kCGWindowName as String] as? String)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !owner.isEmpty else { return nil }
-
-            let title = name.isEmpty ? owner : name
-            let bounds = info[kCGWindowBounds as String] as? [String: Any]
-            let width = (bounds?["Width"] as? Double).map(Int.init) ?? 0
-            let height = (bounds?["Height"] as? Double).map(Int.init) ?? 0
-            let sizeLabel = width > 0 && height > 0 ? " - \(width)x\(height)" : ""
+        WindowCaptureSourceProvider.availableSources().map { source in
+            let sizeLabel = source.sizeLabel.map { " - \($0)" } ?? ""
             return QuickWindowChoice(
-                id: id,
-                title: title,
-                detail: "\(owner)\(sizeLabel)"
+                id: source.id,
+                title: source.title,
+                detail: "\(source.ownerName)\(sizeLabel)"
             )
         }
     }
@@ -2588,6 +2629,7 @@ private enum QuickRecorderError: Error, LocalizedError {
     case invalidNumber(String)
     case stopTimedOut
     case recordingFailedButProjectPreserved(message: String, projectPath: String)
+    case noTranscriptSidecar
 
     var errorDescription: String? {
         switch self {
@@ -2597,6 +2639,8 @@ private enum QuickRecorderError: Error, LocalizedError {
             "Stopping timed out. Recording controls were reset; check the project folder for partial files before recording again."
         case .recordingFailedButProjectPreserved(let message, let projectPath):
             "Recording stopped before completion, but recoverable files were preserved at \(projectPath). \(message)"
+        case .noTranscriptSidecar:
+            "This recording does not have a JSON transcript or caption sidecar to export."
         }
     }
 
@@ -2604,7 +2648,7 @@ private enum QuickRecorderError: Error, LocalizedError {
         switch self {
         case .recordingFailedButProjectPreserved(_, let projectPath):
             projectPath
-        case .invalidNumber, .stopTimedOut:
+        case .invalidNumber, .stopTimedOut, .noTranscriptSidecar:
             nil
         }
     }

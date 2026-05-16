@@ -86,6 +86,36 @@ struct LearnHousePackageTests {
         #expect(file["byte_count"] as? Int == 5)
     }
 
+    @Test("Preserves nested asset paths to avoid basename collisions")
+    func preservesNestedAssetPaths() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Nested.dmlm", isDirectory: true)
+        let outputURL = temp.url.appendingPathComponent("exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("screen"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("webcam"), withIntermediateDirectories: true)
+        try Data("screen".utf8).write(to: projectURL.appendingPathComponent("screen/capture.mp4"))
+        try Data("webcam".utf8).write(to: projectURL.appendingPathComponent("webcam/capture.mp4"))
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Nested"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "screen/capture.mp4", role: .screenVideo, mimeType: "video/mp4"),
+                    webcam: ProjectFile(relativePath: "webcam/capture.mp4", role: .webcamVideo, mimeType: "video/mp4")
+                )
+            ),
+            to: projectURL
+        )
+
+        let result = try LearnHousePackageBuilder().buildPackage(projectURL: projectURL, outputDirectory: outputURL)
+        let packageURL = URL(fileURLWithPath: result.packagePath)
+        let paths = Set(result.manifest.files.map(\.relativePath))
+
+        #expect(paths.contains("assets/screen/capture.mp4"))
+        #expect(paths.contains("assets/webcam/capture.mp4"))
+        #expect(FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("assets/screen/capture.mp4").path))
+        #expect(FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("assets/webcam/capture.mp4").path))
+    }
+
     @Test("Rejects project media paths outside the bundle")
     func rejectsMediaPathsOutsideBundle() throws {
         let temp = try TemporaryDirectory()

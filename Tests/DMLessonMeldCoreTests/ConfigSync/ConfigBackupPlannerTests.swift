@@ -79,6 +79,24 @@ struct ConfigBackupPlannerTests {
         #expect(!tracked.contains("profiles/github-token.json"))
     }
 
+    @Test("Git backup status reports only syncable changed paths")
+    func statusReportsOnlySyncableChangedPaths() throws {
+        try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))
+        let temp = try TemporaryDirectory()
+        let manager = ConfigGitBackupManager()
+        _ = try manager.ensureRepository(rootURL: temp.url)
+        try write("{}", to: temp.url.appendingPathComponent("templates/workshop.json"))
+        try write("token", to: temp.url.appendingPathComponent("profiles/github-token.json"))
+        try write("video", to: temp.url.appendingPathComponent("media/screen.mp4"))
+
+        let status = try manager.status(rootURL: temp.url)
+
+        #expect(status.changedPaths.contains(".gitignore"))
+        #expect(status.changedPaths.contains("templates/workshop.json"))
+        #expect(!status.changedPaths.contains("profiles/github-token.json"))
+        #expect(!status.changedPaths.contains("media/screen.mp4"))
+    }
+
     @Test("Excludes symlink escapes from config backups")
     func excludesSymlinkEscapes() throws {
         let temp = try TemporaryDirectory()

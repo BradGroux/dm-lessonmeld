@@ -97,7 +97,7 @@ Expected structure:
 
 ```text
 lesson-name.dmlm/
-  manifest.json
+  project.json
   screen.mp4
   webcam.mov
   microphone.m4a
