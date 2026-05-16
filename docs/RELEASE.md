@@ -79,21 +79,32 @@ CODESIGN_IDENTITY="Developer ID Application: Example LLC (TEAMID)" scripts/packa
 
 ## Sign and notarize
 
+For local packaging, use a stored notarytool profile:
+
 ```sh
 CODESIGN_IDENTITY="Developer ID Application: Example LLC (TEAMID)" \
-NOTARIZE_APPLE_ID="apple-id@example.com" \
-NOTARIZE_PASSWORD="app-specific-password" \
-NOTARIZE_TEAM_ID="TEAMID" \
+NOTARIZE_PROFILE="dm-lessonmeld" \
 scripts/package-release.sh
 ```
 
-For release-mode enforcement, add:
+For release-mode packaging without a local profile, use App Store Connect API key credentials:
+
+```sh
+CODESIGN_IDENTITY="Developer ID Application: Example LLC (TEAMID)" \
+NOTARIZE_KEY_PATH="/path/AuthKey_ABC123.p8" \
+NOTARIZE_KEY_ID="ABC123" \
+NOTARIZE_ISSUER_ID="00000000-0000-0000-0000-000000000000" \
+DM_LESSONMELD_REQUIRE_NOTARIZATION=1 \
+scripts/package-release.sh
+```
+
+For release-mode enforcement with a stored profile, add:
 
 ```sh
 DM_LESSONMELD_REQUIRE_NOTARIZATION=1
 ```
 
-When this flag is set, packaging fails unless both Developer ID signing and notarization credentials are present.
+When this flag is set, packaging fails unless both Developer ID signing and notarization credentials are present. Apple ID/app-specific password notarization remains available for local non-release packaging, but release-mode packaging rejects password arguments to avoid exposing notarization credentials in process argv.
 
 ## GitHub release
 
@@ -106,7 +117,7 @@ The tag-driven workflow is:
 To publish a release, update `Packaging/Info.plist`, commit the change, then push a matching version tag:
 
 ```sh
-VERSION="0.0.1"
+VERSION="0.0.4"
 git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```
@@ -121,7 +132,7 @@ The workflow runs:
 - packaging script syntax checks
 - `DM_LESSONMELD_REQUIRE_NOTARIZATION=1 scripts/package-release.sh`
 - Developer ID signing
-- Apple notarization and stapler validation
+- Apple notarization with App Store Connect API key credentials and stapler validation
 - SHA256 generation for DMG and zip artifacts
 
 It then creates a GitHub Release and attaches:
@@ -138,14 +149,15 @@ Set these repository secrets before publishing a notarized release:
 - `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`: base64-encoded `.p12` export containing the Developer ID Application certificate and private key.
 - `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`: password for the `.p12` export.
 - `APPLE_DEVELOPER_IDENTITY`: full codesigning identity, for example `Developer ID Application: Example LLC (TEAMID)`.
-- `APPLE_NOTARIZATION_APPLE_ID`: Apple ID used for notarization.
-- `APPLE_NOTARIZATION_PASSWORD`: app-specific password for that Apple ID.
-- `APPLE_NOTARIZATION_TEAM_ID`: Apple Developer Team ID.
+- `APPLE_NOTARIZATION_KEY_BASE64`: base64-encoded App Store Connect API private key `.p8`.
+- `APPLE_NOTARIZATION_KEY_ID`: App Store Connect API key ID.
+- `APPLE_NOTARIZATION_ISSUER_ID`: App Store Connect issuer ID.
 
-Create the certificate payload locally:
+Create the certificate and notarization key payloads locally:
 
 ```sh
 base64 -i DeveloperIDApplication.p12 | pbcopy
+base64 -i AuthKey_ABC123.p8 | pbcopy
 ```
 
 ## Homebrew Cask
@@ -165,7 +177,7 @@ Casks/dm-lessonmeld.rb
 After publishing a GitHub Release, update the mirrored cask and the public tap cask with the release version and SHA256:
 
 ```sh
-VERSION="0.0.1"
+VERSION="0.0.4"
 tmpdir="$(mktemp -d)"
 gh release download "v${VERSION}" \
   --repo BradGroux/dm-lessonmeld \

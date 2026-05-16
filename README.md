@@ -4,7 +4,7 @@
 
 It records lessons into local `.dmlm` project bundles, lets you review and annotate them, renders teaching-ready videos, and packages exports for course workflows without accounts, telemetry, analytics, or cloud processing.
 
-> Status: v0.0.3 developer preview. The core app, CLI, project bundle, recording, annotation, render, export, settings, packaging foundations, and local capture smoke harness are in place. Release automation now supports Developer ID signed/notarized DMG and zip artifacts.
+> Status: v0.0.4 developer preview. The core app, CLI, project bundle, recording, annotation, render, export, settings, packaging foundations, and local capture smoke harness are in place. Release automation supports Developer ID signed/notarized DMG and zip artifacts with App Store Connect API key notarization for tagged releases.
 
 ## Features
 
@@ -111,6 +111,7 @@ Optional release environment:
 CODESIGN_IDENTITY="Developer ID Application: Example" scripts/package-release.sh
 CODESIGN_IDENTITY="Developer ID Application: Example" NOTARIZE_PROFILE="dm-lessonmeld" scripts/package-release.sh
 DM_LESSONMELD_REQUIRE_NOTARIZATION=1 CODESIGN_IDENTITY="Developer ID Application: Example" NOTARIZE_PROFILE="dm-lessonmeld" scripts/package-release.sh
+DM_LESSONMELD_REQUIRE_NOTARIZATION=1 CODESIGN_IDENTITY="Developer ID Application: Example" NOTARIZE_KEY_PATH="/path/AuthKey_ABC123.p8" NOTARIZE_KEY_ID="ABC123" NOTARIZE_ISSUER_ID="00000000-0000-0000-0000-000000000000" scripts/package-release.sh
 ```
 
 Release packaging emits both `.zip` and `.dmg` paths and writes artifacts under `.build/dist`.
