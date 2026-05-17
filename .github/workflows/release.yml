@@ -172,12 +172,8 @@ jobs:
           SIGNING_STATUS: ${{ steps.signing.outputs.status }}
         run: |
           if [[ "${SIGNING_CONFIGURED}" == "1" ]]; then
-            verification="- Developer ID signing
-          - Apple notarization and stapler validation"
             signing_status="This release is Developer ID signed and notarized. The DMG is the primary install artifact; the zip remains attached for automation and cask update workflows."
           else
-            verification="- ad-hoc app signature verification
-          - unsigned, non-notarized DMG verification"
             signing_status="This is an unsigned, non-notarized developer-preview release. macOS may block the app after download; use the Gatekeeper workaround in docs/RELEASE.md only if you trust the source. The DMG is attached for manual installation, and the zip remains attached for automation and cask update workflows."
           fi
 
@@ -211,7 +207,17 @@ jobs:
           - DMG and zip SHA256 generation
           EOF
 
-          printf '          %s\n' "${verification}" >> .build/release-artifacts/release-notes.md
+          if [[ "${SIGNING_CONFIGURED}" == "1" ]]; then
+            cat >> .build/release-artifacts/release-notes.md <<'EOF'
+          - Developer ID signing
+          - Apple notarization and stapler validation
+          EOF
+          else
+            cat >> .build/release-artifacts/release-notes.md <<'EOF'
+          - ad-hoc app signature verification
+          - unsigned, non-notarized DMG verification
+          EOF
+          fi
 
           cat >> .build/release-artifacts/release-notes.md <<EOF
 
