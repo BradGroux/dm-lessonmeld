@@ -50,6 +50,8 @@ struct DMLessonMeldCLI {
             try runLearnHouse(Array(arguments.dropFirst()))
         case "share":
             try runShare(Array(arguments.dropFirst()))
+        case "connectors":
+            try runConnectors(Array(arguments.dropFirst()))
         case "config":
             try runConfig(Array(arguments.dropFirst()))
         case "agent":
@@ -1197,6 +1199,61 @@ struct DMLessonMeldCLI {
         }
     }
 
+    static func runConnectors(_ arguments: [String]) throws {
+        guard arguments.count >= 5, let output = optionValue("--output", in: arguments) else {
+            throw CLIError.usage("Usage: dmlesson connectors common-cartridge|scorm|xapi package <project> --output <directory> [--no-archive] [--json]\n       dmlesson connectors video-host handoff <project> --output <directory> [--archive] [--json]")
+        }
+
+        let kind = arguments[0]
+        let action = arguments[1]
+        let projectURL = URL(fileURLWithPath: arguments[2])
+        let outputURL = URL(fileURLWithPath: output, isDirectory: true)
+        let result: ConnectorPackageResult
+        let label: String
+
+        switch (kind, action) {
+        case ("common-cartridge", "package"):
+            result = try CommonCartridgePackageBuilder().buildPackage(
+                projectURL: projectURL,
+                outputDirectory: outputURL,
+                archive: !arguments.contains("--no-archive")
+            )
+            label = "Common Cartridge package"
+        case ("scorm", "package"):
+            result = try SCORMPackageBuilder().buildPackage(
+                projectURL: projectURL,
+                outputDirectory: outputURL,
+                archive: !arguments.contains("--no-archive")
+            )
+            label = "SCORM package"
+        case ("xapi", "package"):
+            result = try XAPIPackageBuilder().buildPackage(
+                projectURL: projectURL,
+                outputDirectory: outputURL,
+                archive: !arguments.contains("--no-archive")
+            )
+            label = "xAPI package"
+        case ("video-host", "handoff"):
+            result = try VideoHostHandoffBuilder().buildPackage(
+                projectURL: projectURL,
+                outputDirectory: outputURL,
+                archive: arguments.contains("--archive")
+            )
+            label = "Video-host handoff"
+        default:
+            throw CLIError.usage("Usage: dmlesson connectors common-cartridge|scorm|xapi package <project> --output <directory> [--no-archive] [--json]\n       dmlesson connectors video-host handoff <project> --output <directory> [--archive] [--json]")
+        }
+
+        if arguments.contains("--json") {
+            try printJSON(result)
+        } else {
+            print("\(label): \(result.packagePath)")
+            if let archivePath = result.archivePath {
+                print("Archive: \(archivePath)")
+            }
+        }
+    }
+
     static func runConfig(_ arguments: [String]) throws {
         guard let subcommand = arguments.first, arguments.count >= 2 else {
             throw CLIError.usage("Usage: dmlesson config plan|init|status|commit <config-root> [--message <message>] [--json]")
@@ -1378,6 +1435,8 @@ struct DMLessonMeldCLI {
           presets apply <project> --preset <preset.dmlpreset> [--json]
           learnhouse package <project> --output <directory> [--archive] [--json]
           share package <project> --output <directory> [--final-video <video.mp4|video.mov>] [--archive] [--json]
+          connectors common-cartridge|scorm|xapi package <project> --output <directory> [--no-archive] [--json]
+          connectors video-host handoff <project> --output <directory> [--archive] [--json]
           config plan|init|status <config-root> [--json]
           config commit <config-root> --message <message> [--json]
           agent manifest <project> [--include-media-paths] [--include-transcript-references]

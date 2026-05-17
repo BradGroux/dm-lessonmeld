@@ -149,7 +149,8 @@ Use the **Export** inspector tab to keep export actions separate:
 - **Local Share Package** builds a `.lessonshare` directory with project metadata, editable sidecars, raw assets, optional final video, and checksums.
 - **Raw Assets** extracts source files from the `.dmlm` bundle into a standalone raw-assets folder.
 - **Course Package** builds the LearnHouse package.
-- **Publishing** stays gated until a future connector exists, so local export actions do not accidentally publish externally.
+- **Connector Packages** build local Common Cartridge, SCORM, xAPI, and video-host handoff packages without credentials or network publishing.
+- **Publishing** stays gated, so local export actions do not accidentally publish externally.
 
 CLI equivalents:
 
@@ -158,6 +159,10 @@ swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --resolu
 swift run dmlesson render export /tmp/Intro.dmlm --output /tmp/lesson.mov --codec prores
 swift run dmlesson project extract-assets /tmp/Intro.dmlm --output /tmp/raw-assets --json
 swift run dmlesson share package /tmp/Intro.dmlm --output /tmp/shares --final-video /tmp/lesson.mp4 --json
+swift run dmlesson connectors common-cartridge package /tmp/Intro.dmlm --output /tmp/connectors --json
+swift run dmlesson connectors scorm package /tmp/Intro.dmlm --output /tmp/connectors --json
+swift run dmlesson connectors xapi package /tmp/Intro.dmlm --output /tmp/connectors --json
+swift run dmlesson connectors video-host handoff /tmp/Intro.dmlm --output /tmp/connectors --json
 ```
 
 ProRes requires MOV output. Alpha-channel and animated GIF export are not active controls until dedicated alpha and image-sequence render pipelines exist; legacy CLI flags still fail validation instead of silently producing a different file.
@@ -266,6 +271,7 @@ swift run dmlesson record window --window-id 123 --duration 10 --output /tmp/win
 swift run dmlesson project create --lesson-title "Intro" --output /tmp/Intro.dmlm
 swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --json
 swift run dmlesson transcript model-status --settings /tmp/settings.json --json
+swift run dmlesson connectors common-cartridge package /tmp/Intro.dmlm --output /tmp/connectors --json
 swift run dmlesson agent workflows --target codex --json
 ```
 

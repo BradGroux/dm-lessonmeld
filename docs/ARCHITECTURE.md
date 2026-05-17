@@ -18,6 +18,7 @@ Sources/
     Captions/              Transcript/caption import/export helpers plus local transcription model readiness
     Capture/               Screen, region, webcam, cursor/keystroke metadata
     ConfigSync/            Safe local Git config/template backup planning and commits
+    ConnectorExport/       Common Cartridge, SCORM, xAPI, and video-host handoff package builders
     Editor/                Edit decision lists, canvas/camera/audio settings, trim plans, AVFoundation trim export
     LearnHouseExport/      LearnHouse-ready local package generation
     LessonProject/         Project bundle manifest, validation, JSON helpers
@@ -42,7 +43,7 @@ Tests/
 - Settings are persisted locally through `UserDefaults` as a versioned `LessonMeldPreferences` snapshot.
 - Settings backup controls can write the current preferences snapshot to `settings/preferences.json`, initialize the local backup repo, preview the plan, and commit through the core config sync folder.
 - The support target owns app-adjacent pure workflow logic such as project render planning, quick-recording completion render/package decisions, and caption/transcript sidecar export.
-- The app editor opens local `.dmlm` bundles, inspects manifests, opens video-backed projects in a preview-first timeline workspace, saves `editor-settings.json` canvas, cursor, camera, audio, and caption settings, `edit-decision-list.json` cut/zoom sidecars, and `overlays.json` timed overlay sidecars, exports those saved cuts, checks render readiness, exports full renders through support/core services, creates contiguous trim exports through existing core services, imports/exports `.dmlpreset` style files without touching project media or metadata, extracts raw project assets, and builds local `.lessonshare` packages with checksums.
+- The app editor opens local `.dmlm` bundles, inspects manifests, opens video-backed projects in a preview-first timeline workspace, saves `editor-settings.json` canvas, cursor, camera, audio, and caption settings, `edit-decision-list.json` cut/zoom sidecars, and `overlays.json` timed overlay sidecars, exports those saved cuts, checks render readiness, exports full renders through support/core services, creates contiguous trim exports through existing core services, imports/exports `.dmlpreset` style files without touching project media or metadata, extracts raw project assets, builds local `.lessonshare` packages with checksums, and exposes package-first connector builders through the CLI.
 - Project media URL resolution is centralized through `ProjectBundle.fileURL(for:in:)` so project-relative and explicitly attached absolute files behave the same across app, CLI, render, validation, and LearnHouse package paths.
 - First-run onboarding covers Screen Recording, Microphone, Camera, Accessibility, Input Monitoring, teaching defaults, local-only posture, Git-safe settings backup, LearnHouse, and agent manifests.
 - Git-friendly settings exports use stable JSON object keys, including shortcut values, so backups diff cleanly.

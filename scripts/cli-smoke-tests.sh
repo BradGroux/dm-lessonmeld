@@ -253,6 +253,10 @@ swift run dmlesson config plan ~/.dm-lessonmeld --json
 swift run dmlesson edit validate /tmp/Intro.dmlm --json
 swift run dmlesson agent workflows --target codex --json
 swift run dmlesson learnhouse package /tmp/Intro.dmlm --output /tmp/lesson-export --archive
+swift run dmlesson connectors common-cartridge package /tmp/Intro.dmlm --output /tmp/connectors --json
+swift run dmlesson connectors scorm package /tmp/Intro.dmlm --output /tmp/connectors --json
+swift run dmlesson connectors video-host handoff /tmp/Intro.dmlm --output /tmp/connectors --json
+swift run dmlesson connectors xapi package /tmp/Intro.dmlm --output /tmp/connectors --json
 swift run dmlesson permissions status --json
 swift run dmlesson presets apply /tmp/Intro.dmlm --preset /tmp/workshop.dmlpreset
 swift run dmlesson presets apply /tmp/Other.dmlm --preset /tmp/workshop.dmlpreset
@@ -312,6 +316,7 @@ preset_url="$work_dir/workshop.dmlpreset"
 raw_assets_url="$work_dir/raw-assets"
 share_url="$work_dir/shares"
 learnhouse_url="$work_dir/lesson-export"
+connectors_url="$work_dir/connectors"
 config_root="$work_dir/config"
 
 mkdir -p "$config_root"
@@ -450,6 +455,34 @@ run_json "learnhouse package" "learnhouse-package" \
   "manifest.schema=str" \
   "manifest.learn_house.course_uuid=str" \
   -- "$cli_path" learnhouse package "$project_url" --output "$learnhouse_url" --archive --json
+
+run_json "connector common cartridge" "connector-common-cartridge" \
+  "package_path=str" \
+  "archive_path=str" \
+  "manifest.kind=str" \
+  "manifest.primary_launch_path=str" \
+  -- "$cli_path" connectors common-cartridge package "$project_url" --output "$connectors_url" --json
+
+run_json "connector scorm" "connector-scorm" \
+  "package_path=str" \
+  "archive_path=str" \
+  "manifest.kind=str" \
+  "manifest.primary_launch_path=str" \
+  -- "$cli_path" connectors scorm package "$project_url" --output "$connectors_url" --json
+
+run_json "connector xapi" "connector-xapi" \
+  "package_path=str" \
+  "archive_path=str" \
+  "manifest.kind=str" \
+  "manifest.primary_launch_path=str" \
+  -- "$cli_path" connectors xapi package "$project_url" --output "$connectors_url" --json
+
+run_json "connector video host" "connector-video-host" \
+  "package_path=str" \
+  "archive_path=null-or-str" \
+  "manifest.kind=str" \
+  "manifest.primary_launch_path=str" \
+  -- "$cli_path" connectors video-host handoff "$project_url" --output "$connectors_url" --json
 
 run_json "config plan" "config-plan" \
   "rootPath=str" \

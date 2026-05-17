@@ -35,6 +35,8 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - [Roadmap](docs/ROADMAP.md)
 - [LearnHouse export](docs/LEARNHOUSE_EXPORT.md)
 - [Connector roadmap](docs/CONNECTOR_ROADMAP.md)
+- [H5P feasibility](docs/H5P_FEASIBILITY.md)
+- [LTI 1.3 design](docs/LTI_1_3_DESIGN.md)
 - [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
@@ -158,6 +160,10 @@ swift run dmlesson presets apply /tmp/Intro.dmlm --preset /tmp/workshop.dmlprese
 swift run dmlesson project extract-assets /tmp/Intro.dmlm --output /tmp/raw-assets
 swift run dmlesson share package /tmp/Intro.dmlm --output /tmp/shares --final-video /tmp/lesson.mp4
 swift run dmlesson learnhouse package /tmp/Intro.dmlm --output /tmp/lesson-export --archive
+swift run dmlesson connectors common-cartridge package /tmp/Intro.dmlm --output /tmp/connectors --json
+swift run dmlesson connectors scorm package /tmp/Intro.dmlm --output /tmp/connectors --json
+swift run dmlesson connectors xapi package /tmp/Intro.dmlm --output /tmp/connectors --json
+swift run dmlesson connectors video-host handoff /tmp/Intro.dmlm --output /tmp/connectors --json
 swift run dmlesson config plan ~/.dm-lessonmeld --json
 swift run dmlesson app status --json
 ```
