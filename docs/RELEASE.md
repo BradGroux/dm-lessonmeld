@@ -118,7 +118,7 @@ The tag-driven workflow is:
 To publish a release, update `Packaging/Info.plist`, commit the change, then push a matching version tag:
 
 ```sh
-VERSION="0.0.4"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
 git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```
@@ -178,7 +178,7 @@ Casks/dm-lessonmeld.rb
 After publishing a GitHub Release, update the mirrored cask and the public tap cask with the release version and SHA256. The current cask installs the zip artifact, so hash the zip unless the cask is intentionally switched to the DMG artifact:
 
 ```sh
-VERSION="0.0.4"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
 tmpdir="$(mktemp -d)"
 gh release download "v${VERSION}" \
   --repo BradGroux/dm-lessonmeld \

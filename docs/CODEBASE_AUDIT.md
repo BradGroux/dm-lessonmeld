@@ -42,9 +42,9 @@ This audit covers the Swift app, shared core, CLI, packaging, release workflow, 
 
 ## Product And Expansion Backlog
 
-- Decide whether `0.0.4` should be published now or moved back to an unreleased state. The repo metadata is `0.0.4`, while GitHub Releases and casks still point at older artifacts.
-- Publish a signed/notarized DMG release before treating DMG install docs as applying to every public release; older preview releases are zip-only.
-- Update the repo cask and public tap cask together after the next release, and decide whether to keep zip-backed cask installs or switch the cask to the DMG artifact.
+- Configure the required Developer ID signing and App Store Connect notarization secrets before the next tagged public release.
+- Keep version metadata on the latest published release until a signed/notarized tag can complete; unreleased work stays under `Unreleased` in the changelog.
+- Update the repo cask and public tap cask together after the next signed release, and decide whether to keep zip-backed cask installs or switch the cask to the DMG artifact.
 - Keep release workflow permissions under review as GitHub Actions evolves; current build/package verification and publish permissions are separated.
 - Add local transcription runtime execution and model download/install assistance.
 - Expand deeper local app-control actions for agent workflows beyond read/validate/package command sequences.

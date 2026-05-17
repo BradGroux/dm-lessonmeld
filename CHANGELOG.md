@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-## 0.0.4 - 2026-05-16
-
+- Added a testable support target for app-adjacent render planning and quick-recording completion workflows.
+- Split renderer layer construction, audio mixing, and export-session execution out of `RenderService`.
+- Added a package-first LMS/video-host connector roadmap.
 - Hardened recorder startup so pause during countdown blocks capture until recording is resumed.
 - Restricted local runtime status writes to owner-only file permissions.
 - Rejected symlink escapes in `.lessonshare` and LearnHouse package exports.
