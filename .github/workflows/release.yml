@@ -59,7 +59,8 @@ jobs:
           bash -n scripts/verify-dmg.sh
           python3 -m py_compile scripts/dmlesson-mcp-server.py
 
-      - name: Validate signing configuration
+      - name: Detect signing configuration
+        id: signing
         env:
           APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
           APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
@@ -83,11 +84,16 @@ jobs:
           done
 
           if [[ "${#missing[@]}" -gt 0 ]]; then
-            printf 'Tagged releases require Developer ID signing and notarization secrets. Missing: %s\n' "${missing[*]}" >&2
-            exit 1
+            printf 'Unsigned developer-preview release: missing Apple signing/notarization secrets: %s\n' "${missing[*]}" >&2
+            echo "configured=0" >> "${GITHUB_OUTPUT}"
+            echo "status=Unsigned, non-notarized developer preview" >> "${GITHUB_OUTPUT}"
+          else
+            echo "configured=1" >> "${GITHUB_OUTPUT}"
+            echo "status=Developer ID signed and Apple notarized" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Import Developer ID certificate
+        if: steps.signing.outputs.configured == '1'
         env:
           APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
           APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
@@ -107,6 +113,7 @@ jobs:
           security find-identity -v -p codesigning "${keychain_path}"
 
       - name: Prepare notarization key
+        if: steps.signing.outputs.configured == '1'
         env:
           APPLE_NOTARIZATION_KEY_BASE64: ${{ secrets.APPLE_NOTARIZATION_KEY_BASE64 }}
         run: |
@@ -121,8 +128,13 @@ jobs:
           CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
           NOTARIZE_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           NOTARIZE_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-          DM_LESSONMELD_REQUIRE_NOTARIZATION: "1"
+          DM_LESSONMELD_REQUIRE_NOTARIZATION: ${{ steps.signing.outputs.configured }}
+          SIGNING_CONFIGURED: ${{ steps.signing.outputs.configured }}
         run: |
+          if [[ "${SIGNING_CONFIGURED}" != "1" ]]; then
+            unset CODESIGN_IDENTITY NOTARIZE_KEY_ID NOTARIZE_ISSUER_ID NOTARIZE_KEY_PATH
+          fi
+
           package_output="$(scripts/package-release.sh)"
           echo "${package_output}"
 
@@ -138,10 +150,15 @@ jobs:
           shasum -a 256 "${dmg_path}" > "${dmg_path}.sha256"
 
           codesign --verify --strict --deep --verbose=2 "Packaging/Digital Meld LessonMeld.app"
-          spctl --assess --type execute --verbose "Packaging/Digital Meld LessonMeld.app"
-          xcrun stapler validate "Packaging/Digital Meld LessonMeld.app"
           scripts/verify-dmg.sh "${dmg_path}"
-          xcrun stapler validate "${dmg_path}"
+
+          if [[ "${SIGNING_CONFIGURED}" == "1" ]]; then
+            spctl --assess --type execute --verbose "Packaging/Digital Meld LessonMeld.app"
+            xcrun stapler validate "Packaging/Digital Meld LessonMeld.app"
+            xcrun stapler validate "${dmg_path}"
+          else
+            echo "Unsigned developer-preview release: skipped spctl and stapler validation."
+          fi
 
           mkdir -p .build/release-artifacts
           cp "${dmg_path}" .build/release-artifacts/
@@ -150,7 +167,20 @@ jobs:
           cp "${zip_path}.sha256" .build/release-artifacts/
 
       - name: Write release notes
+        env:
+          SIGNING_CONFIGURED: ${{ steps.signing.outputs.configured }}
+          SIGNING_STATUS: ${{ steps.signing.outputs.status }}
         run: |
+          if [[ "${SIGNING_CONFIGURED}" == "1" ]]; then
+            verification="- Developer ID signing
+          - Apple notarization and stapler validation"
+            signing_status="This release is Developer ID signed and notarized. The DMG is the primary install artifact; the zip remains attached for automation and cask update workflows."
+          else
+            verification="- ad-hoc app signature verification
+          - unsigned, non-notarized DMG verification"
+            signing_status="This is an unsigned, non-notarized developer-preview release. macOS may block the app after download; use the Gatekeeper workaround in docs/RELEASE.md only if you trust the source. The DMG is attached for manual installation, and the zip remains attached for automation and cask update workflows."
+          fi
+
           cat > .build/release-artifacts/release-notes.md <<'EOF'
           ## dm-lessonmeld ${{ steps.version.outputs.version }}
 
@@ -178,13 +208,16 @@ jobs:
           - \`swift test\`
           - \`plutil -lint Packaging/Info.plist\`
           - packaging script syntax checks
-          - Developer ID signing
-          - Apple notarization and stapler validation
           - DMG and zip SHA256 generation
+          EOF
+
+          printf '          %s\n' "${verification}" >> .build/release-artifacts/release-notes.md
+
+          cat >> .build/release-artifacts/release-notes.md <<EOF
 
           ### Signing status
 
-          This release is Developer ID signed and notarized. The DMG is the primary install artifact; the zip remains attached for automation and cask update workflows.
+          ${signing_status}
           EOF
 
       - name: Upload release artifacts

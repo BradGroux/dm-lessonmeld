@@ -152,7 +152,7 @@ def handle_message(message: dict[str, Any]) -> dict[str, Any] | None:
             {
                 "protocolVersion": negotiated,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "dm-lessonmeld", "version": "0.0.3"},
+                "serverInfo": {"name": "dm-lessonmeld", "version": "0.0.4"},
                 "instructions": "Use read-only LessonMeld tools for project inspection, render planning, and agent workflow discovery.",
             },
         )

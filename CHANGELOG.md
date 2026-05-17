@@ -2,15 +2,20 @@
 
 ## Unreleased
 
+## 0.0.4 - 2026-05-17
+
 - Added a testable support target for app-adjacent render planning and quick-recording completion workflows.
 - Split renderer layer construction, audio mixing, and export-session execution out of `RenderService`.
 - Added a package-first LMS/video-host connector roadmap.
+- Added package-first Common Cartridge, SCORM, xAPI, and video-host handoff exports.
+- Added H5P feasibility and LTI 1.3 design docs.
 - Hardened recorder startup so pause during countdown blocks capture until recording is resumed.
 - Restricted local runtime status writes to owner-only file permissions.
 - Rejected symlink escapes in `.lessonshare` and LearnHouse package exports.
 - Expanded config backup exclusions for common credential filenames.
 - Rebound CLI edit exports to manifest-contained project media when loading edit-decision sidecars.
 - Scoped Apple release signing secrets to required workflow steps and switched required release notarization to App Store Connect API key or keychain profile credentials.
+- Allowed tagged developer-preview releases to publish unsigned, non-notarized artifacts when Apple signing secrets are not configured.
 
 ## 0.0.3 - 2026-05-14
 

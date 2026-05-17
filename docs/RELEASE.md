@@ -1,6 +1,6 @@
 # Release Guide
 
-This project builds a local macOS app bundle plus versioned DMG and zip artifacts. Tagged public releases must be Developer ID signed and notarized; local preview builds can remain ad-hoc signed for development.
+This project builds a local macOS app bundle plus versioned DMG and zip artifacts. Tagged developer-preview releases can be unsigned and non-notarized; broad public distribution should use Developer ID signing and Apple notarization when Apple credentials are configured.
 
 ## macOS requirements
 
@@ -70,7 +70,7 @@ Output:
 .build/dist/dm-lessonmeld-VERSION-macos.zip
 ```
 
-Ad-hoc signed preview builds and older zip-only preview releases are suitable for local testing. General users should receive the Developer ID signed and notarized DMG when a release includes one.
+Ad-hoc signed preview builds are suitable for developer preview testing. General users should receive the Developer ID signed and notarized DMG when a release includes one.
 
 ## Sign
 
@@ -131,9 +131,10 @@ The workflow runs:
 - `swift test`
 - `plutil -lint Packaging/Info.plist`
 - packaging script syntax checks
-- `DM_LESSONMELD_REQUIRE_NOTARIZATION=1 scripts/package-release.sh`
-- Developer ID signing
-- Apple notarization with App Store Connect API key credentials and stapler validation
+- `scripts/package-release.sh`
+- Developer ID signing when all required Apple signing secrets are configured
+- Apple notarization with App Store Connect API key credentials and stapler validation when all required Apple signing secrets are configured
+- unsigned, non-notarized artifact publication when Apple signing secrets are not configured
 - SHA256 generation for DMG and zip artifacts
 
 It then creates a GitHub Release and attaches:
@@ -143,9 +144,9 @@ It then creates a GitHub Release and attaches:
 - `dm-lessonmeld-VERSION-macos.zip`
 - `dm-lessonmeld-VERSION-macos.zip.sha256`
 
-## Required signing secrets
+## Signing secrets
 
-Set these repository secrets before publishing a notarized release:
+Set these repository secrets before publishing a notarized release. If any are missing, the tag workflow publishes an explicit unsigned, non-notarized developer-preview release instead:
 
 - `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`: base64-encoded `.p12` export containing the Developer ID Application certificate and private key.
 - `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`: password for the `.p12` export.
@@ -213,9 +214,9 @@ brew tap BradGroux/dm-lessonmeld https://github.com/BradGroux/dm-lessonmeld
 brew install --cask bradgroux/dm-lessonmeld/dm-lessonmeld
 ```
 
-## Opening local preview builds
+## Opening unsigned preview builds
 
-Ad-hoc signed preview builds are not notarized. macOS may block them if they are downloaded or moved between machines.
+Ad-hoc signed and unsigned preview builds are not notarized. macOS may block them if they are downloaded or moved between machines.
 
 For local testing only:
 

@@ -4,7 +4,7 @@
 
 It records lessons into local `.dmlm` project bundles, lets you review and annotate them, renders teaching-ready videos, and packages exports for course workflows without accounts, telemetry, analytics, or cloud processing.
 
-> Status: v0.0.3 public developer preview. Main contains unreleased hardening and refactor work. The core app, CLI, project bundle, recording, annotation, render, export, settings, packaging foundations, and local capture smoke harness are in place. Release automation supports Developer ID signed/notarized DMG and zip artifacts with App Store Connect API key notarization for tagged releases.
+> Status: v0.0.4 public developer preview. The core app, CLI, project bundle, recording, annotation, render, export, settings, packaging foundations, local capture smoke harness, and package-first connector exports are in place. Tagged release automation can publish unsigned developer-preview artifacts now and supports Developer ID signed/notarized DMG and zip artifacts when Apple credentials are configured.
 
 ## Features
 
@@ -54,7 +54,7 @@ The first-run onboarding window checks these permissions and links to the releva
 
 ## Install from a Release
 
-For signed public releases that include a notarized DMG, download the DMG from GitHub Releases:
+For public developer-preview releases, download the DMG from GitHub Releases:
 
 ```text
 dm-lessonmeld-VERSION-macos.dmg
@@ -62,7 +62,7 @@ dm-lessonmeld-VERSION-macos.dmg
 
 Open the DMG, drag **Digital Meld LessonMeld.app** to Applications, then open the app and grant macOS permissions when prompted.
 
-The release zip remains attached for automation and cask update workflows. Older preview releases may be zip-only; those are not the DMG-first public distribution path. Local ad-hoc preview builds can still require the Gatekeeper workaround in [docs/RELEASE.md](docs/RELEASE.md#opening-local-preview-builds).
+Unsigned preview releases can require the Gatekeeper workaround in [docs/RELEASE.md](docs/RELEASE.md#opening-unsigned-preview-builds). The release zip remains attached for automation and cask update workflows.
 
 ## Install with Homebrew
 
@@ -101,7 +101,7 @@ scripts/build-app.sh
 open "Packaging/Digital Meld LessonMeld.app"
 ```
 
-The generated app bundle is ad-hoc signed for local testing. Public releases should be Developer ID signed and notarized before broad distribution.
+The generated app bundle is ad-hoc signed for local testing. Broad distribution should use Developer ID signing and notarization when Apple credentials are available.
 
 ## Package a Release
 
