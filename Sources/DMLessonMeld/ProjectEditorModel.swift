@@ -3,6 +3,7 @@ import AVFoundation
 import AVKit
 import Combine
 import DMLessonMeldCore
+import DMLessonMeldSupport
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -2129,22 +2130,13 @@ final class ProjectEditorModel: ObservableObject {
         destinationURL: URL,
         preferences: LessonMeldPreferences
     ) throws -> RenderPlan {
-        let editDecisionList = EditDecisionListFile.exists(in: projectURL)
-            ? try EditDecisionListFile.load(fromProject: projectURL)
-            : nil
-        let editorSettings = try EditorSettingsFile.loadIfPresent(fromProject: projectURL)
-        var plan = try RenderPlan.make(
-            manifest: manifest,
+        try ProjectEditorRenderPlanner.makePlan(
             projectURL: projectURL,
+            manifest: manifest,
             destinationURL: destinationURL,
             preset: renderPresetFromFields(),
-            editDecisionList: editDecisionList,
-            editorSettings: editorSettings
+            fallbackWebcamPlacement: QuickRecordingCompletionService.webcamPlacement(from: preferences.capture)
         )
-        if plan.webcamOverlay != nil, manifest.capture == nil, editorSettings?.camera == nil {
-            plan.webcamOverlay?.placement = Self.webcamPlacement(from: preferences.capture)
-        }
-        return plan
     }
 
     private func renderPresetFromFields() -> RenderPreset {
@@ -3220,14 +3212,10 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     private func writeCaptionSidecars(_ transcript: TranscriptDocument, projectURL: URL) throws {
-        let jsonURL = projectURL.appendingPathComponent("transcript.json")
-        let vttURL = projectURL.appendingPathComponent("captions.vtt")
-        let srtURL = projectURL.appendingPathComponent("captions.srt")
-        let txtURL = projectURL.appendingPathComponent("transcript.txt")
-        try DMLessonJSON.encoder().encode(transcript).write(to: jsonURL, options: [.atomic])
-        try TranscriptExporter.vtt(transcript).data(using: .utf8)?.write(to: vttURL, options: [.atomic])
-        try TranscriptExporter.srt(transcript).data(using: .utf8)?.write(to: srtURL, options: [.atomic])
-        try TranscriptExporter.plainText(transcript).data(using: .utf8)?.write(to: txtURL, options: [.atomic])
+        _ = try QuickRecordingCompletionExporter.writeProjectCaptionSidecars(
+            transcript: transcript,
+            projectURL: projectURL
+        )
     }
 
     private func attachOverlayStore(projectURL: URL) throws -> ProjectManifest {
@@ -3640,20 +3628,6 @@ final class ProjectEditorModel: ObservableObject {
             red: Double((value >> 16) & 0xFF) / 255,
             green: Double((value >> 8) & 0xFF) / 255,
             blue: Double(value & 0xFF) / 255
-        )
-    }
-
-    private static func webcamPlacement(from capture: CapturePreferences) -> PictureInPicturePlacement {
-        PictureInPicturePlacement(
-            corner: .bottomTrailing,
-            widthRatio: capture.webcamRelativeSize,
-            marginRatio: 0.04,
-            aspectRatio: PictureInPictureAspectRatio(rawValue: capture.webcamAspectRatio.rawValue) ?? .widescreen16x9,
-            frameShape: PictureInPictureFrameShape(rawValue: capture.webcamFrameShape.rawValue) ?? .roundedRectangle,
-            cornerRadius: capture.webcamCornerRadius,
-            isMirrored: capture.webcamMirror,
-            borderEnabled: capture.webcamBorderEnabled,
-            shadowEnabled: capture.webcamShadowEnabled
         )
     }
 

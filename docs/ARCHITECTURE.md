@@ -26,6 +26,7 @@ Sources/
     LessonTemplate/        Lesson templates, brand presets, export presets
     Render/                AVFoundation render plans/export with styled canvases, webcam PiP, audio gain/music mixing, cursor/click/shortcut effects, zoom regions, annotations, and styled transcript captions
     ShareExport/           Raw asset extraction and local `.lessonshare` package generation with checksums
+  DMLessonMeldSupport/     Testable app-workflow services shared by the app and app-adjacent tests
 
 Tests/
   DMLessonMeldCoreTests/   Core regression suite, organized by the same internal folders
@@ -40,7 +41,8 @@ Tests/
 - The app owns the interactive permission/recording path. The CLI also supports direct local capture for automation, smoke tests, and agent workflows.
 - Settings are persisted locally through `UserDefaults` as a versioned `LessonMeldPreferences` snapshot.
 - Settings backup controls can write the current preferences snapshot to `settings/preferences.json`, initialize the local backup repo, preview the plan, and commit through the core config sync folder.
-- The app editor opens local `.dmlm` bundles, inspects manifests, opens video-backed projects in a preview-first timeline workspace, saves `editor-settings.json` canvas, cursor, camera, audio, and caption settings, `edit-decision-list.json` cut/zoom sidecars, and `overlays.json` timed overlay sidecars, exports those saved cuts, checks render readiness, exports full renders with canvas styling, camera layout regions/reactions, cursor/click/shortcut/zoom/overlay/annotation/caption burn-in and progress/cancel controls, creates contiguous trim exports through existing core services, imports/exports `.dmlpreset` style files without touching project media or metadata, extracts raw project assets, and builds local `.lessonshare` packages with checksums.
+- The support target owns app-adjacent pure workflow logic such as project render planning, quick-recording completion render/package decisions, and caption/transcript sidecar export.
+- The app editor opens local `.dmlm` bundles, inspects manifests, opens video-backed projects in a preview-first timeline workspace, saves `editor-settings.json` canvas, cursor, camera, audio, and caption settings, `edit-decision-list.json` cut/zoom sidecars, and `overlays.json` timed overlay sidecars, exports those saved cuts, checks render readiness, exports full renders through support/core services, creates contiguous trim exports through existing core services, imports/exports `.dmlpreset` style files without touching project media or metadata, extracts raw project assets, and builds local `.lessonshare` packages with checksums.
 - Project media URL resolution is centralized through `ProjectBundle.fileURL(for:in:)` so project-relative and explicitly attached absolute files behave the same across app, CLI, render, validation, and LearnHouse package paths.
 - First-run onboarding covers Screen Recording, Microphone, Camera, Accessibility, Input Monitoring, teaching defaults, local-only posture, Git-safe settings backup, LearnHouse, and agent manifests.
 - Git-friendly settings exports use stable JSON object keys, including shortcut values, so backups diff cleanly.

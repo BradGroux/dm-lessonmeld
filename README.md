@@ -34,6 +34,7 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - [Product requirements](docs/PRD.md)
 - [Roadmap](docs/ROADMAP.md)
 - [LearnHouse export](docs/LEARNHOUSE_EXPORT.md)
+- [Connector roadmap](docs/CONNECTOR_ROADMAP.md)
 - [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .library(name: "DMLessonMeldCore", targets: ["DMLessonMeldCore"]),
+        .library(name: "DMLessonMeldSupport", targets: ["DMLessonMeldSupport"]),
         .executable(name: "dmlesson", targets: ["DMLessonMeldCLI"]),
         .executable(name: "DMLessonMeld", targets: ["DMLessonMeld"])
     ],
@@ -18,13 +19,17 @@ let package = Package(
             name: "DMLessonMeldCLI",
             dependencies: ["DMLessonMeldCore"]
         ),
+        .target(
+            name: "DMLessonMeldSupport",
+            dependencies: ["DMLessonMeldCore"]
+        ),
         .executableTarget(
             name: "DMLessonMeld",
-            dependencies: ["DMLessonMeldCore"]
+            dependencies: ["DMLessonMeldCore", "DMLessonMeldSupport"]
         ),
         .testTarget(
             name: "DMLessonMeldCoreTests",
-            dependencies: ["DMLessonMeldCore"]
+            dependencies: ["DMLessonMeldCore", "DMLessonMeldSupport"]
         )
     ]
 )

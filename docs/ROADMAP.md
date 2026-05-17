@@ -41,7 +41,6 @@
 
 ## Post-v1.0
 
-- Additional LMS/video-host connectors.
-- SCORM, xAPI, LTI 1.3, Common Cartridge, and H5P evaluation.
+- Additional LMS/video-host connectors. See [Connector Roadmap](CONNECTOR_ROADMAP.md) for the prioritized package-first backlog.
 - MCP server wrapping stable CLI commands. A dependency-free stdio wrapper exists for safe read/plan commands; broader write tools remain gated.
 - Agent-suggested edits and lesson packaging.

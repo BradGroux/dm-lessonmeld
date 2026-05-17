@@ -3,6 +3,7 @@ import AppKit
 import CoreGraphics
 import CoreMedia
 import DMLessonMeldCore
+import DMLessonMeldSupport
 import SwiftUI
 
 struct QuickRecorderPanel: View {
@@ -1341,17 +1342,12 @@ final class QuickRecorderModel: ObservableObject {
         isPackagingCompletion = true
         message = "Packaging \(completion.projectName) for LearnHouse..."
         let projectURL = completion.projectURL
-        let shouldArchive = preferences.export.createArchiveByDefault
 
         Task.detached(priority: .userInitiated) {
             do {
-                let outputDirectory = projectURL
-                    .deletingLastPathComponent()
-                    .appendingPathComponent("LearnHouse Exports", isDirectory: true)
-                let result = try LearnHousePackageBuilder().buildPackage(
+                let result = try QuickRecordingCompletionService.packageForLearnHouse(
                     projectURL: projectURL,
-                    outputDirectory: outputDirectory,
-                    archive: shouldArchive
+                    preferences: preferences
                 )
                 await MainActor.run {
                     self.isPackagingCompletion = false
@@ -1376,7 +1372,7 @@ final class QuickRecorderModel: ObservableObject {
 
         Task.detached(priority: .userInitiated) {
             do {
-                let outputDirectory = try Self.exportCompletionCaptionSidecars(projectURL: projectURL)
+                let outputDirectory = try QuickRecordingCompletionExporter.exportCompletionCaptionSidecars(projectURL: projectURL)
                 await MainActor.run {
                     self.isExportingCompletionCaptions = false
                     self.message = "Exported caption and transcript sidecars."
@@ -1400,7 +1396,7 @@ final class QuickRecorderModel: ObservableObject {
 
         Task {
             do {
-                let outputURL = try await Self.renderCompletionVideo(
+                let outputURL = try await QuickRecordingCompletionService.renderVideo(
                     projectURL: projectURL,
                     preferences: preferences
                 ) { [weak self] progress in
@@ -2073,119 +2069,6 @@ final class QuickRecorderModel: ObservableObject {
         return URL(fileURLWithPath: expanded, isDirectory: true)
     }
 
-    private static func renderCompletionVideo(
-        projectURL: URL,
-        preferences: LessonMeldPreferences,
-        progress: RenderProgressHandler?
-    ) async throws -> URL {
-        let manifest = try ProjectBundle.loadManifest(at: projectURL)
-        let editDecisionList = EditDecisionListFile.exists(in: projectURL)
-            ? try EditDecisionListFile.load(fromProject: projectURL)
-            : nil
-        let destinationURL = try uniqueRenderDestination(
-            projectURL: projectURL,
-            lessonTitle: manifest.metadata.lessonTitle,
-            fileType: preferences.export.defaultFileType
-        )
-        var plan = try RenderPlan.make(
-            manifest: manifest,
-            projectURL: projectURL,
-            destinationURL: destinationURL,
-            preset: renderPreset(from: preferences.export),
-            editDecisionList: editDecisionList
-        )
-        if plan.webcamOverlay != nil {
-            let manifest = try ProjectBundle.loadManifest(at: projectURL)
-            if manifest.capture == nil {
-                plan.webcamOverlay?.placement = webcamPlacement(from: preferences.capture)
-            }
-        }
-        return try await AVFoundationRenderService().export(plan: plan, progress: progress)
-    }
-
-    nonisolated private static func exportCompletionCaptionSidecars(projectURL: URL) throws -> URL {
-        let manifest = try ProjectBundle.loadManifest(at: projectURL)
-        guard let transcriptFile = completionTranscriptSource(in: manifest) else {
-            throw QuickRecorderError.noTranscriptSidecar
-        }
-
-        let transcriptURL = try ProjectBundle.projectLocalFileURL(for: transcriptFile, in: projectURL)
-        let transcriptData = try Data(contentsOf: transcriptURL)
-        let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: transcriptData)
-        let outputDirectory = projectURL
-            .deletingLastPathComponent()
-            .appendingPathComponent("Caption Exports", isDirectory: true)
-            .appendingPathComponent(projectURL.deletingPathExtension().lastPathComponent, isDirectory: true)
-        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
-
-        try Data(TranscriptExporter.vtt(transcript).utf8).write(to: outputDirectory.appendingPathComponent("captions.vtt"), options: [.atomic])
-        try Data(TranscriptExporter.srt(transcript).utf8).write(to: outputDirectory.appendingPathComponent("captions.srt"), options: [.atomic])
-        try Data(TranscriptExporter.markdown(transcript).utf8).write(to: outputDirectory.appendingPathComponent("transcript.md"), options: [.atomic])
-        try Data(TranscriptExporter.plainText(transcript).utf8).write(to: outputDirectory.appendingPathComponent("transcript.txt"), options: [.atomic])
-        return outputDirectory
-    }
-
-    nonisolated private static func completionTranscriptSource(in manifest: ProjectManifest) -> ProjectFile? {
-        manifest.media.transcripts.first(where: isJSONSidecar)
-            ?? manifest.media.captions.first(where: isJSONSidecar)
-    }
-
-    nonisolated private static func isJSONSidecar(_ file: ProjectFile) -> Bool {
-        file.mimeType == "application/json" || file.relativePath.lowercased().hasSuffix(".json")
-    }
-
-    private static func renderPreset(from preferences: ExportPreferences) -> RenderPreset {
-        RenderPreset(
-            fileType: RenderFileType(rawValue: preferences.defaultFileType.rawValue) ?? .mp4,
-            quality: RenderQuality(rawValue: preferences.defaultRenderQuality.rawValue) ?? .highest
-        )
-    }
-
-    private static func webcamPlacement(from capture: CapturePreferences) -> PictureInPicturePlacement {
-        PictureInPicturePlacement(
-            corner: .bottomTrailing,
-            widthRatio: capture.webcamRelativeSize,
-            marginRatio: 0.04,
-            aspectRatio: PictureInPictureAspectRatio(rawValue: capture.webcamAspectRatio.rawValue) ?? .widescreen16x9,
-            frameShape: PictureInPictureFrameShape(rawValue: capture.webcamFrameShape.rawValue) ?? .roundedRectangle,
-            cornerRadius: capture.webcamCornerRadius,
-            isMirrored: capture.webcamMirror,
-            borderEnabled: capture.webcamBorderEnabled,
-            shadowEnabled: capture.webcamShadowEnabled
-        )
-    }
-
-    private static func uniqueRenderDestination(
-        projectURL: URL,
-        lessonTitle: String,
-        fileType: RenderFileTypeID
-    ) throws -> URL {
-        let exportDirectory = projectURL.appendingPathComponent("Exports", isDirectory: true)
-        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
-
-        let baseName = slug(lessonTitle.isEmpty ? projectURL.deletingPathExtension().lastPathComponent : lessonTitle)
-        let fileExtension = fileType.rawValue
-        var candidate = exportDirectory.appendingPathComponent("\(baseName).\(fileExtension)")
-        var index = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = exportDirectory.appendingPathComponent("\(baseName)-\(index).\(fileExtension)")
-            index += 1
-        }
-        return candidate
-    }
-
-    private static func slug(_ value: String) -> String {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-        let scalars = value.lowercased().unicodeScalars.map { scalar in
-            allowed.contains(scalar) ? Character(scalar) : "-"
-        }
-        let collapsed = String(scalars)
-            .split(separator: "-")
-            .joined(separator: "-")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
-        return collapsed.isEmpty ? "lesson" : collapsed
-    }
-
     private static func formatRegionValue(_ value: CGFloat) -> String {
         let rounded = value.rounded()
         if abs(rounded - value) < 0.001 {
@@ -2629,7 +2512,6 @@ private enum QuickRecorderError: Error, LocalizedError {
     case invalidNumber(String)
     case stopTimedOut
     case recordingFailedButProjectPreserved(message: String, projectPath: String)
-    case noTranscriptSidecar
 
     var errorDescription: String? {
         switch self {
@@ -2639,8 +2521,6 @@ private enum QuickRecorderError: Error, LocalizedError {
             "Stopping timed out. Recording controls were reset; check the project folder for partial files before recording again."
         case .recordingFailedButProjectPreserved(let message, let projectPath):
             "Recording stopped before completion, but recoverable files were preserved at \(projectPath). \(message)"
-        case .noTranscriptSidecar:
-            "This recording does not have a JSON transcript or caption sidecar to export."
         }
     }
 
@@ -2648,7 +2528,7 @@ private enum QuickRecorderError: Error, LocalizedError {
         switch self {
         case .recordingFailedButProjectPreserved(_, let projectPath):
             projectPath
-        case .invalidNumber, .stopTimedOut, .noTranscriptSidecar:
+        case .invalidNumber, .stopTimedOut:
             nil
         }
     }
