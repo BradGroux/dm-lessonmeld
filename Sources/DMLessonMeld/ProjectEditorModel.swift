@@ -1272,8 +1272,9 @@ final class ProjectEditorModel: ObservableObject {
             }
 
             let metadataURL = ProjectBundle.fileURL(for: cursorMetadata, in: projectURL)
-            let data = try Data(contentsOf: metadataURL)
+            let data = try RenderSidecarLimits.data(contentsOf: metadataURL, displayPath: cursorMetadata.relativePath)
             let metadata = try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
+            try RenderSidecarLimits.checkInteractionMetadata(metadata, displayPath: cursorMetadata.relativePath)
             let duration = previewDurationSeconds > 0 ? previewDurationSeconds : (Double(sourceDurationSeconds) ?? 0)
             let clicks = metadata.clicks
                 .filter { $0.phase == .down }
@@ -1499,7 +1500,7 @@ final class ProjectEditorModel: ObservableObject {
                 }
             }
 
-            let data = try Data(contentsOf: sourceURL)
+            let data = try RenderSidecarLimits.data(contentsOf: sourceURL, displayPath: sourceURL.lastPathComponent)
             let transcript = try TranscriptImporter.transcript(from: data, fileName: sourceURL.lastPathComponent)
             captionRows = transcript.segments.map(Self.editableCaptionRow(from:))
             saveCaptions()
@@ -2833,8 +2834,10 @@ final class ProjectEditorModel: ObservableObject {
 
         do {
             let metadataURL = ProjectBundle.fileURL(for: cursorMetadata, in: projectURL)
-            let data = try Data(contentsOf: metadataURL)
-            cursorPreviewMetadata = try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
+            let data = try RenderSidecarLimits.data(contentsOf: metadataURL, displayPath: cursorMetadata.relativePath)
+            let metadata = try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
+            try RenderSidecarLimits.checkInteractionMetadata(metadata, displayPath: cursorMetadata.relativePath)
+            cursorPreviewMetadata = metadata
         } catch {
             cursorPreviewMetadata = nil
             setError("Could not load cursor metadata preview: \(error.localizedDescription)")
@@ -2846,8 +2849,9 @@ final class ProjectEditorModel: ObservableObject {
             let store: OverlayStore
             if let overlays = manifest.media.overlays {
                 let url = ProjectBundle.fileURL(for: overlays, in: projectURL)
-                let data = try Data(contentsOf: url)
+                let data = try RenderSidecarLimits.data(contentsOf: url, displayPath: overlays.relativePath)
                 store = try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
+                try RenderSidecarLimits.checkOverlayStore(store, displayPath: overlays.relativePath)
             } else if let existing = try OverlayStoreFile.loadIfPresent(fromProject: projectURL) {
                 store = existing
             } else {
@@ -2871,10 +2875,11 @@ final class ProjectEditorModel: ObservableObject {
                 captionRows = []
                 return
             }
-            let data = try Data(contentsOf: url)
+            let data = try RenderSidecarLimits.data(contentsOf: url, displayPath: source.relativePath)
             let transcript: TranscriptDocument
             if source.mimeType == "application/json" || source.relativePath.lowercased().hasSuffix(".json") {
                 transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
+                try RenderSidecarLimits.checkTranscript(transcript, displayPath: source.relativePath)
             } else {
                 transcript = try TranscriptImporter.transcript(from: data, fileName: source.relativePath)
             }
@@ -3388,8 +3393,10 @@ final class ProjectEditorModel: ObservableObject {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return AnnotationStore()
         }
-        let data = try Data(contentsOf: url)
-        return try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+        let data = try RenderSidecarLimits.data(contentsOf: url, displayPath: url.lastPathComponent)
+        let store = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+        try RenderSidecarLimits.checkAnnotationStore(store, displayPath: url.lastPathComponent)
+        return store
     }
 
     private func writeAnnotationStore(_ store: AnnotationStore, to url: URL) throws {

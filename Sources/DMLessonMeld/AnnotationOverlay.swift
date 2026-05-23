@@ -236,8 +236,10 @@ final class AnnotationOverlayCoordinator: NSObject, ObservableObject {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return AnnotationStore()
         }
-        let data = try Data(contentsOf: url)
-        return try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+        let data = try RenderSidecarLimits.data(contentsOf: url, displayPath: url.lastPathComponent)
+        let store = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+        try RenderSidecarLimits.checkAnnotationStore(store, displayPath: url.lastPathComponent)
+        return store
     }
 
     private static func writeAnnotationStore(_ store: AnnotationStore, to url: URL) throws {

@@ -58,6 +58,25 @@ struct OverlayStoreTests {
         #expect(OverlayStoreFile.url(inProject: projectURL).lastPathComponent == "overlays.json")
     }
 
+    @Test("Overlay load rejects sidecars above item limits")
+    func overlayLoadRejectsSidecarsAboveItemLimits() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let store = OverlayStore(overlays: (0...RenderSidecarLimits.maxOverlays).map { index in
+            OverlayItem(
+                id: "overlay-\(index)",
+                kind: .text,
+                timeRange: EditTimeRange(startSeconds: Double(index), durationSeconds: 1)
+            )
+        })
+
+        try OverlayStoreFile.save(store, toProject: projectURL)
+
+        #expect(throws: RenderSidecarLimitError.self) {
+            try OverlayStoreFile.load(fromProject: projectURL)
+        }
+    }
+
     @Test("Overlay model clamps unsafe numeric values")
     func clampsUnsafeNumericValues() {
         let item = OverlayItem(

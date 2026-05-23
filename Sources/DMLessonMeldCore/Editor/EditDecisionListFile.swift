@@ -12,7 +12,7 @@ public enum EditDecisionListFile {
     }
 
     public static func load(from url: URL) throws -> EditDecisionList {
-        let data = try Data(contentsOf: url)
+        let data = try RenderSidecarLimits.data(contentsOf: url, displayPath: url.lastPathComponent)
         return try decoder().decode(EditDecisionList.self, from: data)
     }
 

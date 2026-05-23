@@ -400,12 +400,7 @@ extension AVFoundationRenderService {
         }
         let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
         let store = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
-        try RenderSidecarLimits.checkCount(
-            store.annotations.count,
-            limit: RenderSidecarLimits.maxAnnotations,
-            displayPath: source.relativePath,
-            itemName: "annotations"
-        )
+        try RenderSidecarLimits.checkAnnotationStore(store, displayPath: source.relativePath)
         return store
     }
 
@@ -415,48 +410,21 @@ extension AVFoundationRenderService {
         }
         let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
         let store = try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
-        try RenderSidecarLimits.checkCount(
-            store.overlays.count,
-            limit: RenderSidecarLimits.maxOverlays,
-            displayPath: source.relativePath,
-            itemName: "overlays"
-        )
+        try RenderSidecarLimits.checkOverlayStore(store, displayPath: source.relativePath)
         return store
     }
 
     private func loadTranscript(from source: RenderMediaSource) throws -> TranscriptDocument {
         let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
         let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
-        try RenderSidecarLimits.checkCount(
-            transcript.segments.count,
-            limit: RenderSidecarLimits.maxCaptionSegments,
-            displayPath: source.relativePath,
-            itemName: "caption segments"
-        )
+        try RenderSidecarLimits.checkTranscript(transcript, displayPath: source.relativePath)
         return transcript
     }
 
     func loadInteractionMetadata(from source: RenderMediaSource) throws -> InteractionMetadataDocument {
         let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
         let metadata = try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
-        try RenderSidecarLimits.checkCount(
-            metadata.cursorSamples.count,
-            limit: RenderSidecarLimits.maxCursorSamples,
-            displayPath: "\(source.relativePath).cursorSamples",
-            itemName: "cursor samples"
-        )
-        try RenderSidecarLimits.checkCount(
-            metadata.clicks.count,
-            limit: RenderSidecarLimits.maxCursorClicks,
-            displayPath: "\(source.relativePath).clicks",
-            itemName: "clicks"
-        )
-        try RenderSidecarLimits.checkCount(
-            metadata.keystrokes.count,
-            limit: RenderSidecarLimits.maxKeystrokes,
-            displayPath: "\(source.relativePath).keystrokes",
-            itemName: "keystrokes"
-        )
+        try RenderSidecarLimits.checkInteractionMetadata(metadata, displayPath: source.relativePath)
         return metadata
     }
 

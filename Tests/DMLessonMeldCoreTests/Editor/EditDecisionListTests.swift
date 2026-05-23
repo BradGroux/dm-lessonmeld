@@ -122,6 +122,17 @@ struct EditDecisionListTests {
         #expect(loaded == editDecisionList)
     }
 
+    @Test("Edit decision load rejects oversized sidecars")
+    func editDecisionLoadRejectsOversizedSidecars() throws {
+        let temp = try TemporaryDirectory()
+        try Data(repeating: UInt8(ascii: "{"), count: RenderSidecarLimits.maxSidecarBytes + 1)
+            .write(to: EditDecisionListFile.defaultURL(in: temp.url), options: [.atomic])
+
+        #expect(throws: RenderSidecarLimitError.self) {
+            try EditDecisionListFile.load(fromProject: temp.url)
+        }
+    }
+
     @Test("Timeline compiler removes enabled cuts from the active source range")
     func compilesRetainedRanges() {
         let retained = EditTimelineCompiler.retainedRanges(

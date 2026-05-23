@@ -34,6 +34,54 @@ public enum RenderSidecarLimits {
         }
     }
 
+    public static func checkAnnotationStore(_ store: AnnotationStore, displayPath: String) throws {
+        try checkCount(
+            store.annotations.count,
+            limit: maxAnnotations,
+            displayPath: displayPath,
+            itemName: "annotations"
+        )
+    }
+
+    public static func checkOverlayStore(_ store: OverlayStore, displayPath: String) throws {
+        try checkCount(
+            store.overlays.count,
+            limit: maxOverlays,
+            displayPath: displayPath,
+            itemName: "overlays"
+        )
+    }
+
+    public static func checkTranscript(_ transcript: TranscriptDocument, displayPath: String) throws {
+        try checkCount(
+            transcript.segments.count,
+            limit: maxCaptionSegments,
+            displayPath: displayPath,
+            itemName: "caption segments"
+        )
+    }
+
+    public static func checkInteractionMetadata(_ metadata: InteractionMetadataDocument, displayPath: String) throws {
+        try checkCount(
+            metadata.cursorSamples.count,
+            limit: maxCursorSamples,
+            displayPath: "\(displayPath).cursorSamples",
+            itemName: "cursor samples"
+        )
+        try checkCount(
+            metadata.clicks.count,
+            limit: maxCursorClicks,
+            displayPath: "\(displayPath).clicks",
+            itemName: "clicks"
+        )
+        try checkCount(
+            metadata.keystrokes.count,
+            limit: maxKeystrokes,
+            displayPath: "\(displayPath).keystrokes",
+            itemName: "keystrokes"
+        )
+    }
+
     private static func checkByteCount(_ byteCount: Int64, displayPath: String) throws {
         if byteCount > maxSidecarBytes {
             throw RenderSidecarLimitError.sidecarTooLarge(
