@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 public struct SharePackageFile: Codable, Equatable, Sendable {
@@ -122,6 +121,7 @@ public enum ShareExportError: Error, Equatable, LocalizedError, Sendable {
     case unsafeSource(String)
     case unsafeDestination(String)
     case finalVideoMissing(String)
+    case unsupportedFinalVideo(String)
 
     public var errorDescription: String? {
         switch self {
@@ -133,6 +133,8 @@ public enum ShareExportError: Error, Equatable, LocalizedError, Sendable {
             "Export destination is not safe: \(path)"
         case .finalVideoMissing(let path):
             "Final video does not exist: \(path)"
+        case .unsupportedFinalVideo(let path):
+            "Final video must be an .mp4 or .mov file: \(path)"
         }
     }
 }
@@ -143,7 +145,7 @@ public struct RawAssetExtractor {
     public func extract(projectURL: URL, outputDirectory: URL) throws -> RawAssetExtractionResult {
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
         let rootURL = outputDirectory.appendingPathComponent("\(Self.slug(manifest.metadata.lessonTitle))-raw-assets", isDirectory: true)
-        try ShareExportUtilities.ensureSafeDirectory(rootURL, within: outputDirectory, error: ShareExportError.unsafeDestination)
+        try ShareExportUtilities.recreateSafeDirectory(rootURL, within: outputDirectory, error: ShareExportError.unsafeDestination)
         let files = try Self.copyProjectFiles(
             manifest.media.allFiles,
             projectURL: projectURL,
@@ -179,7 +181,7 @@ public struct LocalSharePackageBuilder {
         let projectURLInPackage = packageURL.appendingPathComponent("project", isDirectory: true)
         let exportsURL = packageURL.appendingPathComponent("exports", isDirectory: true)
 
-        try ShareExportUtilities.ensureSafeDirectory(packageURL, within: outputDirectory, error: ShareExportError.unsafeDestination)
+        try ShareExportUtilities.recreateSafeDirectory(packageURL, within: outputDirectory, error: ShareExportError.unsafeDestination)
         try ShareExportUtilities.ensureSafeDirectory(rawAssetsURL, within: packageURL, error: ShareExportError.unsafeDestination)
         try ShareExportUtilities.ensureSafeDirectory(projectURLInPackage, within: packageURL, error: ShareExportError.unsafeDestination)
         try ShareExportUtilities.ensureSafeDirectory(exportsURL, within: packageURL, error: ShareExportError.unsafeDestination)
@@ -208,6 +210,9 @@ public struct LocalSharePackageBuilder {
             guard !ShareExportUtilities.isSymbolicLink(finalVideoURL) else {
                 throw ShareExportError.unsafeSource(finalVideoURL.path)
             }
+            guard ShareExportUtilities.isSupportedFinalVideo(finalVideoURL) else {
+                throw ShareExportError.unsupportedFinalVideo(finalVideoURL.path)
+            }
             let relativePath = "exports/\(finalVideoURL.lastPathComponent)"
             files.append(try Self.copyFile(
                 sourceURL: finalVideoURL,
@@ -230,7 +235,8 @@ public struct LocalSharePackageBuilder {
             checksumPath: checksumPath,
             files: files,
             notes: [
-                "This local share package is file-based and contains no credentials.",
+                "This local share package is file-based and does not intentionally include credentials.",
+                "Review raw-assets, project sidecars, and optional final video before sharing outside your local workspace.",
                 "Use raw-assets for source media and project sidecars for editable LessonMeld state."
             ]
         )
@@ -407,6 +413,10 @@ private enum ShareExportUtilities {
         relativePath: String,
         sourceRelativePath: String?
     ) throws -> SharePackageFile {
+        try validatePackageRelativePath(relativePath, error: ShareExportError.unsafeDestination)
+        if let sourceRelativePath {
+            try validatePackageRelativePath(sourceRelativePath, error: ShareExportError.unsafeSource)
+        }
         guard !isSymbolicLink(sourceURL) else {
             throw ShareExportError.unsafeSource(sourceURL.path)
         }
@@ -429,9 +439,12 @@ private enum ShareExportUtilities {
 
     static func writeChecksums(files: [SharePackageFile], rootURL: URL, relativePath: String) throws -> String? {
         guard !files.isEmpty else { return nil }
-        let lines = files
+        let lines = try files
             .sorted { $0.relativePath < $1.relativePath }
-            .map { "\($0.sha256)  \($0.relativePath)" }
+            .map { file in
+                try validatePackageRelativePath(file.relativePath, error: ShareExportError.unsafeDestination)
+                return "\(file.sha256)  \(file.relativePath)"
+            }
             .joined(separator: "\n")
         let checksumURL = rootURL.appendingPathComponent(relativePath)
         try ensureSafeDirectory(checksumURL.deletingLastPathComponent(), within: rootURL, error: ShareExportError.unsafeDestination)
@@ -440,9 +453,7 @@ private enum ShareExportUtilities {
     }
 
     static func sha256Hex(for url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
+        try FileChecksum.sha256Hex(for: url)
     }
 
     static func byteCount(for url: URL) throws -> Int64 {
@@ -452,6 +463,37 @@ private enum ShareExportUtilities {
 
     static func isSymbolicLink(_ url: URL) -> Bool {
         (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
+    }
+
+    static func isSupportedFinalVideo(_ url: URL) -> Bool {
+        ["mp4", "mov"].contains(url.pathExtension.lowercased())
+    }
+
+    static func validatePackageRelativePath<E: Error>(_ path: String, error makeError: (String) -> E) throws {
+        guard !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw makeError(path)
+        }
+    }
+
+    static func recreateSafeDirectory<E: Error>(
+        _ directoryURL: URL,
+        within rootURL: URL,
+        error makeError: (String) -> E
+    ) throws {
+        let rootPath = rootURL.standardizedFileURL.resolvingSymlinksInPath().path
+        let targetPath = directoryURL.standardizedFileURL.path
+        guard targetPath != rootPath else {
+            throw makeError(directoryURL.path)
+        }
+
+        try ensureSafeDirectory(directoryURL, within: rootURL, error: makeError)
+        if FileManager.default.fileExists(atPath: directoryURL.path) {
+            guard !isSymbolicLink(directoryURL) else {
+                throw makeError(directoryURL.path)
+            }
+            try FileManager.default.removeItem(at: directoryURL)
+        }
+        try ensureSafeDirectory(directoryURL, within: rootURL, error: makeError)
     }
 
     static func ensureSafeDirectory<E: Error>(

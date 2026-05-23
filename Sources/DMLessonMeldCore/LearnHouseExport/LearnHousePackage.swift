@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 public struct LearnHousePackageManifest: Codable, Equatable, Sendable {
@@ -520,6 +519,7 @@ public struct LearnHousePackageBuilder {
             guard !isSymbolicLink(sourceURL) else {
                 throw LearnHousePackageError.unsafeSource(sourceURL.path)
             }
+            try validatePackageRelativePath(destinationRelativePath)
             try ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: assetsURL)
             if FileManager.default.fileExists(atPath: destinationURL.path) {
                 guard !isSymbolicLink(destinationURL) else {
@@ -549,9 +549,7 @@ public struct LearnHousePackageBuilder {
     }
 
     private func sha256Hex(for url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
+        try FileChecksum.sha256Hex(for: url)
     }
 
     private func byteCount(for url: URL) throws -> Int64 {
@@ -578,8 +576,9 @@ public struct LearnHousePackageBuilder {
 
     private func writeChecksums(files: [LearnHousePackageFile], packageURL: URL) throws -> String? {
         guard !files.isEmpty else { return nil }
-        let lines = files.compactMap { file -> String? in
+        let lines = try files.compactMap { file -> String? in
             guard let sha256 = file.sha256 else { return nil }
+            try validatePackageRelativePath(file.relativePath)
             return "\(sha256)  \(file.relativePath)"
         }.joined(separator: "\n")
         let relativePath = "assets/checksums.sha256"
@@ -681,6 +680,12 @@ public struct LearnHousePackageBuilder {
 
     private func isSymbolicLink(_ url: URL) -> Bool {
         (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
+    }
+
+    private func validatePackageRelativePath(_ path: String) throws {
+        guard !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw LearnHousePackageError.unsafeSource(path)
+        }
     }
 
     private func ensureSafeDirectory(_ directoryURL: URL, within rootURL: URL) throws {
