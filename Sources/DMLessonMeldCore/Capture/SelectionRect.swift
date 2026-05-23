@@ -72,6 +72,6 @@ public struct SelectionRect: Codable, Equatable, Sendable {
     }
 
     private static func evenRounded(_ value: CGFloat) -> CGFloat {
-        CGFloat(max(0, Int(value.rounded()) & ~1))
+        NumericInputValidation.safeEvenRounded(value)
     }
 }

@@ -490,6 +490,15 @@ run_json "render plan" "render-plan" \
 run_expected_failure "render concurrency bounds failure" "--concurrency must be an integer from 1 through 8." \
   "$cli_path" render plan "$project_url" --output "$render_url" --concurrency 99 --json
 
+run_expected_failure "record duration rejects infinity" "--duration must be finite." \
+  "$cli_path" record display --duration inf --output "$work_dir/invalid-duration.mp4" --json
+
+run_expected_failure "record region rejects huge geometry" "Capture region width and height must be 16384 points or less." \
+  "$cli_path" record region --duration 1 --output "$work_dir/invalid-region.mp4" --x 0 --y 0 --width 999999 --height 100 --json
+
+run_expected_failure "record webcam rejects invalid fps" "--fps must be one of" \
+  "$cli_path" record webcam --duration 1 --output "$work_dir/invalid-webcam.mov" --fps 999 --json
+
 run_json "templates list" "templates-list" \
   "@=nonempty-list" \
   "0.id=str" \

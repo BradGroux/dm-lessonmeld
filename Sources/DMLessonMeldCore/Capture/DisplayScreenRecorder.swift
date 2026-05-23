@@ -92,8 +92,11 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
     }
 
     public func record(_ request: DisplayRecordingRequest) async throws -> RecordingResult {
-        guard request.durationSeconds > 0 else {
-            throw CaptureError.recordingFailed("Duration must be greater than zero.")
+        let durationSeconds: TimeInterval
+        do {
+            durationSeconds = try NumericInputValidation.recordingDuration(request.durationSeconds)
+        } catch {
+            throw CaptureError.recordingFailed(error.localizedDescription)
         }
         guard ScreenCapturePermission.isGranted else {
             throw CaptureError.permissionDenied
@@ -105,11 +108,11 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
         let sourceRect = request.sourceRect ?? window.map {
             CGRect(x: 0, y: 0, width: $0.frame.width, height: $0.frame.height)
         } ?? CGRect(x: 0, y: 0, width: display.width, height: display.height)
-        guard sourceRect.width > 0, sourceRect.height > 0 else {
+        guard let validatedSourceRect = try? NumericInputValidation.captureRect(sourceRect) else {
             throw CaptureError.invalidSourceRect
         }
-        let pixelSize = ScreenCaptureSession.outputPixelSize(
-            for: sourceRect.size,
+        let pixelSize = try ScreenCaptureSession.validatedOutputPixelSize(
+            for: validatedSourceRect.size,
             displayScale: 1,
             retinaCapture: request.options.retinaCapture
         )
@@ -127,7 +130,7 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
         }
         let configuration = ScreenCaptureSession.configuration(
-            sourceRect: sourceRect,
+            sourceRect: validatedSourceRect,
             displayScale: 1,
             options: request.options
         )
@@ -150,7 +153,7 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
         }
 
         do {
-            try await Task.sleep(nanoseconds: UInt64(request.durationSeconds * 1_000_000_000))
+            try await Task.sleep(nanoseconds: try NumericInputValidation.sleepNanoseconds(forRecordingDuration: durationSeconds))
             return try await stopRecording(
                 fps: request.options.fps,
                 captureQuality: request.options.captureQuality,

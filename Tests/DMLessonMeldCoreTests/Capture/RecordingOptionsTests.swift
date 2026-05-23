@@ -45,6 +45,59 @@ struct RecordingOptionsTests {
         #expect(CameraPermission.privacySettingsURL.scheme == "x-apple.systempreferences")
     }
 
+    @Test("Numeric validation rejects unsafe capture and editor values")
+    func numericValidationRejectsUnsafeValues() throws {
+        #expect(throws: NumericInputValidationError.self) {
+            try NumericInputValidation.recordingDuration(.infinity)
+        }
+        #expect(throws: NumericInputValidationError.self) {
+            try NumericInputValidation.recordingDuration(NumericInputValidation.maxRecordingDurationSeconds + 1)
+        }
+        #expect(throws: NumericInputValidationError.self) {
+            try NumericInputValidation.captureFPS(Int.max)
+        }
+        #expect(throws: NumericInputValidationError.self) {
+            try NumericInputValidation.captureRect(CGRect(x: 0, y: 0, width: CGFloat.infinity, height: 10))
+        }
+        #expect(throws: NumericInputValidationError.self) {
+            try NumericInputValidation.captureRect(CGRect(x: 10, y: 10, width: -5, height: 10))
+        }
+        #expect(throws: NumericInputValidationError.self) {
+            try NumericInputValidation.canvasDimension(NumericInputValidation.maxCanvasDimension + 2, label: "Canvas width")
+        }
+
+        #expect(try NumericInputValidation.sleepNanoseconds(forRecordingDuration: 1) == 1_000_000_000)
+        #expect(try NumericInputValidation.canvasDimension(1920, label: "Canvas width") == 1920)
+    }
+
+    @Test("Camera recorder rejects invalid duration and FPS before permissions")
+    func cameraRecorderRejectsInvalidDurationAndFPSBeforePermissions() async {
+        let recorder = CameraRecorder()
+
+        do {
+            _ = try await recorder.record(CameraRecordingRequest(
+                outputURL: URL(fileURLWithPath: "/tmp/webcam.mov"),
+                durationSeconds: .infinity
+            ))
+            Issue.record("Expected invalid camera duration to be rejected.")
+        } catch CameraRecordingError.invalidDuration {
+        } catch {
+            Issue.record("Expected CameraRecordingError.invalidDuration, got \(error).")
+        }
+
+        do {
+            _ = try await recorder.record(CameraRecordingRequest(
+                outputURL: URL(fileURLWithPath: "/tmp/webcam.mov"),
+                durationSeconds: 1,
+                fps: Int.max
+            ))
+            Issue.record("Expected invalid camera FPS to be rejected.")
+        } catch CameraRecordingError.invalidFrameRate(_) {
+        } catch {
+            Issue.record("Expected CameraRecordingError.invalidFrameRate, got \(error).")
+        }
+    }
+
     @Test("Window capture source keeps stable JSON fields")
     func windowCaptureSourceJSONFields() throws {
         let source = WindowCaptureSource(
@@ -77,6 +130,16 @@ struct RecordingOptionsTests {
         #expect(redacted.ownerName == source.ownerName)
         #expect(redacted.bounds == source.bounds)
         #expect(source.redactedForAutomation(includeTitle: true) == source)
+    }
+
+    @Test("Window size labels ignore non-finite dimensions")
+    func windowSizeLabelsIgnoreNonFiniteDimensions() {
+        #expect(WindowCaptureSource(
+            id: 123,
+            title: "Bad",
+            ownerName: "App",
+            bounds: WindowCaptureBounds(x: 0, y: 0, width: Double.infinity, height: 720)
+        ).sizeLabel == nil)
     }
 
     @Test("Camera permission request does not crash without bundled usage description")

@@ -2015,7 +2015,7 @@ final class QuickRecorderModel: ObservableObject {
         ))
 
         do {
-            try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            try await Task.sleep(nanoseconds: try NumericInputValidation.sleepNanoseconds(forRecordingDuration: duration))
             return try recorder.stopRecording()
         } catch is CancellationError {
             return try recorder.stopRecording()
