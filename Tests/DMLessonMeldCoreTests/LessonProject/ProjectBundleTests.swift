@@ -159,6 +159,19 @@ struct ProjectBundleTests {
         }
     }
 
+    @Test("Load rejects oversized project manifests")
+    func loadRejectsOversizedProjectManifests() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Oversized.dmlm", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        try Data(repeating: UInt8(ascii: "{"), count: Int(ProjectBundle.maxManifestBytes) + 1)
+            .write(to: ProjectBundle.manifestURL(in: projectURL))
+
+        #expect(throws: ProjectBundleError.self) {
+            try ProjectBundle.loadManifest(at: projectURL)
+        }
+    }
+
     @Test("Repairs a bundle manifest from recoverable raw media")
     func repairsManifestFromRecoverableMedia() throws {
         let temp = try TemporaryDirectory()
@@ -193,6 +206,27 @@ struct ProjectBundleTests {
         #expect(manifest.tracks.map(\.kind).contains(.cursor))
         #expect(manifest.tracks.map(\.kind).contains(.overlays))
         #expect(result.issues.isEmpty)
+    }
+
+    @Test("Repair preserves corrupt manifests and recovers media")
+    func repairPreservesCorruptManifestAndRecoversMedia() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Corrupt.dmlm", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        try Data("{".utf8).write(to: ProjectBundle.manifestURL(in: projectURL))
+        try Data("screen".utf8).write(to: projectURL.appendingPathComponent("screen.mp4"))
+
+        let result = try ProjectBundle.repair(at: projectURL, lessonTitle: "Recovered")
+        let backupFiles = try FileManager.default.contentsOfDirectory(at: projectURL, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("project.invalid-") && $0.pathExtension == "json" }
+        let manifest = try ProjectBundle.loadManifest(at: projectURL)
+
+        #expect(result.wroteManifest)
+        #expect(result.manifest.metadata.lessonTitle == "Recovered")
+        #expect(result.manifest.media.screen?.relativePath == "screen.mp4")
+        #expect(manifest.media.screen?.relativePath == "screen.mp4")
+        #expect(backupFiles.count == 1)
+        #expect(result.issues.contains { $0.severity == .warning && $0.path == backupFiles.first?.lastPathComponent })
     }
 
     @Test("Repair is non-mutating when manifest already exists")

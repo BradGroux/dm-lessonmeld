@@ -4,6 +4,8 @@ public enum ProjectBundleError: Error, LocalizedError {
     case manifestNotFound(URL)
     case invalidBundle(URL)
     case unsafeFileReference(String)
+    case oversizedManifest(URL, byteCount: Int64, limit: Int64)
+    case unreadableManifest(URL, String)
 
     public var errorDescription: String? {
         switch self {
@@ -13,6 +15,10 @@ public enum ProjectBundleError: Error, LocalizedError {
             "Project path is not a directory: \(url.path)."
         case .unsafeFileReference(let path):
             "Project file reference must be a project-local relative path: \(path)"
+        case .oversizedManifest(let url, let byteCount, let limit):
+            "Project manifest is too large: \(url.path) is \(byteCount) bytes, limit is \(limit) bytes."
+        case .unreadableManifest(let url, let reason):
+            "Project manifest could not be decoded at \(url.path): \(reason)"
         }
     }
 }
@@ -83,6 +89,7 @@ public struct ProjectBundleRepairResult: Codable, Equatable, Sendable {
 
 public enum ProjectBundle {
     public static let manifestFileName = "project.json"
+    public static let maxManifestBytes: Int64 = 1 * 1024 * 1024
 
     public static func manifestURL(in projectURL: URL) -> URL {
         projectURL.appendingPathComponent(manifestFileName)
@@ -94,8 +101,12 @@ public enum ProjectBundle {
             throw ProjectBundleError.manifestNotFound(manifestURL)
         }
 
-        let data = try Data(contentsOf: manifestURL)
-        return try DMLessonJSON.decoder().decode(ProjectManifest.self, from: data)
+        let data = try boundedManifestData(from: manifestURL)
+        do {
+            return try DMLessonJSON.decoder().decode(ProjectManifest.self, from: data)
+        } catch {
+            throw ProjectBundleError.unreadableManifest(manifestURL, error.localizedDescription)
+        }
     }
 
     public static func writeManifest(_ manifest: ProjectManifest, to projectURL: URL) throws {
@@ -148,8 +159,38 @@ public enum ProjectBundle {
             throw ProjectBundleError.invalidBundle(projectURL)
         }
 
-        if FileManager.default.fileExists(atPath: manifestURL(in: projectURL).path) {
-            var manifest = try loadManifest(at: projectURL)
+        let manifestURL = manifestURL(in: projectURL)
+        if FileManager.default.fileExists(atPath: manifestURL.path) {
+            let existingManifest: ProjectManifest
+            do {
+                existingManifest = try loadManifest(at: projectURL)
+            } catch {
+                let backupURL = try preserveUnreadableManifest(at: manifestURL)
+                let recoveredFiles = recoverableFiles(in: projectURL)
+                let media = recoveredMedia(from: recoveredFiles)
+                let manifest = ProjectManifest(
+                    metadata: LessonMetadata(lessonTitle: recoveredLessonTitle(projectURL: projectURL, override: lessonTitle)),
+                    media: media,
+                    tracks: recoveredTracks(from: media),
+                    exportPresets: ["learnhouse-1080p"]
+                )
+                try writeManifest(manifest, to: projectURL)
+                var issues = validate(manifest: manifest, projectURL: projectURL)
+                issues.insert(ProjectValidationIssue(
+                    severity: .warning,
+                    message: "Existing project manifest could not be loaded and was preserved before repair.",
+                    path: backupURL.lastPathComponent
+                ), at: 0)
+                return ProjectBundleRepairResult(
+                    projectURLPath: projectURL.path,
+                    wroteManifest: true,
+                    manifest: manifest,
+                    recoveredFiles: recoveredFiles,
+                    issues: issues
+                )
+            }
+
+            var manifest = existingManifest
             let recoveredFiles = recoverableFiles(in: projectURL)
             let recoveredMedia = recoveredMedia(from: recoveredFiles)
             let didUpdate = mergeRecoveredMedia(recoveredMedia, into: &manifest)
@@ -237,6 +278,26 @@ public enum ProjectBundle {
         }
 
         return components.joined(separator: "/")
+    }
+
+    private static func boundedManifestData(from url: URL) throws -> Data {
+        if let byteCount = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init),
+           byteCount > maxManifestBytes {
+            throw ProjectBundleError.oversizedManifest(url, byteCount: byteCount, limit: maxManifestBytes)
+        }
+        let data = try Data(contentsOf: url)
+        if Int64(data.count) > maxManifestBytes {
+            throw ProjectBundleError.oversizedManifest(url, byteCount: Int64(data.count), limit: maxManifestBytes)
+        }
+        return data
+    }
+
+    private static func preserveUnreadableManifest(at manifestURL: URL) throws -> URL {
+        let backupURL = manifestURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("project.invalid-\(UUID().uuidString).json")
+        try FileManager.default.copyItem(at: manifestURL, to: backupURL)
+        return backupURL
     }
 
     private static func ensureProjectContained(_ candidateURL: URL, projectURL: URL, originalPath: String) throws {
