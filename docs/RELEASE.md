@@ -1,6 +1,6 @@
 # Release Guide
 
-This project builds a local macOS app bundle plus versioned DMG and zip artifacts. Tagged developer-preview releases can be unsigned and non-notarized; broad public distribution should use Developer ID signing and Apple notarization when Apple credentials are configured.
+This project builds a local macOS app bundle plus versioned DMG and zip artifacts. Tagged developer-preview releases can be unsigned and non-notarized only when the release workflow is explicitly placed in unsigned-preview mode. Broad public distribution should use Developer ID signing and Apple notarization.
 
 ## macOS requirements
 
@@ -37,10 +37,12 @@ bash -n scripts/build-app.sh
 bash -n scripts/package-app.sh
 bash -n scripts/package-dmg.sh
 bash -n scripts/package-release.sh
+bash -n scripts/verify-cask-release.sh
 bash -n scripts/capture-device-matrix-smoke.sh
 bash -n scripts/real-media-fixture-smoke.sh
 ruby -c Casks/dm-lessonmeld.rb
 brew style Casks/dm-lessonmeld.rb
+scripts/verify-cask-release.sh
 ```
 
 Run the app-level keyboard, VoiceOver, layout, capture-device, and real-media fixture checklists in `docs/ACCESSIBILITY_QA.md`, `docs/UI_REGRESSION_QA.md`, and `docs/CAPTURE_DEVICE_QA.md` before tagging a public release. The capture and real-media smoke commands are local-only and should run on a machine where recording permissions, test devices, and representative fixture media are available.
@@ -125,6 +127,13 @@ git push origin "v${VERSION}"
 
 The workflow fails if the tag does not match `CFBundleShortVersionString`.
 
+Set the release mode before pushing the tag:
+
+- Signed public release: leave `DM_LESSONMELD_RELEASE_MODE` unset, or set the repository variable to `signed`.
+- Unsigned developer preview: set repository variable `DM_LESSONMELD_RELEASE_MODE=unsigned-preview` before pushing the tag, then restore it when preview releases are no longer intended.
+
+Signed mode fails closed unless every required Apple signing and notarization secret is present. Unsigned-preview mode is allowed only as an explicit repository decision; partial Apple secret sets fail in either mode.
+
 The workflow runs:
 
 - `swift build`
@@ -132,10 +141,12 @@ The workflow runs:
 - `plutil -lint Packaging/Info.plist`
 - packaging script syntax checks
 - `scripts/package-release.sh`
-- Developer ID signing when all required Apple signing secrets are configured
-- Apple notarization with App Store Connect API key credentials and stapler validation when all required Apple signing secrets are configured
-- unsigned, non-notarized artifact publication when Apple signing secrets are not configured
+- Developer ID signing and Apple notarization when release mode is `signed`
+- unsigned, non-notarized artifact publication only when release mode is `unsigned-preview`
 - SHA256 generation for DMG and zip artifacts
+- SHA256 verification before publishing downloaded release artifacts
+- mounted DMG content validation
+- cask version checks
 
 It then creates a GitHub Release and attaches:
 
@@ -146,7 +157,7 @@ It then creates a GitHub Release and attaches:
 
 ## Signing secrets
 
-Set these repository secrets before publishing a notarized release. If any are missing, the tag workflow publishes an explicit unsigned, non-notarized developer-preview release instead:
+Set these repository secrets before publishing a signed and notarized release. If any are missing while release mode is `signed`, the tag workflow fails. If only some are configured, the tag workflow fails in every release mode to avoid accidental partial signing state.
 
 - `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`: base64-encoded `.p12` export containing the Developer ID Application certificate and private key.
 - `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`: password for the `.p12` export.
@@ -176,7 +187,7 @@ This repository keeps a mirrored cask at:
 Casks/dm-lessonmeld.rb
 ```
 
-After publishing a GitHub Release, update the mirrored cask and the public tap cask with the release version and SHA256. The current cask installs the zip artifact, so hash the zip unless the cask is intentionally switched to the DMG artifact:
+Before tagging a cask-backed release, update the mirrored cask with the release version. After the GitHub Release is published, verify the mirrored cask against the downloaded release zip before updating the public tap. The current cask installs the zip artifact, so hash the zip unless the cask is intentionally switched to the DMG artifact:
 
 ```sh
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
@@ -186,6 +197,7 @@ gh release download "v${VERSION}" \
   --pattern "dm-lessonmeld-${VERSION}-macos.zip" \
   --dir "${tmpdir}"
 shasum -a 256 "${tmpdir}/dm-lessonmeld-${VERSION}-macos.zip"
+scripts/verify-cask-release.sh "${tmpdir}/dm-lessonmeld-${VERSION}-macos.zip"
 rm -rf "${tmpdir}"
 ```
 

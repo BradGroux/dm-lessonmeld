@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
@@ -41,10 +41,20 @@ jobs:
           bash -n scripts/package-app.sh
           bash -n scripts/package-dmg.sh
           bash -n scripts/package-release.sh
+          bash -n scripts/verify-cask-release.sh
           bash -n scripts/verify-dmg.sh
           ruby -c Casks/dm-lessonmeld.rb
           brew style Casks/dm-lessonmeld.rb
+          scripts/verify-cask-release.sh
           scripts/build-app.sh release >/dev/null
           codesign --verify --strict --deep "Packaging/Digital Meld LessonMeld.app"
-          scripts/package-dmg.sh >/dev/null
-          scripts/verify-dmg.sh .build/dist/dm-lessonmeld-*-macos.dmg
+          package_output="$(scripts/package-release.sh)"
+          zip_path="$(printf '%s\n' "${package_output}" | awk -F= '/^zip_path=/{print $2}')"
+          dmg_path="$(printf '%s\n' "${package_output}" | awk -F= '/^dmg_path=/{print $2}')"
+          test -f "${zip_path}"
+          test -f "${dmg_path}"
+          shasum -a 256 "${zip_path}" > "${zip_path}.sha256"
+          shasum -a 256 "${dmg_path}" > "${dmg_path}.sha256"
+          shasum -a 256 -c "${zip_path}.sha256"
+          shasum -a 256 -c "${dmg_path}.sha256"
+          scripts/verify-dmg.sh "${dmg_path}"

@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  DM_LESSONMELD_RELEASE_MODE: ${{ vars.DM_LESSONMELD_RELEASE_MODE }}
+
 jobs:
   build-release:
     name: Build release
@@ -19,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
@@ -56,6 +59,7 @@ jobs:
           bash -n scripts/package-dmg.sh
           bash -n scripts/package-release.sh
           bash -n scripts/real-media-fixture-smoke.sh
+          bash -n scripts/verify-cask-release.sh
           bash -n scripts/verify-dmg.sh
           python3 -m py_compile scripts/dmlesson-mcp-server.py
 
@@ -69,6 +73,15 @@ jobs:
           APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           APPLE_NOTARIZATION_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
         run: |
+          release_mode="$(printf '%s' "${DM_LESSONMELD_RELEASE_MODE:-signed}" | tr '[:upper:]' '[:lower:]')"
+          case "${release_mode}" in
+            signed|unsigned-preview) ;;
+            *)
+              echo "error: DM_LESSONMELD_RELEASE_MODE must be signed or unsigned-preview, got '${release_mode}'." >&2
+              exit 1
+              ;;
+          esac
+
           missing=()
           for secret_name in \
             APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 \
@@ -83,13 +96,26 @@ jobs:
             fi
           done
 
-          if [[ "${#missing[@]}" -gt 0 ]]; then
-            printf 'Unsigned developer-preview release: missing Apple signing/notarization secrets: %s\n' "${missing[*]}" >&2
-            echo "configured=0" >> "${GITHUB_OUTPUT}"
-            echo "status=Unsigned, non-notarized developer preview" >> "${GITHUB_OUTPUT}"
-          else
+          if [[ "${release_mode}" == "signed" ]]; then
+            if [[ "${#missing[@]}" -gt 0 ]]; then
+              printf 'error: signed release expected but Apple signing/notarization secrets are missing: %s\n' "${missing[*]}" >&2
+              echo "Set repository variable DM_LESSONMELD_RELEASE_MODE=unsigned-preview only for an intentional unsigned developer-preview release." >&2
+              exit 1
+            fi
+
             echo "configured=1" >> "${GITHUB_OUTPUT}"
+            echo "mode=${release_mode}" >> "${GITHUB_OUTPUT}"
             echo "status=Developer ID signed and Apple notarized" >> "${GITHUB_OUTPUT}"
+          else
+            if [[ "${#missing[@]}" -ne 0 && "${#missing[@]}" -ne 6 ]]; then
+              printf 'error: unsigned-preview release has a partial Apple signing/notarization secret set: %s\n' "${missing[*]}" >&2
+              echo "Remove the partial Apple secret set or switch DM_LESSONMELD_RELEASE_MODE=signed after configuring all required secrets." >&2
+              exit 1
+            fi
+
+            echo "configured=0" >> "${GITHUB_OUTPUT}"
+            echo "mode=${release_mode}" >> "${GITHUB_OUTPUT}"
+            echo "status=Unsigned, non-notarized developer preview" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Import Developer ID certificate
@@ -113,6 +139,7 @@ jobs:
           security find-identity -v -p codesigning "${keychain_path}"
 
       - name: Prepare notarization key
+        id: notarization
         if: steps.signing.outputs.configured == '1'
         env:
           APPLE_NOTARIZATION_KEY_BASE64: ${{ secrets.APPLE_NOTARIZATION_KEY_BASE64 }}
@@ -120,15 +147,17 @@ jobs:
           notarization_key_path="${RUNNER_TEMP}/notarization-key.p8"
           echo "${APPLE_NOTARIZATION_KEY_BASE64}" | base64 --decode > "${notarization_key_path}"
           chmod 600 "${notarization_key_path}"
-          echo "NOTARIZE_KEY_PATH=${notarization_key_path}" >> "${GITHUB_ENV}"
+          echo "key_path=${notarization_key_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Package app
         id: package
         env:
           CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
+          NOTARIZE_KEY_PATH: ${{ steps.notarization.outputs.key_path }}
           NOTARIZE_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           NOTARIZE_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
           DM_LESSONMELD_REQUIRE_NOTARIZATION: ${{ steps.signing.outputs.configured }}
+          RELEASE_MODE: ${{ steps.signing.outputs.mode }}
           SIGNING_CONFIGURED: ${{ steps.signing.outputs.configured }}
         run: |
           if [[ "${SIGNING_CONFIGURED}" != "1" ]]; then
@@ -148,6 +177,8 @@ jobs:
 
           shasum -a 256 "${zip_path}" > "${zip_path}.sha256"
           shasum -a 256 "${dmg_path}" > "${dmg_path}.sha256"
+          shasum -a 256 -c "${zip_path}.sha256"
+          shasum -a 256 -c "${dmg_path}.sha256"
 
           codesign --verify --strict --deep --verbose=2 "Packaging/Digital Meld LessonMeld.app"
           scripts/verify-dmg.sh "${dmg_path}"
@@ -165,6 +196,15 @@ jobs:
           cp "${dmg_path}.sha256" .build/release-artifacts/
           cp "${zip_path}" .build/release-artifacts/
           cp "${zip_path}.sha256" .build/release-artifacts/
+
+      - name: Remove notarization material
+        if: always() && steps.signing.outputs.configured == '1'
+        env:
+          NOTARIZE_KEY_PATH: ${{ steps.notarization.outputs.key_path }}
+        run: |
+          if [[ -n "${NOTARIZE_KEY_PATH:-}" ]]; then
+            rm -f "${NOTARIZE_KEY_PATH}"
+          fi
 
       - name: Write release notes
         env:
@@ -227,7 +267,7 @@ jobs:
           EOF
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dm-lessonmeld-release-${{ steps.version.outputs.version }}
           path: .build/release-artifacts/
@@ -242,10 +282,16 @@ jobs:
 
     steps:
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dm-lessonmeld-release-${{ needs.build-release.outputs.version }}
           path: release-artifacts
+
+      - name: Verify downloaded release artifacts
+        run: |
+          cd release-artifacts
+          shasum -a 256 -c "dm-lessonmeld-${{ needs.build-release.outputs.version }}-macos.dmg.sha256"
+          shasum -a 256 -c "dm-lessonmeld-${{ needs.build-release.outputs.version }}-macos.zip.sha256"
 
       - name: Create GitHub release
         env:
