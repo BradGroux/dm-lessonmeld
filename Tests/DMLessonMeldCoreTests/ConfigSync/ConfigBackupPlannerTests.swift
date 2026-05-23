@@ -23,6 +23,17 @@ struct ConfigBackupPlannerTests {
         #expect(plan.excludedPaths.contains { $0.path == "profiles/github-token.json" })
     }
 
+    @Test("Config plan redaction hides absolute root paths")
+    func configPlanRedactionHidesRootPath() throws {
+        let temp = try TemporaryDirectory()
+        try write("{}", to: temp.url.appendingPathComponent("templates/workshop.json"))
+
+        let plan = try ConfigBackupPlanner().plan(rootURL: temp.url).redactedForAutomation()
+
+        #expect(plan.rootPath == temp.url.lastPathComponent)
+        #expect(!plan.rootPath.hasPrefix("/"))
+    }
+
     @Test("Excludes common credential file names from config backups")
     func excludesCommonCredentialNames() throws {
         let temp = try TemporaryDirectory()

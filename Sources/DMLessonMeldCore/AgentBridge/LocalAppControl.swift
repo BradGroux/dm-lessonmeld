@@ -487,4 +487,19 @@ public struct LocalAppControlStatus: Codable, Equatable, Sendable {
         }
         return "idle"
     }
+
+    public func redactedForAutomation() -> LocalAppControlStatus {
+        LocalAppControlStatus(
+            schemaVersion: schemaVersion,
+            pid: pid,
+            updatedAt: updatedAt,
+            isAppRunning: isAppRunning,
+            isRecording: isRecording,
+            isPaused: isPaused,
+            isStopping: isStopping,
+            elapsedSeconds: elapsedSeconds,
+            lastProjectPath: SafePathDisplay.basename(lastProjectPath),
+            message: SafePathDisplay.redactingAbsolutePaths(in: message)
+        )
+    }
 }

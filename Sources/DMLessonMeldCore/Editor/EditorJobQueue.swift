@@ -158,6 +158,31 @@ public struct EditorJobRecord: Codable, Equatable, Identifiable, Sendable {
         status.title
     }
 
+    public var projectDisplayPath: String? {
+        SafePathDisplay.basename(projectPath)
+    }
+
+    public var outputDisplayPath: String? {
+        SafePathDisplay.projectRelativeOrBasename(outputPath, projectPath: projectPath)
+    }
+
+    public func redactedForHistory() -> EditorJobRecord {
+        EditorJobRecord(
+            id: id,
+            kind: kind,
+            title: title,
+            detail: detail.map { SafePathDisplay.redactingAbsolutePaths(in: $0) },
+            projectPath: projectDisplayPath,
+            outputPath: outputDisplayPath,
+            status: status,
+            progress: progress,
+            createdAt: createdAt,
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            log: log.map { SafePathDisplay.redactingAbsolutePaths(in: $0) }
+        )
+    }
+
     public mutating func start(at date: Date = Date(), message: String? = nil) {
         status = .running
         startedAt = date
@@ -248,7 +273,9 @@ public enum EditorJobHistoryFile {
     ) throws {
         let destination = url(inProject: projectURL)
         try fileManager.createDirectory(at: projectURL, withIntermediateDirectories: true)
-        let recentRecords = Array(records.prefix(max(1, limit)))
+        let recentRecords = records
+            .prefix(max(1, limit))
+            .map { $0.redactedForHistory() }
         let data = try DMLessonJSON.encoder().encode(recentRecords)
         try data.write(to: destination, options: [.atomic])
     }

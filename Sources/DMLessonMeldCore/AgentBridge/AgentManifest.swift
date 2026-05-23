@@ -3,10 +3,29 @@ import Foundation
 public struct AgentManifestOptions: Codable, Equatable, Sendable {
     public var includeMediaPaths: Bool
     public var includeTranscriptReferences: Bool
+    public var includeProjectPath: Bool
 
-    public init(includeMediaPaths: Bool = false, includeTranscriptReferences: Bool = false) {
+    enum CodingKeys: String, CodingKey {
+        case includeMediaPaths
+        case includeTranscriptReferences
+        case includeProjectPath
+    }
+
+    public init(
+        includeMediaPaths: Bool = false,
+        includeTranscriptReferences: Bool = false,
+        includeProjectPath: Bool = false
+    ) {
         self.includeMediaPaths = includeMediaPaths
         self.includeTranscriptReferences = includeTranscriptReferences
+        self.includeProjectPath = includeProjectPath
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        includeMediaPaths = try container.decodeIfPresent(Bool.self, forKey: .includeMediaPaths) ?? false
+        includeTranscriptReferences = try container.decodeIfPresent(Bool.self, forKey: .includeTranscriptReferences) ?? false
+        includeProjectPath = try container.decodeIfPresent(Bool.self, forKey: .includeProjectPath) ?? false
     }
 }
 
@@ -131,7 +150,10 @@ public enum AgentWorkflowCatalog {
 public enum AgentManifestBuilder {
     public static func build(projectURL: URL, options: AgentManifestOptions = AgentManifestOptions()) throws -> AgentProjectManifest {
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
-        let summary = try ProjectBundle.inspect(at: projectURL)
+        var summary = try ProjectBundle.inspect(at: projectURL)
+        if !options.includeProjectPath {
+            summary.urlPath = SafePathDisplay.basename(summary.urlPath)
+        }
         let files = manifest.media.allFiles.compactMap { file -> AgentFileReference? in
             let shouldIncludePath = file.role == .transcript
                 ? options.includeTranscriptReferences

@@ -10,6 +10,14 @@ public struct ConfigGitBackupStatus: Codable, Equatable, Sendable {
         self.repositoryInitialized = repositoryInitialized
         self.changedPaths = changedPaths
     }
+
+    public func redactedForAutomation() -> ConfigGitBackupStatus {
+        ConfigGitBackupStatus(
+            rootPath: SafePathDisplay.basename(rootPath),
+            repositoryInitialized: repositoryInitialized,
+            changedPaths: changedPaths
+        )
+    }
 }
 
 public struct ConfigGitBackupCommitResult: Codable, Equatable, Sendable {
@@ -31,6 +39,16 @@ public struct ConfigGitBackupCommitResult: Codable, Equatable, Sendable {
         self.commitHash = commitHash
         self.committedPaths = committedPaths
         self.message = message
+    }
+
+    public func redactedForAutomation() -> ConfigGitBackupCommitResult {
+        ConfigGitBackupCommitResult(
+            rootPath: SafePathDisplay.basename(rootPath),
+            didCommit: didCommit,
+            commitHash: commitHash,
+            committedPaths: committedPaths,
+            message: SafePathDisplay.redactingAbsolutePaths(in: message)
+        )
     }
 }
 

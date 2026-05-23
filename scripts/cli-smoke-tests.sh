@@ -202,6 +202,40 @@ run_json() {
   return 1
 }
 
+validate_json_omits_absolute_paths() {
+  local name="$1"
+  local json_path="$2"
+  local fragment="${3:-}"
+
+  "$python_bin" - "$json_path" "$fragment" <<'PY'
+import json
+import sys
+
+json_path = sys.argv[1]
+fragment = sys.argv[2]
+
+with open(json_path, "r", encoding="utf-8") as handle:
+    value = json.load(handle)
+
+def walk(node, path="$"):
+    if isinstance(node, dict):
+        for key, child in node.items():
+            yield from walk(child, f"{path}.{key}")
+    elif isinstance(node, list):
+        for index, child in enumerate(node):
+            yield from walk(child, f"{path}[{index}]")
+    elif isinstance(node, str):
+        yield path, node
+
+for path, text in walk(value):
+    if fragment and fragment in text:
+        raise AssertionError(f"{path} exposed test workspace path: {text!r}")
+    if text.startswith(("/Users/", "/var/", "/tmp/", "/private/")):
+        raise AssertionError(f"{path} exposed absolute local path: {text!r}")
+PY
+  record_status "PASS" "$name" "$json_path"
+}
+
 validate_window_titles_redacted() {
   local name="$1"
   local json_path="$2"
@@ -538,6 +572,7 @@ run_json "config plan" "config-plan" \
   "includePaths=list" \
   "excludedPaths=list" \
   -- "$cli_path" config plan "$config_root" --json
+validate_json_omits_absolute_paths "config plan redacts local paths" "$logs_dir/config-plan.json" "$work_dir"
 
 run_json "agent manifest" "agent-manifest" \
   "schemaVersion=int" \
@@ -545,6 +580,7 @@ run_json "agent manifest" "agent-manifest" \
   "availableCommands=nonempty-list" \
   "workflows=nonempty-list" \
   -- "$cli_path" agent manifest "$project_url" --json
+validate_json_omits_absolute_paths "agent manifest redacts local paths" "$logs_dir/agent-manifest.json" "$work_dir"
 
 run_json "agent workflows" "agent-workflows" \
   "@=nonempty-list" \
@@ -558,6 +594,7 @@ run_json "app status" "app-status" \
   "isRecording=bool" \
   "message=str" \
   -- "$cli_path" app status --json
+validate_json_omits_absolute_paths "app status redacts local paths" "$logs_dir/app-status.json" "$work_dir"
 
 run_expected_failure "invalid command failure" "Invalid command: not-a-command" \
   "$cli_path" not-a-command

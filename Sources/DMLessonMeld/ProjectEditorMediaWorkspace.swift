@@ -344,7 +344,7 @@ extension ProjectEditorView {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(editorJobStatusColor(latestJob.status))
                     valueLine("Status", latestJob.statusTitle)
-                    if let outputPath = latestJob.outputPath {
+                    if let outputPath = latestJob.outputDisplayPath {
                         Text(outputPath)
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
