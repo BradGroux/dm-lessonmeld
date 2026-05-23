@@ -73,8 +73,9 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
     private var writtenFrames = 0
     private var writtenAudioSamples = 0
     private var writerError: Error?
-    private var outputURL: URL?
+    private var outputFile: RecordingOutputFile?
     private var outputSize: CGSize = .zero
+    private var isStarting = false
     private var isPaused = false
     private var pauseStartedAt: Date?
     private var totalPausedDuration: TimeInterval = 0
@@ -117,12 +118,18 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             retinaCapture: request.options.retinaCapture
         )
 
-        try prepareWriter(
-            outputURL: request.outputURL,
-            width: pixelSize.width,
-            height: pixelSize.height,
-            includeAudio: request.options.captureSystemAudio
-        )
+        try reserveStart()
+        do {
+            try prepareWriter(
+                outputURL: request.outputURL,
+                width: pixelSize.width,
+                height: pixelSize.height,
+                includeAudio: request.options.captureSystemAudio
+            )
+        } catch {
+            resetStateAfterFailedStart()
+            throw error
+        }
 
         let filter = if let window {
             SCContentFilter(desktopIndependentWindow: window)
@@ -146,6 +153,7 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
 
             syncState {
                 self.stream = stream
+                isStarting = false
             }
         } catch {
             resetStateAfterFailedStart()
@@ -201,10 +209,12 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
         clearStreamState()
 
         let writerState = takeWriterState()
-        let outputURL = try await finishWriter(writerState)
         guard writerState.writtenFrames > 0 else {
+            writerState.writer?.cancelWriting()
+            writerState.outputFile?.discard()
             throw DisplayScreenRecorderError.noFramesRecorded
         }
+        let outputURL = try await finishWriter(writerState)
 
         return RecordingResult(
             screenVideoURL: outputURL,
@@ -357,66 +367,71 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
     }
 
     private func prepareWriter(outputURL: URL, width: Int, height: Int, includeAudio: Bool) throws {
-        try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
+        let outputFile = try RecordingOutputFile.prepare(destinationURL: outputURL)
 
-        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
-        let settings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: width,
-            AVVideoHeightKey: height
-        ]
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
-        input.expectsMediaDataInRealTime = true
-
-        guard writer.canAdd(input) else {
-            throw DisplayScreenRecorderError.cannotAddWriterInput
-        }
-
-        writer.add(input)
-
-        let audioInput: AVAssetWriterInput?
-        if includeAudio {
-            let audioSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVNumberOfChannelsKey: 2,
-                AVSampleRateKey: 48_000,
-                AVEncoderBitRateKey: 192_000
+        do {
+            let writer = try AVAssetWriter(outputURL: outputFile.temporaryURL, fileType: .mp4)
+            let settings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: width,
+                AVVideoHeightKey: height
             ]
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
             input.expectsMediaDataInRealTime = true
-            guard writer.canAdd(input) else {
-                throw DisplayScreenRecorderError.cannotAddAudioInput
-            }
-            writer.add(input)
-            audioInput = input
-        } else {
-            audioInput = nil
-        }
 
-        try syncState {
-            guard stream == nil, self.writer == nil else {
-                throw DisplayScreenRecorderError.alreadyRecording
+            guard writer.canAdd(input) else {
+                throw DisplayScreenRecorderError.cannotAddWriterInput
             }
-            self.writer = writer
-            videoInput = input
-            self.audioInput = audioInput
-            firstPresentationTime = nil
-            writtenFrames = 0
-            writtenAudioSamples = 0
-            writerError = nil
-            self.outputURL = outputURL
-            outputSize = CGSize(width: width, height: height)
+
+            writer.add(input)
+
+            let audioInput: AVAssetWriterInput?
+            if includeAudio {
+                let audioSettings: [String: Any] = [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVNumberOfChannelsKey: 2,
+                    AVSampleRateKey: 48_000,
+                    AVEncoderBitRateKey: 192_000
+                ]
+                let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+                input.expectsMediaDataInRealTime = true
+                guard writer.canAdd(input) else {
+                    throw DisplayScreenRecorderError.cannotAddAudioInput
+                }
+                writer.add(input)
+                audioInput = input
+            } else {
+                audioInput = nil
+            }
+
+            try syncState {
+                guard stream == nil, self.writer == nil else {
+                    throw DisplayScreenRecorderError.alreadyRecording
+                }
+                self.writer = writer
+                videoInput = input
+                self.audioInput = audioInput
+                firstPresentationTime = nil
+                writtenFrames = 0
+                writtenAudioSamples = 0
+                writerError = nil
+                self.outputFile = outputFile
+                outputSize = CGSize(width: width, height: height)
+            }
+        } catch {
+            outputFile.discard()
+            throw error
         }
     }
 
     private func finishWriter(_ state: WriterState) async throws -> URL {
         if let writerError = state.writerError {
+            state.writer?.cancelWriting()
+            state.outputFile?.discard()
             throw DisplayScreenRecorderError.writerFailed(writerError.localizedDescription)
         }
-        guard let writer = state.writer, let input = state.input, let outputURL = state.outputURL else {
+        guard let writer = state.writer, let input = state.input, let outputFile = state.outputFile else {
+            state.outputFile?.discard()
             throw DisplayScreenRecorderError.writerFailed("Writer was not initialized.")
         }
 
@@ -427,9 +442,15 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
         return try await withCheckedThrowingContinuation { continuation in
             writerBox.writer.finishWriting {
                 if let error = writerBox.writer.error {
+                    outputFile.discard()
                     continuation.resume(throwing: DisplayScreenRecorderError.writerFailed(error.localizedDescription))
                 } else {
-                    continuation.resume(returning: outputURL)
+                    do {
+                        continuation.resume(returning: try outputFile.commit())
+                    } catch {
+                        outputFile.discard()
+                        continuation.resume(throwing: DisplayScreenRecorderError.writerFailed(error.localizedDescription))
+                    }
                 }
             }
         }
@@ -440,7 +461,7 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             let writer = self.writer
             let input = videoInput
             let audioInput = self.audioInput
-            let outputURL = self.outputURL
+            let outputFile = self.outputFile
             let writerError = self.writerError
             let writtenFrames = self.writtenFrames
             let writtenAudioSamples = self.writtenAudioSamples
@@ -449,13 +470,13 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             self.writer = nil
             videoInput = nil
             self.audioInput = nil
-            self.outputURL = nil
+            self.outputFile = nil
 
             return WriterState(
                 writer: writer,
                 input: input,
                 audioInput: audioInput,
-                outputURL: outputURL,
+                outputFile: outputFile,
                 writerError: writerError,
                 writtenFrames: writtenFrames,
                 writtenAudioSamples: writtenAudioSamples,
@@ -476,15 +497,26 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
     private func clearStreamState() {
         syncState {
             stream = nil
+            isStarting = false
             isPaused = false
             pauseStartedAt = nil
             totalPausedDuration = 0
         }
     }
 
+    func reserveStart() throws {
+        try syncState {
+            guard stream == nil, writer == nil, !isStarting else {
+                throw DisplayScreenRecorderError.alreadyRecording
+            }
+            isStarting = true
+        }
+    }
+
     private func resetStateAfterFailedStart() {
         syncState {
             writer?.cancelWriting()
+            outputFile?.discard()
             stream = nil
             writer = nil
             videoInput = nil
@@ -493,8 +525,9 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             writtenFrames = 0
             writtenAudioSamples = 0
             writerError = nil
-            outputURL = nil
+            outputFile = nil
             outputSize = .zero
+            isStarting = false
             isPaused = false
             pauseStartedAt = nil
             totalPausedDuration = 0
@@ -522,7 +555,7 @@ private struct WriterState {
     var writer: AVAssetWriter?
     var input: AVAssetWriterInput?
     var audioInput: AVAssetWriterInput?
-    var outputURL: URL?
+    var outputFile: RecordingOutputFile?
     var writerError: Error?
     var writtenFrames: Int
     var writtenAudioSamples: Int
