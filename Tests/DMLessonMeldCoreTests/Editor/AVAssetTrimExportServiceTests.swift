@@ -42,6 +42,53 @@ struct AVAssetTrimExportServiceTests {
         #expect(duration > 0.4)
         #expect(duration < 0.9)
     }
+
+    @Test("Cut composition preserves source video orientation")
+    func cutCompositionPreservesSourceVideoOrientation() async throws {
+        let temp = try TemporaryDirectory()
+        let sourceURL = temp.url.appendingPathComponent("rotated-source.mp4")
+        let outputURL = temp.url.appendingPathComponent("rotated-output.mp4")
+        let rotation = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 54, ty: 0)
+        try await SyntheticVideoWriter.write(
+            outputURL: sourceURL,
+            size: CGSize(width: 96, height: 54),
+            color: (red: 80, green: 40, blue: 170),
+            frameCount: 30,
+            fps: 30,
+            transform: rotation
+        )
+
+        let editDecisionList = EditDecisionList(
+            id: "rotated-edit",
+            sourceMediaURL: sourceURL,
+            sourceDurationSeconds: 1,
+            cuts: [
+                TimelineCut(id: "cut-1", range: EditTimeRange(startSeconds: 0.2, endSeconds: 0.4))
+            ]
+        )
+        let plan = try ExportJob(
+            id: "rotated-export",
+            editDecisionList: editDecisionList,
+            destinationURL: outputURL,
+            preset: ExportPreset(id: "mp4-medium", quality: .medium)
+        ).makePlan()
+
+        _ = try await AVAssetTrimExportService().export(plan: plan)
+
+        let sourceDisplaySize = try await firstVideoDisplaySize(sourceURL)
+        let outputDisplaySize = try await firstVideoDisplaySize(outputURL)
+        #expect(outputDisplaySize.isApproximatelyEqual(to: sourceDisplaySize))
+    }
+
+    private func firstVideoDisplaySize(_ url: URL) async throws -> CGSize {
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try #require(tracks.first)
+        let naturalSize = try await track.load(.naturalSize)
+        let preferredTransform = try await track.load(.preferredTransform)
+        let transformed = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+        return CGSize(width: abs(transformed.width), height: abs(transformed.height))
+    }
 }
 
 private final class TemporaryDirectory {
@@ -64,7 +111,8 @@ private enum SyntheticVideoWriter {
         size: CGSize,
         color: (red: UInt8, green: UInt8, blue: UInt8),
         frameCount: Int,
-        fps: Int32
+        fps: Int32,
+        transform: CGAffineTransform = .identity
     ) async throws {
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try FileManager.default.removeItem(at: outputURL)
@@ -77,6 +125,7 @@ private enum SyntheticVideoWriter {
             AVVideoWidthKey: Int(size.width),
             AVVideoHeightKey: Int(size.height)
         ])
+        input.transform = transform
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(
             assetWriterInput: input,
             sourcePixelBufferAttributes: [
@@ -150,4 +199,11 @@ private enum SyntheticVideoWriter {
 private enum SyntheticVideoWriterError: Error {
     case pixelBufferCreationFailed(CVReturn)
     case pixelBufferBaseAddressMissing
+}
+
+private extension CGSize {
+    func isApproximatelyEqual(to other: CGSize, tolerance: CGFloat = 0.001) -> Bool {
+        abs(width - other.width) <= tolerance &&
+            abs(height - other.height) <= tolerance
+    }
 }

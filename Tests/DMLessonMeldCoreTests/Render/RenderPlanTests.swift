@@ -336,6 +336,46 @@ struct RenderPlanTests {
         #expect(proResPlan.validate().isEmpty)
     }
 
+    @Test("Render preset resolution and frame rate drive composition output")
+    func renderPresetResolutionAndFrameRateDriveCompositionOutput() async throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let mediaURL = projectURL.appendingPathComponent("media", isDirectory: true)
+        try FileManager.default.createDirectory(at: mediaURL, withIntermediateDirectories: true)
+        let screenURL = mediaURL.appendingPathComponent("screen.mp4")
+        let outputURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+        try await SyntheticVideoWriter.write(
+            outputURL: screenURL,
+            size: CGSize(width: 320, height: 180),
+            color: (red: 20, green: 96, blue: 160),
+            frameCount: 60,
+            fps: 30
+        )
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Preset Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo, mimeType: "video/mp4")
+                )
+            ),
+            to: projectURL
+        )
+        let plan = try AVFoundationRenderService().makePlan(
+            projectURL: projectURL,
+            destinationURL: outputURL,
+            preset: RenderPreset(resolution: .p720, frameRate: .fps24)
+        )
+
+        #expect(plan.validate(options: .export).isEmpty)
+        let renderedURL = try await AVFoundationRenderService().export(plan: plan)
+        let track = try await firstVideoTrack(renderedURL)
+        let naturalSize = try await track.load(.naturalSize)
+        let nominalFrameRate = try await track.load(.nominalFrameRate)
+
+        #expect(naturalSize == CGSize(width: 1280, height: 720))
+        #expect(abs(nominalFrameRate - 24) < 0.5)
+    }
+
     @Test("Rejects render plans with media paths outside the project")
     func rejectsRenderPlansWithExternalMediaPaths() throws {
         let manifest = ProjectManifest(
@@ -829,6 +869,64 @@ struct RenderPlanTests {
         #expect(geometry.cornerRadius == 100)
     }
 
+    @Test("PiP style timeline follows camera layout and hidden regions")
+    func pipStyleTimelineFollowsCameraLayoutAndHiddenRegions() {
+        let defaultPlacement = PictureInPicturePlacement(
+            corner: .bottomTrailing,
+            widthRatio: 0.2,
+            marginRatio: 0.05,
+            aspectRatio: .widescreen16x9,
+            frameShape: .roundedRectangle,
+            borderEnabled: true,
+            shadowEnabled: true
+        )
+        let overlay = PictureInPictureOverlay(
+            source: RenderMediaSource(
+                role: .webcamVideo,
+                relativePath: "media/webcam.mp4",
+                url: URL(fileURLWithPath: "/tmp/webcam.mp4")
+            ),
+            placement: defaultPlacement
+        )
+        let camera = EditorCameraSettings(
+            defaultPlacement: defaultPlacement,
+            layoutRegions: [
+                CameraLayoutRegion(
+                    id: "side-by-side",
+                    range: EditTimeRange(startSeconds: 2, endSeconds: 4),
+                    preset: .sideBySide,
+                    animation: .fade,
+                    transitionSeconds: 0.4
+                ),
+                CameraLayoutRegion(
+                    id: "hidden",
+                    range: EditTimeRange(startSeconds: 6, endSeconds: 8),
+                    preset: .hidden,
+                    animation: .fade,
+                    transitionSeconds: 0.4
+                )
+            ]
+        )
+
+        let segments = PictureInPictureStyleTimeline.segments(
+            overlay: overlay,
+            camera: camera,
+            sourceDisplaySize: CGSize(width: 640, height: 360),
+            renderSize: CGSize(width: 1280, height: 720),
+            durationSeconds: 10
+        )
+
+        #expect(segments.map(\.range) == [
+            EditTimeRange(startSeconds: 0, endSeconds: 2),
+            EditTimeRange(startSeconds: 2, endSeconds: 4),
+            EditTimeRange(startSeconds: 4, endSeconds: 6),
+            EditTimeRange(startSeconds: 8, endSeconds: 10)
+        ])
+        #expect(segments[1].id == "side-by-side")
+        #expect(segments[1].geometry.frame.width > segments[0].geometry.frame.width)
+        #expect(!segments.contains { $0.range.overlaps(EditTimeRange(startSeconds: 6, endSeconds: 8)) })
+    }
+
     @Test("Exports synthetic project media with webcam picture-in-picture")
     func exportsSyntheticProjectMediaWithWebcamOverlay() async throws {
         let temp = try TemporaryDirectory()
@@ -1249,11 +1347,18 @@ private final class TemporaryDirectory {
     }
 }
 
+private func firstVideoTrack(_ url: URL) async throws -> AVAssetTrack {
+    let tracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)
+    return try #require(tracks.first)
+}
+
 private enum SyntheticVideoWriter {
     static func write(
         outputURL: URL,
         size: CGSize,
-        color: (red: UInt8, green: UInt8, blue: UInt8)
+        color: (red: UInt8, green: UInt8, blue: UInt8),
+        frameCount: Int = 15,
+        fps: Int32 = 15
     ) async throws {
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try FileManager.default.removeItem(at: outputURL)
@@ -1283,12 +1388,12 @@ private enum SyntheticVideoWriter {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
 
-        for frameIndex in 0..<15 {
+        for frameIndex in 0..<frameCount {
             while !input.isReadyForMoreMediaData {
                 try await Task.sleep(nanoseconds: 1_000_000)
             }
             let pixelBuffer = try makePixelBuffer(size: size, color: color)
-            let time = CMTime(value: CMTimeValue(frameIndex), timescale: 15)
+            let time = CMTime(value: CMTimeValue(frameIndex), timescale: fps)
             #expect(adaptor.append(pixelBuffer, withPresentationTime: time))
         }
 

@@ -155,6 +155,36 @@ public struct EditorCanvasRenderGeometry: Equatable, Sendable {
         self.videoFrame = videoFrame
         self.cornerRadius = cornerRadius
     }
+
+    public func scaled(to targetRenderSize: CGSize) -> EditorCanvasRenderGeometry {
+        let safeTarget = CGSize(
+            width: max(16, targetRenderSize.width),
+            height: max(16, targetRenderSize.height)
+        )
+        guard renderSize.width > 0, renderSize.height > 0 else {
+            return EditorCanvasRenderGeometry(
+                renderSize: safeTarget,
+                sourceCropRect: sourceCropRect,
+                videoFrame: CGRect(origin: .zero, size: safeTarget),
+                cornerRadius: 0
+            )
+        }
+
+        let scaleX = safeTarget.width / renderSize.width
+        let scaleY = safeTarget.height / renderSize.height
+        let scaledFrame = CGRect(
+            x: videoFrame.minX * scaleX,
+            y: videoFrame.minY * scaleY,
+            width: videoFrame.width * scaleX,
+            height: videoFrame.height * scaleY
+        )
+        return EditorCanvasRenderGeometry(
+            renderSize: safeTarget,
+            sourceCropRect: sourceCropRect,
+            videoFrame: scaledFrame,
+            cornerRadius: cornerRadius * min(scaleX, scaleY)
+        )
+    }
 }
 
 public enum EditorCanvasAspectRatio: String, Codable, CaseIterable, Identifiable, Sendable {

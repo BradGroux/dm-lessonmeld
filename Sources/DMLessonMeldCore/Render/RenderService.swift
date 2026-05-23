@@ -164,7 +164,9 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
            plan.zoomRegions.isEmpty,
            plan.speedRegions.isEmpty,
            plan.audio.isDefault,
-           plan.canvas.isDefault {
+           plan.canvas.isDefault,
+           plan.preset.resolution == .source,
+           plan.preset.frameRate == .source {
             return try await exportSingleAsset(plan, progress: progress)
         }
 
@@ -239,8 +241,13 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
         let screenNaturalSize = try await screenVideoTrack.load(.naturalSize)
         let screenPreferredTransform = try await screenVideoTrack.load(.preferredTransform)
+        let screenNominalFrameRate = try await screenVideoTrack.load(.nominalFrameRate)
         let screenDisplay = displayGeometry(naturalSize: screenNaturalSize, preferredTransform: screenPreferredTransform)
-        let canvasGeometry = plan.canvas.renderGeometry(sourceSize: screenDisplay.size)
+        let canvasGeometry = outputCanvasGeometry(
+            canvas: plan.canvas,
+            sourceSize: screenDisplay.size,
+            preset: plan.preset
+        )
         let renderSize = canvasGeometry.renderSize
 
         let instruction = AVMutableVideoCompositionInstruction()
@@ -263,7 +270,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         )
 
         var layerInstructions = [screenInstruction]
-        var webcamGeometry: PictureInPictureRenderGeometry?
+        var webcamStyleSegments: [PictureInPictureStyleSegment] = []
         var retimedTracks = [compositionScreenTrack]
         retimedTracks += audioTracks.map(\.track)
 
@@ -277,7 +284,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 timelineMapper: timelineMapper
             )
             layerInstructions.insert(webcamOverlayComposition.instruction, at: 0)
-            webcamGeometry = webcamOverlayComposition.geometry
+            webcamStyleSegments = webcamOverlayComposition.styleSegments
             retimedTracks.append(webcamOverlayComposition.track)
         }
 
@@ -307,7 +314,10 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = renderSize
-        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        videoComposition.frameDuration = frameDuration(
+            for: plan.preset.frameRate,
+            sourceFrameRate: Double(screenNominalFrameRate)
+        )
         videoComposition.instructions = [instruction]
         try Task.checkCancellation()
         try applyOverlayLayersIfNeeded(
@@ -315,7 +325,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             videoComposition: videoComposition,
             renderSize: renderSize,
             canvasGeometry: canvasGeometry,
-            webcamGeometry: webcamGeometry,
+            webcamStyleSegments: webcamStyleSegments,
             interactionMetadata: interactionMetadata,
             timelineMapper: timelineMapper
         )
@@ -435,7 +445,14 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         return WebcamOverlayComposition(
             track: compositionWebcamTrack,
             instruction: instruction,
-            geometry: defaultState.geometry
+            styleSegments: PictureInPictureStyleTimeline.segments(
+                overlay: overlay,
+                camera: camera,
+                sourceDisplaySize: sourceDisplaySize,
+                renderSize: renderSize,
+                durationSeconds: durationSeconds,
+                timelineMapper: timelineMapper
+            )
         )
     }
 
@@ -706,6 +723,22 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         displayGeometry(naturalSize: naturalSize, preferredTransform: preferredTransform).size
     }
 
+    private func outputCanvasGeometry(
+        canvas: EditorCanvasSettings,
+        sourceSize: CGSize,
+        preset: RenderPreset
+    ) -> EditorCanvasRenderGeometry {
+        let baseGeometry = canvas.renderGeometry(sourceSize: sourceSize)
+        let outputSize = preset.resolution.resolvedRenderSize(baseSize: baseGeometry.renderSize)
+        return baseGeometry.scaled(to: outputSize)
+    }
+
+    private func frameDuration(for frameRate: RenderFrameRate, sourceFrameRate: Double) -> CMTime {
+        let framesPerSecond = frameRate.framesPerSecond
+            ?? (sourceFrameRate.isFinite && sourceFrameRate > 0 ? sourceFrameRate : 30)
+        return CMTime(seconds: 1 / framesPerSecond, preferredTimescale: 60_000)
+    }
+
     private func displayGeometry(naturalSize: CGSize, preferredTransform: CGAffineTransform) -> DisplayGeometry {
         let transformed = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
         let normalize = CGAffineTransform(translationX: -transformed.minX, y: -transformed.minY)
@@ -740,7 +773,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 private struct WebcamOverlayComposition {
     var track: AVMutableCompositionTrack
     var instruction: AVMutableVideoCompositionLayerInstruction
-    var geometry: PictureInPictureRenderGeometry
+    var styleSegments: [PictureInPictureStyleSegment]
 }
 
 private struct WebcamRenderState {

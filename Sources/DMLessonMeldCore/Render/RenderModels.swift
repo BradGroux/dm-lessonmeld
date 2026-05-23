@@ -117,6 +117,47 @@ public enum RenderResolution: String, Codable, CaseIterable, Identifiable, Senda
         case .p2160: "4K"
         }
     }
+
+    public var targetShortEdge: CGFloat? {
+        switch self {
+        case .source:
+            nil
+        case .p720:
+            720
+        case .p1080:
+            1080
+        case .p1440:
+            1440
+        case .p2160:
+            2160
+        }
+    }
+
+    public func resolvedRenderSize(baseSize: CGSize) -> CGSize {
+        let safeBaseSize = CGSize(
+            width: max(16, baseSize.width),
+            height: max(16, baseSize.height)
+        )
+        guard let targetShortEdge else {
+            return Self.evenSize(safeBaseSize)
+        }
+
+        let shortEdge = max(1, min(safeBaseSize.width, safeBaseSize.height))
+        let scale = targetShortEdge / shortEdge
+        return Self.evenSize(CGSize(
+            width: safeBaseSize.width * scale,
+            height: safeBaseSize.height * scale
+        ))
+    }
+
+    private static func evenSize(_ size: CGSize) -> CGSize {
+        CGSize(width: evenDimension(size.width), height: evenDimension(size.height))
+    }
+
+    private static func evenDimension(_ value: CGFloat) -> CGFloat {
+        let rounded = Int(value.rounded())
+        return CGFloat(rounded.isMultiple(of: 2) ? rounded : rounded + 1)
+    }
 }
 
 public enum RenderFrameRate: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -133,6 +174,19 @@ public enum RenderFrameRate: String, Codable, CaseIterable, Identifiable, Sendab
         case .fps24: "24 fps"
         case .fps30: "30 fps"
         case .fps60: "60 fps"
+        }
+    }
+
+    public var framesPerSecond: Double? {
+        switch self {
+        case .source:
+            nil
+        case .fps24:
+            24
+        case .fps30:
+            30
+        case .fps60:
+            60
         }
     }
 }
@@ -314,6 +368,111 @@ public struct PictureInPictureRenderGeometry: Equatable, Sendable {
         self.videoFrame = videoFrame
         self.sourceScale = sourceScale
         self.cornerRadius = cornerRadius
+    }
+}
+
+public struct PictureInPictureStyleSegment: Equatable, Sendable {
+    public var id: String
+    public var range: EditTimeRange
+    public var placement: PictureInPicturePlacement
+    public var geometry: PictureInPictureRenderGeometry
+    public var transitionSeconds: Double
+
+    public init(
+        id: String,
+        range: EditTimeRange,
+        placement: PictureInPicturePlacement,
+        geometry: PictureInPictureRenderGeometry,
+        transitionSeconds: Double = 0
+    ) {
+        self.id = id
+        self.range = range
+        self.placement = placement
+        self.geometry = geometry
+        self.transitionSeconds = min(2, max(0, transitionSeconds.isFinite ? transitionSeconds : 0))
+    }
+}
+
+public enum PictureInPictureStyleTimeline {
+    public static func segments(
+        overlay: PictureInPictureOverlay,
+        camera: EditorCameraSettings,
+        sourceDisplaySize: CGSize,
+        renderSize: CGSize,
+        durationSeconds: Double,
+        timelineMapper: TimelineRetimingMapper = TimelineRetimingMapper()
+    ) -> [PictureInPictureStyleSegment] {
+        let safeDuration = durationSeconds.isFinite ? max(0, durationSeconds) : 0
+        guard safeDuration > 0 else { return [] }
+
+        var segments: [PictureInPictureStyleSegment] = []
+        var cursorSeconds = 0.0
+
+        func appendSegment(
+            id: String,
+            startSeconds: Double,
+            endSeconds: Double,
+            placement: PictureInPicturePlacement,
+            transitionSeconds: Double
+        ) {
+            let clampedStart = min(max(startSeconds, 0), safeDuration)
+            let clampedEnd = min(max(endSeconds, clampedStart), safeDuration)
+            guard clampedEnd > clampedStart else { return }
+            let mappedRange = timelineMapper.outputRange(
+                forSourceRange: EditTimeRange(startSeconds: clampedStart, endSeconds: clampedEnd)
+            )
+            guard mappedRange.durationSeconds > 0 else { return }
+            segments.append(PictureInPictureStyleSegment(
+                id: id,
+                range: mappedRange,
+                placement: placement,
+                geometry: placement.resolvedRenderGeometry(
+                    sourceSize: sourceDisplaySize,
+                    renderSize: renderSize
+                ),
+                transitionSeconds: min(transitionSeconds, mappedRange.durationSeconds / 2)
+            ))
+        }
+
+        for region in camera.enabledLayoutRegions {
+            let regionStart = min(max(region.range.startSeconds, 0), safeDuration)
+            let regionEnd = min(max(region.range.endSeconds, regionStart), safeDuration)
+            guard regionEnd > regionStart else { continue }
+
+            if regionStart > cursorSeconds {
+                appendSegment(
+                    id: "default-\(segments.count)",
+                    startSeconds: cursorSeconds,
+                    endSeconds: regionStart,
+                    placement: overlay.placement,
+                    transitionSeconds: 0
+                )
+            }
+
+            if region.preset != .hidden {
+                appendSegment(
+                    id: region.id,
+                    startSeconds: regionStart,
+                    endSeconds: regionEnd,
+                    placement: region.resolvedPlacement(default: overlay.placement),
+                    transitionSeconds: region.animation == .fade ? region.transitionSeconds : 0
+                )
+            }
+
+            cursorSeconds = max(cursorSeconds, regionEnd)
+        }
+
+        if cursorSeconds < safeDuration {
+            appendSegment(
+                id: "default-\(segments.count)",
+                startSeconds: cursorSeconds,
+                endSeconds: safeDuration,
+                placement: overlay.placement,
+                transitionSeconds: 0
+            )
+        }
+
+        return segments
     }
 }
 
