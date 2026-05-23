@@ -613,8 +613,7 @@ struct DMLessonMeldCLI {
                 throw CLIError.usage("Usage: dmlesson settings validate <settings.json> [--json]")
             }
             let inputURL = pathURL(arguments[1])
-            let data = try Data(contentsOf: inputURL)
-            let decoded = try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data)
+            let decoded = try LessonMeldPreferencesFile.load(from: inputURL)
             let normalized = decoded.normalized()
             if arguments.contains("--json") {
                 try printJSON(normalized)
@@ -1146,8 +1145,7 @@ struct DMLessonMeldCLI {
             }
             let projectURL = pathURL(arguments[1])
             let preferences = try optionValue("--settings", in: arguments).map { path in
-                let data = try Data(contentsOf: pathURL(path))
-                return try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data)
+                try LessonMeldPreferencesFile.load(from: pathURL(path))
             }
             let preset = try LessonPreset.make(
                 fromProject: projectURL,
@@ -1517,8 +1515,7 @@ struct DMLessonMeldCLI {
 
     static func loadPreferences(from path: String?) throws -> LessonMeldPreferences {
         guard let path else { return LessonMeldPreferences() }
-        let data = try Data(contentsOf: pathURL(path))
-        return try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data).normalized()
+        return try LessonMeldPreferencesFile.load(from: pathURL(path)).normalized()
     }
 
     static func printConfigStatus(_ status: ConfigGitBackupStatus, json: Bool, includePaths: Bool = false) throws {

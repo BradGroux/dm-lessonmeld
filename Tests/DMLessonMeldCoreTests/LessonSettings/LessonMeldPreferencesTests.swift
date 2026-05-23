@@ -105,6 +105,37 @@ struct LessonMeldPreferencesTests {
         #expect(decoded.onboardingCompleted)
     }
 
+    @Test("Preferences file loader decodes valid settings")
+    func preferencesFileLoaderDecodesValidSettings() throws {
+        let temp = try TranscriptionPreferenceTestDirectory()
+        let preferencesURL = temp.url.appendingPathComponent("settings.json")
+        let preferences = LessonMeldPreferences(
+            capture: CapturePreferences(quickRecordDurationSeconds: 420),
+            privacy: PrivacyPreferences(includeTranscriptReferencesInAgentManifests: true)
+        )
+        try DMLessonJSON.encoder().encode(preferences).write(to: preferencesURL, options: [.atomic])
+
+        let loaded = try LessonMeldPreferencesFile.load(from: preferencesURL)
+
+        #expect(loaded == preferences)
+    }
+
+    @Test("Preferences file loader rejects oversized settings")
+    func preferencesFileLoaderRejectsOversizedSettings() throws {
+        let temp = try TranscriptionPreferenceTestDirectory()
+        let preferencesURL = temp.url.appendingPathComponent("settings.json")
+        try Data(repeating: UInt8(ascii: "{"), count: Int(LessonMeldPreferencesFile.maxPreferencesBytes + 1))
+            .write(to: preferencesURL, options: [.atomic])
+
+        #expect(throws: LessonMeldPreferencesFileError.oversizedPreferences(
+            preferencesURL,
+            byteCount: LessonMeldPreferencesFile.maxPreferencesBytes + 1,
+            limit: LessonMeldPreferencesFile.maxPreferencesBytes
+        )) {
+            try LessonMeldPreferencesFile.load(from: preferencesURL)
+        }
+    }
+
     @Test("Legacy v1 preferences migrate webcam capture and quick record defaults")
     func legacyWebcamDefaultMigration() throws {
         let json = """
