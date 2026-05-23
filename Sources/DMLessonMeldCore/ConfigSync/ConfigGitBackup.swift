@@ -56,6 +56,7 @@ public enum ConfigGitBackupError: Error, Equatable, LocalizedError, Sendable {
     case gitNotFound(String)
     case gitFailed(String)
     case gitTimedOut(String)
+    case gitIgnoreTooLarge(String, byteCount: Int64, limit: Int64)
     case noSyncableFiles
 
     public var errorDescription: String? {
@@ -66,6 +67,8 @@ public enum ConfigGitBackupError: Error, Equatable, LocalizedError, Sendable {
             message
         case .gitTimedOut(let command):
             "Git command timed out: \(command)."
+        case .gitIgnoreTooLarge(let path, let byteCount, let limit):
+            ".gitignore is too large to update safely: \(path) is \(byteCount) bytes, limit is \(limit) bytes."
         case .noSyncableFiles:
             "No syncable config/template files were found."
         }
@@ -73,6 +76,8 @@ public enum ConfigGitBackupError: Error, Equatable, LocalizedError, Sendable {
 }
 
 public struct ConfigGitBackupManager: Sendable {
+    public static let maxGitIgnoreBytes: Int64 = 256 * 1024
+
     public var gitExecutableURL: URL
     public var planner: ConfigBackupPlanner
     public var processTimeoutSeconds: TimeInterval
@@ -219,18 +224,33 @@ public struct ConfigGitBackupManager: Sendable {
 
         """
 
-        if let existing = try? String(contentsOf: gitignoreURL, encoding: .utf8),
+        let existing = try readExistingGitIgnore(at: gitignoreURL)
+        if let existing,
            existing.contains("# Digital Meld LessonMeld local config backup")
             || existing.contains("# DM LessonMeld local config backup") {
             return
         }
 
-        if FileManager.default.fileExists(atPath: gitignoreURL.path),
-           let existing = try? String(contentsOf: gitignoreURL, encoding: .utf8) {
+        if let existing {
             try (existing + "\n" + body).write(to: gitignoreURL, atomically: true, encoding: .utf8)
         } else {
             try body.write(to: gitignoreURL, atomically: true, encoding: .utf8)
         }
+    }
+
+    private func readExistingGitIgnore(at url: URL) throws -> String? {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        if let byteCount = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init),
+           byteCount > Self.maxGitIgnoreBytes {
+            throw ConfigGitBackupError.gitIgnoreTooLarge(url.path, byteCount: byteCount, limit: Self.maxGitIgnoreBytes)
+        }
+        let data = try Data(contentsOf: url)
+        if Int64(data.count) > Self.maxGitIgnoreBytes {
+            throw ConfigGitBackupError.gitIgnoreTooLarge(url.path, byteCount: Int64(data.count), limit: Self.maxGitIgnoreBytes)
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     @discardableResult
