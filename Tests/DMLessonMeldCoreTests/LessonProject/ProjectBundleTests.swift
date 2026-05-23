@@ -114,6 +114,27 @@ struct ProjectBundleTests {
         #expect(issues.contains { $0.severity == .error && $0.path == "../screen.mp4" })
     }
 
+    @Test("Validation rejects control characters in media references")
+    func validationRejectsControlCharacterReferences() {
+        let unsafePath = "media/screen\nforged.mp4"
+        let manifest = ProjectManifest(
+            metadata: LessonMetadata(lessonTitle: "Control Character"),
+            media: ProjectMedia(
+                screen: ProjectFile(relativePath: unsafePath, role: .screenVideo)
+            )
+        )
+
+        let issues = ProjectBundle.validate(manifest: manifest, projectURL: URL(fileURLWithPath: "/tmp/Lesson.dmlm"))
+
+        #expect(issues.contains { $0.severity == .error && $0.path == unsafePath })
+        #expect(throws: ProjectBundleError.self) {
+            try ProjectBundle.projectLocalFileURL(
+                for: ProjectFile(relativePath: unsafePath, role: .screenVideo),
+                in: URL(fileURLWithPath: "/tmp/Lesson.dmlm")
+            )
+        }
+    }
+
     @Test("Repairs a bundle manifest from recoverable raw media")
     func repairsManifestFromRecoverableMedia() throws {
         let temp = try TemporaryDirectory()

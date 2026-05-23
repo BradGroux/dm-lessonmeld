@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 public enum ConnectorPackageKind: String, Codable, CaseIterable, Sendable {
@@ -535,6 +534,7 @@ private enum ConnectorPackageUtilities {
             }
             let destinationURL = destinationRoot.appendingPathComponent(file.relativePath)
             let relativePath = "\(destinationPrefix)/\(file.relativePath)"
+            try validatePackageRelativePath(relativePath)
             try ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: destinationRoot)
             if FileManager.default.fileExists(atPath: destinationURL.path) {
                 guard !isSymbolicLink(destinationURL) else {
@@ -572,6 +572,7 @@ private enum ConnectorPackageUtilities {
             }
             let relativePath = String(filePath.dropFirst(rootPath.count + 1))
             guard !excluded.contains(relativePath) else { return nil }
+            try validatePackageRelativePath(relativePath)
             return ConnectorPackageFile(
                 role: role(for: relativePath),
                 relativePath: relativePath,
@@ -585,9 +586,12 @@ private enum ConnectorPackageUtilities {
 
     static func writeChecksums(files: [ConnectorPackageFile], rootURL: URL, relativePath: String) throws -> String? {
         guard !files.isEmpty else { return nil }
-        let lines = files
+        let lines = try files
             .sorted { $0.relativePath < $1.relativePath }
-            .map { "\($0.sha256)  \($0.relativePath)" }
+            .map { file in
+                try validatePackageRelativePath(file.relativePath)
+                return "\(file.sha256)  \(file.relativePath)"
+            }
             .joined(separator: "\n")
         let checksumURL = rootURL.appendingPathComponent(relativePath)
         try ensureSafeDirectory(checksumURL.deletingLastPathComponent(), within: rootURL)
@@ -626,9 +630,7 @@ private enum ConnectorPackageUtilities {
     }
 
     static func sha256Hex(for url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
+        try FileChecksum.sha256Hex(for: url)
     }
 
     static func byteCount(for url: URL) throws -> Int64 {
@@ -638,6 +640,12 @@ private enum ConnectorPackageUtilities {
 
     static func isSymbolicLink(_ url: URL) -> Bool {
         (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
+    }
+
+    static func validatePackageRelativePath(_ path: String) throws {
+        guard !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw ConnectorPackageError.unsafeSource(path)
+        }
     }
 
     private static func role(for relativePath: String) -> ProjectFileRole? {

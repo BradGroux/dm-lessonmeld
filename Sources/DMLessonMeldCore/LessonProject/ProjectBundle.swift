@@ -227,7 +227,7 @@ public enum ProjectBundle {
         guard !trimmed.isEmpty,
               !trimmed.hasPrefix("/"),
               !trimmed.hasPrefix("~"),
-              !trimmed.contains("\0") else {
+              !trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw ProjectBundleError.unsafeFileReference(value)
         }
 
