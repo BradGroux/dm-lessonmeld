@@ -38,16 +38,16 @@ public enum EditorJobKind: String, Codable, CaseIterable, Identifiable, Sendable
 
     public var supportsCancellation: Bool {
         switch self {
-        case .renderVideo:
-            true
-        case .trimExport,
+        case .renderVideo,
+             .trimExport,
              .editDecisionExport,
              .learnHousePackage,
              .rawAssetExtract,
              .sharePackage,
              .frameExport,
-             .frameCopy,
-             .captionSidecars:
+             .frameCopy:
+            true
+        case .captionSidecars:
             false
         }
     }
@@ -244,6 +244,22 @@ public enum EditorJobConflictPolicy {
                 && record.kind.requiresProjectExclusivity
                 && record.projectPath == projectPath
         }
+    }
+}
+
+public enum EditorJobCancellationPolicy {
+    public static func cancellableActiveJobIDs(
+        in records: [EditorJobRecord],
+        projectPath: String?
+    ) -> [String] {
+        guard let projectPath else { return [] }
+        return records
+            .filter { record in
+                record.isActive
+                    && record.kind.supportsCancellation
+                    && record.projectPath == projectPath
+            }
+            .map(\.id)
     }
 }
 

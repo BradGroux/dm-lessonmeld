@@ -148,6 +148,7 @@ final class ProjectEditorModel: ObservableObject {
     private var timeObserver: Any?
     private var lastEditDecisionList: EditDecisionList?
     private var renderTask: Task<Void, Never>?
+    private var editorJobTasks: [String: Task<Void, Never>] = [:]
     private var activeRenderJobID: String?
     private var isLoadingProject = false
     private var isDirtyRefreshScheduled = false
@@ -418,14 +419,17 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     func teardown() {
+        cancelAllTrackedEditorJobTasks()
         removeTimeObserver()
         player?.pause()
         player = nil
-        renderTask?.cancel()
         renderTask = nil
+        activeRenderJobID = nil
+        resetEditorJobActivityIndicators()
     }
 
     func closeProject() {
+        cancelTrackedEditorJobTasksForCurrentProject()
         markActiveJobsCancelledForCurrentProject("Project closed before the job completed.")
         teardown()
         projectURL = nil
@@ -682,25 +686,46 @@ final class ProjectEditorModel: ObservableObject {
 
     func copyCurrentFrame() {
         guard !isExportingFrame else { return }
-        guard let jobID = beginEditorJob(kind: .frameCopy, detail: "Copy the current preview frame to the clipboard.") else {
+        guard let projectURL else {
+            setError("Open a project before copying the current frame.")
+            return
+        }
+        guard let jobID = beginEditorJob(
+            kind: .frameCopy,
+            detail: "Copy the current preview frame to the clipboard.",
+            projectURL: projectURL
+        ) else {
             return
         }
         isExportingFrame = true
         setMessage("Copying current frame...")
-        Task {
+        let task = Task {
             do {
                 let image = try await currentFrameImage()
+                try Task.checkCancellation()
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.writeObjects([image])
+                finishTrackedEditorJobTask(jobID)
                 isExportingFrame = false
+                guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                 completeEditorJob(jobID, message: "Copied current frame to the clipboard.")
                 setMessage("Copied current frame.")
+            } catch is CancellationError {
+                handleEditorJobCancellation(
+                    jobID,
+                    kind: .frameCopy,
+                    projectURL: projectURL,
+                    message: "Frame copy cancelled by user."
+                )
             } catch {
+                finishTrackedEditorJobTask(jobID)
                 isExportingFrame = false
+                guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                 failEditorJob(jobID, error: error)
                 setError(error.localizedDescription)
             }
         }
+        trackEditorJobTask(task, jobID: jobID)
     }
 
     func exportCurrentFrame() {
@@ -727,22 +752,36 @@ final class ProjectEditorModel: ObservableObject {
 
             isExportingFrame = true
             setMessage("Exporting current frame...")
-            Task {
+            let task = Task {
                 do {
                     let data = try await currentFramePNGData()
+                    try Task.checkCancellation()
                     try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try data.write(to: outputURL, options: [.atomic])
+                    try Task.checkCancellation()
+                    finishTrackedEditorJobTask(jobID)
                     isExportingFrame = false
+                    guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                     let displayPath = Self.displayPath(outputURL, projectURL: projectURL)
                     completeEditorJob(jobID, outputURL: outputURL, message: "Exported frame to \(displayPath).")
                     setMessage("Exported frame \(displayPath).")
                     NSWorkspace.shared.activateFileViewerSelecting([outputURL])
+                } catch is CancellationError {
+                    handleEditorJobCancellation(
+                        jobID,
+                        kind: .frameExport,
+                        projectURL: projectURL,
+                        message: "Frame export cancelled by user."
+                    )
                 } catch {
+                    finishTrackedEditorJobTask(jobID)
                     isExportingFrame = false
+                    guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                     failEditorJob(jobID, error: error)
                     setError(error.localizedDescription)
                 }
             }
+            trackEditorJobTask(task, jobID: jobID)
         } catch {
             setError(error.localizedDescription)
         }
@@ -1536,24 +1575,48 @@ final class ProjectEditorModel: ObservableObject {
 
             isTrimming = true
             setMessage("Exporting cut list...")
-            Task {
+            let task = Task {
                 do {
                     let output = try await AVAssetTrimExportService().export(plan: plan)
+                    try Task.checkCancellation()
                     await MainActor.run {
+                        self.finishTrackedEditorJobTask(jobID)
                         self.isTrimming = false
+                        guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                         let displayPath = Self.displayPath(output, projectURL: projectURL)
                         self.completeEditorJob(jobID, outputURL: output, message: "Exported cut list to \(displayPath).")
                         self.setMessage("Exported cut list \(displayPath).")
                         NSWorkspace.shared.activateFileViewerSelecting([output])
                     }
+                } catch AVAssetTrimExportServiceError.exportCancelled {
+                    await MainActor.run {
+                        self.handleEditorJobCancellation(
+                            jobID,
+                            kind: .editDecisionExport,
+                            projectURL: projectURL,
+                            message: "Cut list export cancelled by user."
+                        )
+                    }
+                } catch is CancellationError {
+                    await MainActor.run {
+                        self.handleEditorJobCancellation(
+                            jobID,
+                            kind: .editDecisionExport,
+                            projectURL: projectURL,
+                            message: "Cut list export cancelled by user."
+                        )
+                    }
                 } catch {
                     await MainActor.run {
+                        self.finishTrackedEditorJobTask(jobID)
                         self.isTrimming = false
+                        guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                         self.failEditorJob(jobID, error: error)
                         self.setError(error.localizedDescription)
                     }
                 }
             }
+            trackEditorJobTask(task, jobID: jobID)
         } catch {
             setError(error.localizedDescription)
         }
@@ -1929,7 +1992,7 @@ final class ProjectEditorModel: ObservableObject {
             activeRenderJobID = jobID
             setMessage("Rendering full project...")
 
-            renderTask = Task {
+            let task = Task {
                 do {
                     let loadedManifest = try ProjectBundle.loadManifest(at: projectURL)
                     let plan = try renderPlan(
@@ -1939,15 +2002,20 @@ final class ProjectEditorModel: ObservableObject {
                         preferences: preferences
                     )
                     let output = try await AVFoundationRenderService().export(plan: plan) { [weak self] progress in
+                        guard let self,
+                              self.isActiveEditorJob(jobID, projectURL: projectURL) else {
+                            return
+                        }
                         let clampedProgress = min(max(progress, 0), 1)
-                        self?.renderProgress = clampedProgress
-                        self?.updateEditorJobProgress(jobID, progress: clampedProgress)
+                        self.renderProgress = clampedProgress
+                        self.updateEditorJobProgress(jobID, progress: clampedProgress)
                     }
+                    try Task.checkCancellation()
                     await MainActor.run {
+                        self.finishTrackedEditorJobTask(jobID)
                         self.isRendering = false
                         self.renderProgress = 1
-                        self.renderTask = nil
-                        self.activeRenderJobID = nil
+                        guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                         let displayPath = Self.displayPath(output, projectURL: projectURL)
                         self.completeEditorJob(jobID, outputURL: output, message: "Rendered video to \(displayPath).")
                         self.setMessage("Rendered \(displayPath).")
@@ -1955,22 +2023,34 @@ final class ProjectEditorModel: ObservableObject {
                     }
                 } catch RenderExportError.exportCancelled {
                     await MainActor.run {
-                        self.isRendering = false
-                        self.renderTask = nil
-                        self.activeRenderJobID = nil
-                        self.cancelEditorJob(jobID, message: "Render cancelled by user.")
-                        self.setMessage("Render cancelled.")
+                        self.handleEditorJobCancellation(
+                            jobID,
+                            kind: .renderVideo,
+                            projectURL: projectURL,
+                            message: "Render cancelled by user."
+                        )
+                    }
+                } catch is CancellationError {
+                    await MainActor.run {
+                        self.handleEditorJobCancellation(
+                            jobID,
+                            kind: .renderVideo,
+                            projectURL: projectURL,
+                            message: "Render cancelled by user."
+                        )
                     }
                 } catch {
                     await MainActor.run {
+                        self.finishTrackedEditorJobTask(jobID)
                         self.isRendering = false
-                        self.renderTask = nil
-                        self.activeRenderJobID = nil
+                        guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                         self.failEditorJob(jobID, error: error)
                         self.setError(error.localizedDescription)
                     }
                 }
             }
+            renderTask = task
+            trackEditorJobTask(task, jobID: jobID)
         } catch {
             setError(error.localizedDescription)
         }
@@ -1998,15 +2078,18 @@ final class ProjectEditorModel: ObservableObject {
         setMessage("Packaging LearnHouse export...")
         let shouldArchive = preferences.export.createArchiveByDefault
 
-        Task.detached(priority: .userInitiated) {
+        let task = Task.detached(priority: .userInitiated) {
             do {
                 let result = try LearnHousePackageBuilder().buildPackage(
                     projectURL: projectURL,
                     outputDirectory: outputDirectory,
                     archive: shouldArchive
                 )
+                try Task.checkCancellation()
                 await MainActor.run {
+                    self.finishTrackedEditorJobTask(jobID)
                     self.isPackagingLearnHouse = false
+                    guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                     let revealPath = result.archivePath ?? result.packagePath
                     self.completeEditorJob(
                         jobID,
@@ -2016,14 +2099,26 @@ final class ProjectEditorModel: ObservableObject {
                     self.setMessage("Packaged LearnHouse export.")
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: revealPath)])
                 }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.handleEditorJobCancellation(
+                        jobID,
+                        kind: .learnHousePackage,
+                        projectURL: projectURL,
+                        message: "LearnHouse package cancelled by user."
+                    )
+                }
             } catch {
                 await MainActor.run {
+                    self.finishTrackedEditorJobTask(jobID)
                     self.isPackagingLearnHouse = false
+                    guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                     self.failEditorJob(jobID, error: error)
                     self.setError(error.localizedDescription)
                 }
             }
         }
+        trackEditorJobTask(task, jobID: jobID)
     }
 
     func extractRawAssets() {
@@ -2046,11 +2141,14 @@ final class ProjectEditorModel: ObservableObject {
         isExtractingRawAssets = true
         setMessage("Extracting raw assets...")
 
-        Task.detached(priority: .userInitiated) {
+        let task = Task.detached(priority: .userInitiated) {
             do {
                 let result = try RawAssetExtractor().extract(projectURL: projectURL, outputDirectory: outputDirectory)
+                try Task.checkCancellation()
                 await MainActor.run {
+                    self.finishTrackedEditorJobTask(jobID)
                     self.isExtractingRawAssets = false
+                    guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                     self.completeEditorJob(
                         jobID,
                         outputURL: URL(fileURLWithPath: result.outputDirectoryPath),
@@ -2059,14 +2157,26 @@ final class ProjectEditorModel: ObservableObject {
                     self.setMessage("Extracted \(result.files.count) raw asset\(result.files.count == 1 ? "" : "s").")
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.outputDirectoryPath)])
                 }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.handleEditorJobCancellation(
+                        jobID,
+                        kind: .rawAssetExtract,
+                        projectURL: projectURL,
+                        message: "Raw asset extraction cancelled by user."
+                    )
+                }
             } catch {
                 await MainActor.run {
+                    self.finishTrackedEditorJobTask(jobID)
                     self.isExtractingRawAssets = false
+                    guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                     self.failEditorJob(jobID, error: error)
                     self.setError(error.localizedDescription)
                 }
             }
         }
+        trackEditorJobTask(task, jobID: jobID)
     }
 
     func buildLocalSharePackage() {
@@ -2090,15 +2200,18 @@ final class ProjectEditorModel: ObservableObject {
         isBuildingSharePackage = true
         setMessage("Building local share package...")
 
-        Task.detached(priority: .userInitiated) {
+        let task = Task.detached(priority: .userInitiated) {
             do {
                 let result = try LocalSharePackageBuilder().buildPackage(
                     projectURL: projectURL,
                     outputDirectory: outputDirectory,
                     finalVideoURL: finalVideoURL
                 )
+                try Task.checkCancellation()
                 await MainActor.run {
+                    self.finishTrackedEditorJobTask(jobID)
                     self.isBuildingSharePackage = false
+                    guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                     self.completeEditorJob(
                         jobID,
                         outputURL: URL(fileURLWithPath: result.packagePath),
@@ -2107,24 +2220,34 @@ final class ProjectEditorModel: ObservableObject {
                     self.setMessage("Built local share package.")
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.packagePath)])
                 }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.handleEditorJobCancellation(
+                        jobID,
+                        kind: .sharePackage,
+                        projectURL: projectURL,
+                        message: "Share package cancelled by user."
+                    )
+                }
             } catch {
                 await MainActor.run {
+                    self.finishTrackedEditorJobTask(jobID)
                     self.isBuildingSharePackage = false
+                    guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                     self.failEditorJob(jobID, error: error)
                     self.setError(error.localizedDescription)
                 }
             }
         }
+        trackEditorJobTask(task, jobID: jobID)
     }
 
     func cancelRender() {
-        renderTask?.cancel()
-        if let activeRenderJobID {
-            updateEditorJob(activeRenderJobID) { job in
-                job.appendLog("Render cancellation requested.")
-            }
+        guard let activeRenderJobID,
+              let job = jobHistory.first(where: { $0.id == activeRenderJobID && $0.isActive }) else {
+            return
         }
-        setMessage("Cancelling render...")
+        cancelTrackedEditorJob(job, message: "Render cancelled by user.")
     }
 
     private func renderPlan(
@@ -2207,24 +2330,48 @@ final class ProjectEditorModel: ObservableObject {
 
             isTrimming = true
             setMessage("Exporting trim...")
-            Task {
+            let task = Task {
                 do {
                     let output = try await AVAssetTrimExportService().export(plan: plan)
+                    try Task.checkCancellation()
                     await MainActor.run {
+                        self.finishTrackedEditorJobTask(jobID)
                         self.isTrimming = false
+                        guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                         let displayPath = Self.displayPath(output, projectURL: projectURL)
                         self.completeEditorJob(jobID, outputURL: output, message: "Exported trim to \(displayPath).")
                         self.setMessage("Exported trim \(displayPath).")
                         NSWorkspace.shared.activateFileViewerSelecting([output])
                     }
+                } catch AVAssetTrimExportServiceError.exportCancelled {
+                    await MainActor.run {
+                        self.handleEditorJobCancellation(
+                            jobID,
+                            kind: .trimExport,
+                            projectURL: projectURL,
+                            message: "Trim export cancelled by user."
+                        )
+                    }
+                } catch is CancellationError {
+                    await MainActor.run {
+                        self.handleEditorJobCancellation(
+                            jobID,
+                            kind: .trimExport,
+                            projectURL: projectURL,
+                            message: "Trim export cancelled by user."
+                        )
+                    }
                 } catch {
                     await MainActor.run {
+                        self.finishTrackedEditorJobTask(jobID)
                         self.isTrimming = false
+                        guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                         self.failEditorJob(jobID, error: error)
                         self.setError(error.localizedDescription)
                     }
                 }
             }
+            trackEditorJobTask(task, jobID: jobID)
         } catch {
             setError(error.localizedDescription)
         }
@@ -2457,25 +2604,119 @@ final class ProjectEditorModel: ObservableObject {
         }
     }
 
+    private func trackEditorJobTask(_ task: Task<Void, Never>, jobID: String) {
+        guard jobHistory.contains(where: { $0.id == jobID && $0.isActive }) else { return }
+        editorJobTasks[jobID]?.cancel()
+        editorJobTasks[jobID] = task
+    }
+
+    private func finishTrackedEditorJobTask(_ jobID: String) {
+        editorJobTasks[jobID] = nil
+        if activeRenderJobID == jobID {
+            renderTask = nil
+            activeRenderJobID = nil
+        }
+    }
+
+    private func cancelAllTrackedEditorJobTasks() {
+        for task in editorJobTasks.values {
+            task.cancel()
+        }
+        editorJobTasks.removeAll()
+        renderTask?.cancel()
+        renderTask = nil
+        activeRenderJobID = nil
+    }
+
+    private func cancelTrackedEditorJobTasksForCurrentProject() {
+        let cancellableJobIDs = Set(EditorJobCancellationPolicy.cancellableActiveJobIDs(
+            in: jobHistory,
+            projectPath: normalizedCurrentProjectPath
+        ))
+        guard !cancellableJobIDs.isEmpty else { return }
+        for jobID in cancellableJobIDs {
+            editorJobTasks[jobID]?.cancel()
+            editorJobTasks[jobID] = nil
+            if activeRenderJobID == jobID {
+                renderTask?.cancel()
+                renderTask = nil
+                activeRenderJobID = nil
+            }
+        }
+    }
+
+    private func isActiveEditorJob(_ jobID: String, projectURL expectedProjectURL: URL) -> Bool {
+        guard normalizedCurrentProjectPath == Self.normalizedProjectPath(expectedProjectURL) else {
+            return false
+        }
+        return jobHistory.contains { $0.id == jobID && $0.isActive }
+    }
+
+    private func cancelTrackedEditorJob(_ job: EditorJobRecord, message: String) {
+        editorJobTasks[job.id]?.cancel()
+        editorJobTasks[job.id] = nil
+        if activeRenderJobID == job.id {
+            renderTask?.cancel()
+            renderTask = nil
+            activeRenderJobID = nil
+        }
+        resetEditorJobActivityIndicator(for: job.kind)
+        cancelEditorJob(job.id, message: message)
+        setMessage("\(job.title) cancelled.")
+    }
+
+    private func handleEditorJobCancellation(
+        _ jobID: String,
+        kind: EditorJobKind,
+        projectURL: URL,
+        message: String
+    ) {
+        finishTrackedEditorJobTask(jobID)
+        resetEditorJobActivityIndicator(for: kind)
+        guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+        cancelEditorJob(jobID, message: message)
+        setMessage("\(kind.title) cancelled.")
+    }
+
+    private func resetEditorJobActivityIndicators() {
+        isRendering = false
+        renderProgress = 0
+        isTrimming = false
+        isPackagingLearnHouse = false
+        isExtractingRawAssets = false
+        isBuildingSharePackage = false
+        isExportingFrame = false
+    }
+
+    private func resetEditorJobActivityIndicator(for kind: EditorJobKind) {
+        switch kind {
+        case .renderVideo:
+            isRendering = false
+            renderProgress = 0
+        case .trimExport,
+             .editDecisionExport:
+            isTrimming = false
+        case .learnHousePackage:
+            isPackagingLearnHouse = false
+        case .rawAssetExtract:
+            isExtractingRawAssets = false
+        case .sharePackage:
+            isBuildingSharePackage = false
+        case .frameExport,
+             .frameCopy:
+            isExportingFrame = false
+        case .captionSidecars:
+            break
+        }
+    }
+
     func cancelJob(_ job: EditorJobRecord) {
         guard job.isActive else { return }
         guard job.isCancellable else {
             setError("\(job.title) cannot be cancelled after it starts.")
             return
         }
-        switch job.kind {
-        case .renderVideo:
-            cancelRender()
-        case .trimExport,
-             .editDecisionExport,
-             .learnHousePackage,
-             .rawAssetExtract,
-             .sharePackage,
-             .frameExport,
-             .frameCopy,
-             .captionSidecars:
-            setError("\(job.title) cannot be cancelled after it starts.")
-        }
+        cancelTrackedEditorJob(job, message: "\(job.title) cancelled by user.")
     }
 
     func retryJob(_ job: EditorJobRecord, preferences: LessonMeldPreferences) {

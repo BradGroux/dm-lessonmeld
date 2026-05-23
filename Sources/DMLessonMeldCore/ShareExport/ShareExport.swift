@@ -143,8 +143,10 @@ public struct RawAssetExtractor {
     public init() {}
 
     public func extract(projectURL: URL, outputDirectory: URL) throws -> RawAssetExtractionResult {
+        try Task.checkCancellation()
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
         let rootURL = outputDirectory.appendingPathComponent("\(Self.slug(manifest.metadata.lessonTitle))-raw-assets", isDirectory: true)
+        try Task.checkCancellation()
         try ShareExportUtilities.recreateSafeDirectory(rootURL, within: outputDirectory, error: ShareExportError.unsafeDestination)
         let files = try Self.copyProjectFiles(
             manifest.media.allFiles,
@@ -153,6 +155,7 @@ public struct RawAssetExtractor {
             destinationPrefix: "",
             requireExisting: true
         )
+        try Task.checkCancellation()
         let checksumPath = try Self.writeChecksums(files: files, rootURL: rootURL, relativePath: "checksums.sha256")
         return RawAssetExtractionResult(
             outputDirectoryPath: rootURL.path,
@@ -175,17 +178,20 @@ public struct LocalSharePackageBuilder {
         finalVideoURL: URL? = nil,
         archive: Bool = false
     ) throws -> LocalSharePackageResult {
+        try Task.checkCancellation()
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
         let packageURL = outputDirectory.appendingPathComponent("\(Self.slug(manifest.metadata.lessonTitle)).lessonshare", isDirectory: true)
         let rawAssetsURL = packageURL.appendingPathComponent("raw-assets", isDirectory: true)
         let projectURLInPackage = packageURL.appendingPathComponent("project", isDirectory: true)
         let exportsURL = packageURL.appendingPathComponent("exports", isDirectory: true)
 
+        try Task.checkCancellation()
         try ShareExportUtilities.recreateSafeDirectory(packageURL, within: outputDirectory, error: ShareExportError.unsafeDestination)
         try ShareExportUtilities.ensureSafeDirectory(rawAssetsURL, within: packageURL, error: ShareExportError.unsafeDestination)
         try ShareExportUtilities.ensureSafeDirectory(projectURLInPackage, within: packageURL, error: ShareExportError.unsafeDestination)
         try ShareExportUtilities.ensureSafeDirectory(exportsURL, within: packageURL, error: ShareExportError.unsafeDestination)
 
+        try Task.checkCancellation()
         var files = try Self.copyProjectFiles(
             manifest.media.allFiles,
             projectURL: projectURL,
@@ -194,6 +200,7 @@ public struct LocalSharePackageBuilder {
             requireExisting: false
         )
 
+        try Task.checkCancellation()
         files.append(try Self.writeJSONFile(
             manifest,
             role: .manifest,
@@ -202,6 +209,7 @@ public struct LocalSharePackageBuilder {
         ))
         files += try Self.copyOptionalProjectSidecars(projectURL: projectURL, packageURL: packageURL)
 
+        try Task.checkCancellation()
         let finalVideoPath: String?
         if let finalVideoURL {
             guard FileManager.default.fileExists(atPath: finalVideoURL.path) else {
@@ -227,6 +235,7 @@ public struct LocalSharePackageBuilder {
             finalVideoPath = nil
         }
 
+        try Task.checkCancellation()
         let checksumPath = try Self.writeChecksums(files: files, rootURL: packageURL, relativePath: "checksums.sha256")
         let packageManifest = LocalSharePackageManifest(
             sourceProject: projectURL.lastPathComponent,
@@ -241,9 +250,11 @@ public struct LocalSharePackageBuilder {
             ]
         )
         let manifestData = try DMLessonJSON.encoder().encode(packageManifest)
+        try Task.checkCancellation()
         try manifestData.write(to: packageURL.appendingPathComponent("share-package.json"), options: [.atomic])
         try manifestData.write(to: packageURL.appendingPathComponent("manifest.json"), options: [.atomic])
 
+        try Task.checkCancellation()
         let archiveURL = archive ? try archiveBuilder.buildArchive(packageDirectory: packageURL) : nil
         return LocalSharePackageResult(
             packagePath: packageURL.path,
@@ -307,6 +318,7 @@ extension LocalSharePackageBuilder {
             OverlayStoreFile.defaultFileName
         ]
         return try sidecars.compactMap { fileName in
+            try Task.checkCancellation()
             let sourceURL = projectURL.appendingPathComponent(fileName)
             guard FileManager.default.fileExists(atPath: sourceURL.path) else { return nil }
             let relativePath = "project/\(fileName)"
@@ -348,7 +360,9 @@ extension LocalSharePackageBuilder {
         let destinationURL = rootURL.appendingPathComponent(relativePath)
         try ShareExportUtilities.ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: rootURL, error: ShareExportError.unsafeDestination)
         let data = try DMLessonJSON.encoder().encode(value)
+        try Task.checkCancellation()
         try data.write(to: destinationURL, options: [.atomic])
+        try Task.checkCancellation()
         return SharePackageFile(
             role: role,
             relativePath: relativePath,
@@ -382,6 +396,7 @@ private enum ShareExportUtilities {
         requireExisting: Bool
     ) throws -> [SharePackageFile] {
         try files.compactMap { file in
+            try Task.checkCancellation()
             let sourceURL = try ProjectBundle.projectLocalFileURL(for: file, in: projectURL)
             guard FileManager.default.fileExists(atPath: sourceURL.path) else {
                 if requireExisting {
@@ -417,6 +432,7 @@ private enum ShareExportUtilities {
         if let sourceRelativePath {
             try validatePackageRelativePath(sourceRelativePath, error: ShareExportError.unsafeSource)
         }
+        try Task.checkCancellation()
         guard !isSymbolicLink(sourceURL) else {
             throw ShareExportError.unsafeSource(sourceURL.path)
         }
@@ -427,7 +443,9 @@ private enum ShareExportUtilities {
             }
             try FileManager.default.removeItem(at: destinationURL)
         }
+        try Task.checkCancellation()
         try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        try Task.checkCancellation()
         return SharePackageFile(
             role: role,
             relativePath: relativePath,
@@ -439,15 +457,18 @@ private enum ShareExportUtilities {
 
     static func writeChecksums(files: [SharePackageFile], rootURL: URL, relativePath: String) throws -> String? {
         guard !files.isEmpty else { return nil }
+        try Task.checkCancellation()
         let lines = try files
             .sorted { $0.relativePath < $1.relativePath }
             .map { file in
+                try Task.checkCancellation()
                 try validatePackageRelativePath(file.relativePath, error: ShareExportError.unsafeDestination)
                 return "\(file.sha256)  \(file.relativePath)"
             }
             .joined(separator: "\n")
         let checksumURL = rootURL.appendingPathComponent(relativePath)
         try ensureSafeDirectory(checksumURL.deletingLastPathComponent(), within: rootURL, error: ShareExportError.unsafeDestination)
+        try Task.checkCancellation()
         try "\(lines)\n".write(to: checksumURL, atomically: true, encoding: .utf8)
         return relativePath
     }
