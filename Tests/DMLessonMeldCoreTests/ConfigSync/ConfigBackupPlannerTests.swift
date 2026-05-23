@@ -43,6 +43,21 @@ struct ConfigBackupPlannerTests {
         #expect(!plan.includePaths.contains("profiles/session.json"))
     }
 
+    @Test("Excludes syncable file names with secret content")
+    func excludesSecretContentInBenignFileNames() throws {
+        let temp = try TemporaryDirectory()
+        try write(#"{ "apiKey": "sk_test_1234567890" }"#, to: temp.url.appendingPathComponent("templates/workshop.json"))
+        try write("title = \"Workshop\"", to: temp.url.appendingPathComponent("templates/safe.toml"))
+
+        let plan = try ConfigBackupPlanner().plan(rootURL: temp.url)
+
+        #expect(plan.includePaths.contains("templates/safe.toml"))
+        #expect(!plan.includePaths.contains("templates/workshop.json"))
+        #expect(plan.excludedPaths.contains {
+            $0.path == "templates/workshop.json" && $0.reason.contains("credential")
+        })
+    }
+
     @Test("Git backup initializes a local repository with safe ignore rules")
     func initializesLocalGitBackupRepository() throws {
         try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))
@@ -77,6 +92,70 @@ struct ConfigBackupPlannerTests {
         #expect(tracked.contains("templates/workshop.json"))
         #expect(!tracked.contains("media/screen.mp4"))
         #expect(!tracked.contains("profiles/github-token.json"))
+    }
+
+    @Test("Git backup commits bypass local hooks")
+    func commitsBypassLocalHooks() throws {
+        try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))
+        let temp = try TemporaryDirectory()
+        let manager = ConfigGitBackupManager()
+        _ = try manager.ensureRepository(rootURL: temp.url)
+        let hookMarkerURL = temp.url.appendingPathComponent("hook-ran")
+        let hookURL = temp.url.appendingPathComponent(".git/hooks/pre-commit")
+        try write(
+            """
+            #!/bin/sh
+            echo ran > \(hookMarkerURL.path)
+            exit 1
+            """,
+            to: hookURL
+        )
+        try makeExecutable(hookURL)
+        try write("{}", to: temp.url.appendingPathComponent("templates/workshop.json"))
+
+        let result = try manager.commit(rootURL: temp.url, message: "Backup lesson config")
+
+        #expect(result.didCommit)
+        #expect(!FileManager.default.fileExists(atPath: hookMarkerURL.path))
+    }
+
+    @Test("Git runner drains large output")
+    func gitRunnerDrainsLargeOutput() throws {
+        let temp = try TemporaryDirectory()
+        let fakeGitURL = temp.url.appendingPathComponent("git")
+        try write(
+            """
+            #!/bin/sh
+            /usr/bin/awk 'BEGIN { for (i = 0; i < 50000; i++) print "templates/file" i ".json" }'
+            """,
+            to: fakeGitURL
+        )
+        try makeExecutable(fakeGitURL)
+        let manager = ConfigGitBackupManager(gitExecutableURL: fakeGitURL)
+
+        let tracked = try manager.trackedPaths(rootURL: temp.url)
+
+        #expect(tracked.count == 50_000)
+        #expect(tracked.contains("templates/file49999.json"))
+    }
+
+    @Test("Git runner times out stuck commands")
+    func gitRunnerTimesOutStuckCommands() throws {
+        let temp = try TemporaryDirectory()
+        let fakeGitURL = temp.url.appendingPathComponent("git")
+        try write(
+            """
+            #!/bin/sh
+            /bin/sleep 5
+            """,
+            to: fakeGitURL
+        )
+        try makeExecutable(fakeGitURL)
+        let manager = ConfigGitBackupManager(gitExecutableURL: fakeGitURL, processTimeoutSeconds: 0.05)
+
+        #expect(throws: ConfigGitBackupError.gitTimedOut("git ls-files")) {
+            try manager.trackedPaths(rootURL: temp.url)
+        }
     }
 
     @Test("Git backup status reports only syncable changed paths")
@@ -117,6 +196,10 @@ struct ConfigBackupPlannerTests {
     private func write(_ value: String, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try value.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func makeExecutable(_ url: URL) throws {
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
     }
 }
 

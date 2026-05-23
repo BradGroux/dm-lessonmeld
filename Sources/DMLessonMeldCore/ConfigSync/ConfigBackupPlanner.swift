@@ -23,6 +23,8 @@ public struct ExcludedConfigPath: Codable, Equatable, Sendable {
 }
 
 public struct ConfigBackupPlanner: Sendable {
+    private let maxContentScanBytes = 1_048_576
+
     public init() {}
 
     public func plan(rootURL: URL) throws -> ConfigBackupPlan {
@@ -63,7 +65,11 @@ public struct ConfigBackupPlanner: Sendable {
             if let reason = exclusionReason(for: relativePath) {
                 excludedPaths.append(ExcludedConfigPath(path: relativePath, reason: reason))
             } else if isSyncable(relativePath: relativePath) {
-                includePaths.append(relativePath)
+                if let reason = try contentExclusionReason(for: url) {
+                    excludedPaths.append(ExcludedConfigPath(path: relativePath, reason: reason))
+                } else {
+                    includePaths.append(relativePath)
+                }
             }
         }
 
@@ -128,5 +134,85 @@ public struct ConfigBackupPlanner: Sendable {
         }
 
         return nil
+    }
+
+    private func contentExclusionReason(for url: URL) throws -> String? {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: maxContentScanBytes) ?? Data()
+        guard let content = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        let lowered = content.lowercased()
+        let secretMarkers = [
+            "-----begin private key-----",
+            "-----begin rsa private key-----",
+            "-----begin openssh private key-----",
+            "aws_secret_access_key",
+            "github_token",
+            "slack_bot_token",
+            "xoxb-",
+            "sk_live_",
+            "sk_test_"
+        ]
+        if secretMarkers.contains(where: { lowered.contains($0) }) {
+            return "Potential credential material must stay out of Git sync."
+        }
+
+        let sensitiveKeys = [
+            "access_token",
+            "accesstoken",
+            "api_key",
+            "api-key",
+            "apikey",
+            "auth_token",
+            "authtoken",
+            "client_secret",
+            "clientsecret",
+            "passwd",
+            "password",
+            "private_key",
+            "private-key",
+            "privatekey",
+            "refresh_token",
+            "refreshtoken",
+            "secret",
+            "session_token",
+            "sessiontoken",
+            "token"
+        ]
+
+        for rawLine in lowered.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.hasPrefix("#"), !line.hasPrefix("//") else { continue }
+            if sensitiveKeys.contains(where: { lineContainsSensitiveAssignment(line, key: $0) }) {
+                return "Potential credential material must stay out of Git sync."
+            }
+        }
+
+        return nil
+    }
+
+    private func lineContainsSensitiveAssignment(_ line: String, key: String) -> Bool {
+        guard let keyRange = line.range(of: key),
+              keyRange.lowerBound == line.startIndex || !line[line.index(before: keyRange.lowerBound)].isLetter,
+              keyRange.upperBound == line.endIndex || !line[keyRange.upperBound].isLetter else {
+            return false
+        }
+
+        let remainder = line[keyRange.upperBound...]
+        guard let delimiterIndex = remainder.firstIndex(where: { $0 == ":" || $0 == "=" }) else {
+            return false
+        }
+
+        let value = remainder[remainder.index(after: delimiterIndex)...]
+            .trimmingCharacters(in: CharacterSet(charactersIn: " \t\"',"))
+            .trimmingCharacters(in: CharacterSet(charactersIn: ",}"))
+        guard !value.isEmpty, !["null", "false", "true"].contains(value) else {
+            return false
+        }
+
+        return value.count >= 6
     }
 }
