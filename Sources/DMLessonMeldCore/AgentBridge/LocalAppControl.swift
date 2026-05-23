@@ -7,6 +7,7 @@ public enum LocalAppControl {
     public static let notificationName = Notification.Name("io.digitalmeld.lessonmeld.app-control")
     public static let notificationObject = "io.digitalmeld.lessonmeld"
     public static let commandMaxAgeSeconds = 60
+    static let legacyControlTokenProvenanceMarker = "io.digitalmeld.lessonmeld.local-control-token.v1"
 
     public static var statusURL: URL {
         get throws {
@@ -71,10 +72,13 @@ public enum LocalAppControl {
 
         if let legacyTokenURL,
            FileManager.default.fileExists(atPath: legacyTokenURL.path) {
-            let token = try readControlToken(at: legacyTokenURL)
-            try store.writeControlToken(token)
+            if legacyControlTokenHasProvenance(at: legacyTokenURL) {
+                let token = try readControlToken(at: legacyTokenURL)
+                try store.writeControlToken(token)
+                try removeLegacyControlToken(at: legacyTokenURL)
+                return token
+            }
             try removeLegacyControlToken(at: legacyTokenURL)
-            return token
         }
 
         let token = generateControlToken()
@@ -170,8 +174,37 @@ public enum LocalAppControl {
     }
 
     private static func removeLegacyControlToken(at url: URL?) throws {
-        guard let url, FileManager.default.fileExists(atPath: url.path) else { return }
-        try FileManager.default.removeItem(at: url)
+        guard let url else { return }
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+        let provenanceURL = legacyControlTokenProvenanceURL(for: url)
+        if FileManager.default.fileExists(atPath: provenanceURL.path) {
+            try FileManager.default.removeItem(at: provenanceURL)
+        }
+    }
+
+    static func writeLegacyControlTokenProvenance(for legacyTokenURL: URL) throws {
+        try Data("\(legacyControlTokenProvenanceMarker)\n".utf8)
+            .write(to: legacyControlTokenProvenanceURL(for: legacyTokenURL), options: [.atomic])
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: legacyControlTokenProvenanceURL(for: legacyTokenURL).path
+        )
+    }
+
+    private static func legacyControlTokenHasProvenance(at url: URL) -> Bool {
+        let provenanceURL = legacyControlTokenProvenanceURL(for: url)
+        guard let marker = try? String(contentsOf: provenanceURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return marker == legacyControlTokenProvenanceMarker
+    }
+
+    static func legacyControlTokenProvenanceURL(for url: URL) -> URL {
+        url.deletingLastPathComponent()
+            .appendingPathComponent("\(url.lastPathComponent).provenance")
     }
 
     static func consumeReplayNonce(_ nonce: String, issuedAt: Int, now: Date = Date(), cacheURL: URL) throws -> Bool {

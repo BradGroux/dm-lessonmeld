@@ -1,5 +1,8 @@
 import DMLessonMeldCore
 import Foundation
+import OSLog
+
+private let localAppControlLogger = Logger(subsystem: "io.digitalmeld.lessonmeld", category: "LocalAppControl")
 
 @MainActor
 final class LocalAppControlBridge {
@@ -14,7 +17,11 @@ final class LocalAppControlBridge {
     func configure(quickRecorder: QuickRecorderModel, preferences: AppPreferencesController) {
         self.quickRecorder = quickRecorder
         self.preferences = preferences
-        _ = try? LocalAppControl.ensureControlToken()
+        do {
+            _ = try LocalAppControl.ensureControlToken()
+        } catch {
+            localAppControlLogger.error("Failed to prepare local app-control token: \(error.localizedDescription, privacy: .public)")
+        }
         quickRecorder.publishStatus()
 
         guard observer == nil else { return }
@@ -24,6 +31,9 @@ final class LocalAppControlBridge {
             queue: .main
         ) { [weak self] notification in
             let command = LocalAppControl.authenticatedCommand(from: notification.userInfo)
+            if command == nil {
+                localAppControlLogger.warning("Rejected local app-control command")
+            }
             Task { @MainActor in
                 self?.handle(command: command)
             }

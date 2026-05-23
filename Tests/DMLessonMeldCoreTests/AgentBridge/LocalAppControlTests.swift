@@ -89,6 +89,7 @@ struct LocalAppControlTests {
         let temp = try TemporaryDirectory()
         let legacyTokenURL = temp.url.appendingPathComponent("local-control-token")
         try Data("legacy-token\n".utf8).write(to: legacyTokenURL)
+        try LocalAppControl.writeLegacyControlTokenProvenance(for: legacyTokenURL)
         let store = InMemoryTokenStore()
 
         let token = try LocalAppControl.ensureControlToken(store: store, legacyTokenURL: legacyTokenURL)
@@ -96,6 +97,23 @@ struct LocalAppControlTests {
         #expect(token == "legacy-token")
         #expect(store.token == "legacy-token")
         #expect(!FileManager.default.fileExists(atPath: legacyTokenURL.path))
+        #expect(!FileManager.default.fileExists(atPath: LocalAppControl.legacyControlTokenProvenanceURL(for: legacyTokenURL).path))
+    }
+
+    @Test("Pre-created legacy tokens without provenance are rejected")
+    func precreatedLegacyTokenWithoutProvenanceIsRejected() throws {
+        let temp = try TemporaryDirectory()
+        let legacyTokenURL = temp.url.appendingPathComponent("local-control-token")
+        try Data("attacker-token\n".utf8).write(to: legacyTokenURL)
+        let store = InMemoryTokenStore()
+
+        let token = try LocalAppControl.ensureControlToken(store: store, legacyTokenURL: legacyTokenURL)
+
+        #expect(!token.isEmpty)
+        #expect(token != "attacker-token")
+        #expect(store.token == token)
+        #expect(!FileManager.default.fileExists(atPath: legacyTokenURL.path))
+        #expect(!FileManager.default.fileExists(atPath: LocalAppControl.legacyControlTokenProvenanceURL(for: legacyTokenURL).path))
     }
 
     @Test("New control tokens are stored without creating legacy plaintext files")
