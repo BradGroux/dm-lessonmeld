@@ -84,6 +84,23 @@ struct ConfigBackupPlannerTests {
         #expect(gitignore.contains("*token*"))
     }
 
+    @Test("Git backup rejects oversized existing gitignore")
+    func rejectsOversizedExistingGitIgnore() throws {
+        try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))
+        let temp = try TemporaryDirectory()
+        let gitignoreURL = temp.url.appendingPathComponent(".gitignore")
+        try Data(repeating: UInt8(ascii: "#"), count: Int(ConfigGitBackupManager.maxGitIgnoreBytes + 1))
+            .write(to: gitignoreURL, options: [.atomic])
+
+        #expect(throws: ConfigGitBackupError.gitIgnoreTooLarge(
+            gitignoreURL.path,
+            byteCount: ConfigGitBackupManager.maxGitIgnoreBytes + 1,
+            limit: ConfigGitBackupManager.maxGitIgnoreBytes
+        )) {
+            try ConfigGitBackupManager().ensureRepository(rootURL: temp.url)
+        }
+    }
+
     @Test("Git backup commits only syncable config files")
     func commitsOnlySyncableConfigFiles() throws {
         try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))
