@@ -89,18 +89,49 @@ public struct LessonPreset: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public enum LessonPresetFileError: Error, Equatable, LocalizedError {
+    case oversizedPreset(URL, byteCount: Int64, limit: Int64)
+    case unreadablePreset(URL, String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .oversizedPreset(let url, let byteCount, let limit):
+            "Lesson preset is too large: \(url.path) is \(byteCount) bytes, limit is \(limit) bytes."
+        case .unreadablePreset(let url, let reason):
+            "Lesson preset could not be decoded at \(url.path): \(reason)"
+        }
+    }
+}
+
 public enum LessonPresetFile {
     public static let fileExtension = "dmlpreset"
+    public static let maxPresetBytes: Int64 = 1 * 1024 * 1024
 
     public static func load(from url: URL) throws -> LessonPreset {
-        let data = try Data(contentsOf: url)
-        return try DMLessonJSON.decoder().decode(LessonPreset.self, from: data).normalized()
+        let data = try boundedPresetData(from: url)
+        do {
+            return try DMLessonJSON.decoder().decode(LessonPreset.self, from: data).normalized()
+        } catch {
+            throw LessonPresetFileError.unreadablePreset(url, error.localizedDescription)
+        }
     }
 
     public static func save(_ preset: LessonPreset, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let data = try DMLessonJSON.encoder().encode(preset.normalized())
         try data.write(to: url, options: [.atomic])
+    }
+
+    private static func boundedPresetData(from url: URL) throws -> Data {
+        if let byteCount = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init),
+           byteCount > maxPresetBytes {
+            throw LessonPresetFileError.oversizedPreset(url, byteCount: byteCount, limit: maxPresetBytes)
+        }
+        let data = try Data(contentsOf: url)
+        if Int64(data.count) > maxPresetBytes {
+            throw LessonPresetFileError.oversizedPreset(url, byteCount: Int64(data.count), limit: maxPresetBytes)
+        }
+        return data
     }
 }
 

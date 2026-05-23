@@ -327,6 +327,7 @@ fi
 
 project_url="$work_dir/Intro.dmlm"
 other_project_url="$work_dir/Other.dmlm"
+corrupt_project_url="$work_dir/Corrupt.dmlm"
 settings_url="$work_dir/settings.json"
 screen_url="$project_url/screen.mp4"
 render_url="$work_dir/lesson.mp4"
@@ -423,6 +424,18 @@ run_json "project inspect" "project-inspect" \
   "fileCount=int" \
   "issues=list" \
   -- "$cli_path" project inspect "$project_url" --json
+
+mkdir -p "$corrupt_project_url"
+printf "{" >"$corrupt_project_url/project.json"
+printf "screen" >"$corrupt_project_url/screen.mp4"
+
+run_json "project repair corrupt manifest" "project-repair-corrupt-manifest" \
+  "wroteManifest=bool" \
+  "manifest.media.screen.relativePath=str" \
+  "issues=list" \
+  -- "$cli_path" project repair "$corrupt_project_url" --lesson-title "Recovered" --json
+
+run_step "project repair preserved corrupt manifest" /bin/sh -c 'test "$(find "$1" -maxdepth 1 -name "project.invalid-*.json" | wc -l)" -eq 1' sh "$corrupt_project_url"
 
 run_json "edit validate" "edit-validate" \
   "@=list" \

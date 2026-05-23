@@ -118,6 +118,24 @@ struct LessonPresetTests {
         #expect(updated.export.defaultFileType == .mov)
     }
 
+    @Test("Preset load rejects oversized and corrupt JSON")
+    func presetLoadRejectsOversizedAndCorruptJSON() throws {
+        let temp = try TemporaryDirectory()
+        let oversizedURL = temp.url.appendingPathComponent("Oversized.dmlpreset")
+        let corruptURL = temp.url.appendingPathComponent("Corrupt.dmlpreset")
+
+        try Data(repeating: UInt8(ascii: "{"), count: Int(LessonPresetFile.maxPresetBytes) + 1)
+            .write(to: oversizedURL)
+        try Data("{".utf8).write(to: corruptURL)
+
+        #expect(throws: LessonPresetFileError.self) {
+            try LessonPresetFile.load(from: oversizedURL)
+        }
+        #expect(throws: LessonPresetFileError.self) {
+            try LessonPresetFile.load(from: corruptURL)
+        }
+    }
+
     @Test("App settings presets do not write project editor settings")
     func settingsPresetDoesNotWriteEditorSettings() throws {
         let temp = try TemporaryDirectory()
