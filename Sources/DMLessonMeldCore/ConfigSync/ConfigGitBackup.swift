@@ -37,6 +37,7 @@ public struct ConfigGitBackupCommitResult: Codable, Equatable, Sendable {
 public enum ConfigGitBackupError: Error, Equatable, LocalizedError, Sendable {
     case gitNotFound(String)
     case gitFailed(String)
+    case gitTimedOut(String)
     case noSyncableFiles
 
     public var errorDescription: String? {
@@ -45,6 +46,8 @@ public enum ConfigGitBackupError: Error, Equatable, LocalizedError, Sendable {
             "Git executable was not found at \(path)."
         case .gitFailed(let message):
             message
+        case .gitTimedOut(let command):
+            "Git command timed out: \(command)."
         case .noSyncableFiles:
             "No syncable config/template files were found."
         }
@@ -54,13 +57,16 @@ public enum ConfigGitBackupError: Error, Equatable, LocalizedError, Sendable {
 public struct ConfigGitBackupManager: Sendable {
     public var gitExecutableURL: URL
     public var planner: ConfigBackupPlanner
+    public var processTimeoutSeconds: TimeInterval
 
     public init(
         gitExecutableURL: URL = URL(fileURLWithPath: "/usr/bin/git"),
-        planner: ConfigBackupPlanner = ConfigBackupPlanner()
+        planner: ConfigBackupPlanner = ConfigBackupPlanner(),
+        processTimeoutSeconds: TimeInterval = 30
     ) {
         self.gitExecutableURL = gitExecutableURL
         self.planner = planner
+        self.processTimeoutSeconds = processTimeoutSeconds
     }
 
     public func ensureRepository(rootURL: URL) throws -> ConfigGitBackupStatus {
@@ -126,6 +132,7 @@ public struct ConfigGitBackupManager: Sendable {
             "-c", "user.email=dm-lessonmeld@localhost",
             "commit",
             "--no-gpg-sign",
+            "--no-verify",
             "-m", message
         ], rootURL: rootURL)
 
@@ -219,17 +226,65 @@ public struct ConfigGitBackupManager: Sendable {
         let errorPipe = Pipe()
         process.standardOutput = outputPipe
         process.standardError = errorPipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let error = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-
-        guard process.terminationStatus == 0 else {
-            throw ConfigGitBackupError.gitFailed(error.isEmpty ? output : error)
+        let output = GitProcessOutputBuffer()
+        let error = GitProcessOutputBuffer()
+        outputPipe.fileHandleForReading.readabilityHandler = { handle in
+            output.append(handle.availableData)
+        }
+        errorPipe.fileHandleForReading.readabilityHandler = { handle in
+            error.append(handle.availableData)
+        }
+        defer {
+            outputPipe.fileHandleForReading.readabilityHandler = nil
+            errorPipe.fileHandleForReading.readabilityHandler = nil
         }
 
-        return output
+        try process.run()
+        let deadline = Date().addingTimeInterval(processTimeoutSeconds)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if process.isRunning {
+            process.terminate()
+            Thread.sleep(forTimeInterval: 0.1)
+            throw ConfigGitBackupError.gitTimedOut(commandDescription(arguments))
+        }
+
+        process.waitUntilExit()
+        output.append(outputPipe.fileHandleForReading.readDataToEndOfFile())
+        error.append(errorPipe.fileHandleForReading.readDataToEndOfFile())
+        let outputString = output.stringValue()
+        let errorString = error.stringValue()
+
+        guard process.terminationStatus == 0 else {
+            throw ConfigGitBackupError.gitFailed(errorString.isEmpty ? outputString : errorString)
+        }
+
+        return outputString
+    }
+
+    private func commandDescription(_ arguments: [String]) -> String {
+        ([gitExecutableURL.lastPathComponent] + arguments).joined(separator: " ")
+    }
+}
+
+private final class GitProcessOutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    private let maxBytes = 16 * 1_024 * 1_024
+
+    func append(_ chunk: Data) {
+        guard !chunk.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        let remainingBytes = maxBytes - data.count
+        guard remainingBytes > 0 else { return }
+        data.append(chunk.prefix(remainingBytes))
+    }
+
+    func stringValue() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }
