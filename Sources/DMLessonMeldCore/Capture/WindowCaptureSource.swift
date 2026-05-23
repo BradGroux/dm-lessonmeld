@@ -2,6 +2,8 @@ import CoreGraphics
 import Foundation
 
 public struct WindowCaptureSource: Codable, Equatable, Identifiable, Sendable {
+    public static let redactedTitle = "Window title redacted"
+
     public var id: UInt32
     public var title: String
     public var ownerName: String
@@ -19,6 +21,16 @@ public struct WindowCaptureSource: Codable, Equatable, Identifiable, Sendable {
             return nil
         }
         return "\(Int(bounds.width.rounded()))x\(Int(bounds.height.rounded()))"
+    }
+
+    public func redactedForAutomation(includeTitle: Bool = false) -> WindowCaptureSource {
+        guard !includeTitle else { return self }
+        return WindowCaptureSource(
+            id: id,
+            title: Self.redactedTitle,
+            ownerName: ownerName,
+            bounds: bounds
+        )
     }
 }
 

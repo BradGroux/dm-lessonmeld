@@ -202,6 +202,24 @@ run_json() {
   return 1
 }
 
+validate_window_titles_redacted() {
+  local name="$1"
+  local json_path="$2"
+
+  "$python_bin" - "$json_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    windows = json.load(handle)
+
+for index, window in enumerate(windows):
+    if window.get("title") != "Window title redacted":
+        raise AssertionError(f"window {index} title was not redacted")
+PY
+  record_status "PASS" "$name" "$json_path"
+}
+
 run_expected_failure() {
   local name="$1"
   local expected_stderr="$2"
@@ -336,6 +354,12 @@ run_json "permissions status" "permissions-status" \
 run_json "record windows" "record-windows" \
   "@=list" \
   -- "$cli_path" record windows --json
+
+validate_window_titles_redacted "record windows redacts titles by default" "$logs_dir/record-windows.json"
+
+run_json "record windows title opt in" "record-windows-title-opt-in" \
+  "@=list" \
+  -- "$cli_path" record windows --include-window-titles --json
 
 run_json "settings defaults" "settings-defaults" \
   "@=dict" \

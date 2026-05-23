@@ -277,6 +277,8 @@ swift run dmlesson agent workflows --target codex --json
 
 JSON output is intended to be stable enough for local agents and scripts. Metadata is safe by default; media paths and transcript contents should be included only when explicitly requested.
 
+Window listings redact titles by default in CLI output. Use `--include-window-titles` only for intentional interactive selection.
+
 Agent workflow JSON is available for `openclaw`, `codex`, and `veritas-kanban` targets. These workflows list safe command sequences for inspection, validation, packaging, and handoff without exposing media paths unless explicit flags are used.
 
 ## MCP Wrapper

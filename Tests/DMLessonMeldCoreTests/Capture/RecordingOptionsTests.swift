@@ -61,6 +61,24 @@ struct RecordingOptionsTests {
         #expect(decoded.sizeLabel == "1280x720")
     }
 
+    @Test("Window capture source redacts titles for automation")
+    func windowCaptureSourceRedactsTitlesForAutomation() {
+        let source = WindowCaptureSource(
+            id: 123,
+            title: "Client Lesson Plan",
+            ownerName: "Safari",
+            bounds: WindowCaptureBounds(x: 10, y: 20, width: 1280, height: 720)
+        )
+
+        let redacted = source.redactedForAutomation()
+
+        #expect(redacted.id == source.id)
+        #expect(redacted.title == WindowCaptureSource.redactedTitle)
+        #expect(redacted.ownerName == source.ownerName)
+        #expect(redacted.bounds == source.bounds)
+        #expect(source.redactedForAutomation(includeTitle: true) == source)
+    }
+
     @Test("Camera permission request does not crash without bundled usage description")
     func cameraPermissionRequestNeedsUsageDescription() async {
         guard Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") == nil else {

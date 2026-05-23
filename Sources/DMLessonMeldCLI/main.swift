@@ -355,7 +355,9 @@ struct DMLessonMeldCLI {
     }
 
     static func runWindowListing(_ arguments: [String]) throws {
+        let includeWindowTitles = arguments.contains("--include-window-titles")
         let windows = WindowCaptureSourceProvider.availableSources()
+            .map { $0.redactedForAutomation(includeTitle: includeWindowTitles) }
         if arguments.contains("--json") {
             try printJSON(windows)
             return
@@ -1456,7 +1458,7 @@ struct DMLessonMeldCLI {
           settings validate <settings.json> [--json]
           record display --duration <seconds> --output <screen.mp4> [--display-id <id>] [--system-audio] [--json]
           record region --duration <seconds> --output <screen.mp4> --x <points> --y <points> --width <points> --height <points> [--display-id <id>] [--system-audio] [--json]
-          record windows [--json]
+          record windows [--include-window-titles] [--json]
           record window --window-id <id> --duration <seconds> --output <screen.mp4> [--system-audio] [--json]
           record microphone --duration <seconds> --output <audio.caf|audio.m4a|audio.wav> [--format caf|m4a|wav] [--microphone-device-id <id>] [--json]
           record webcam --duration <seconds> --output <webcam.mov> [--camera-id <id>] [--resolution 720p|1080p|4K] [--fps 24|30|40|50|60] [--json]
