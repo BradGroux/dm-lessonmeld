@@ -17,10 +17,8 @@ public struct WindowCaptureSource: Codable, Equatable, Identifiable, Sendable {
     }
 
     public var sizeLabel: String? {
-        guard let bounds, bounds.width > 0, bounds.height > 0 else {
-            return nil
-        }
-        return "\(Int(bounds.width.rounded()))x\(Int(bounds.height.rounded()))"
+        guard let bounds else { return nil }
+        return NumericInputValidation.safeSizeLabel(width: bounds.width, height: bounds.height)
     }
 
     public func redactedForAutomation(includeTitle: Bool = false) -> WindowCaptureSource {

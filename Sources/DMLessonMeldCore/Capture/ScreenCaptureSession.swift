@@ -28,12 +28,17 @@ public final class ScreenCaptureSession: NSObject, SCStreamDelegate, SCStreamOut
         displayScale: CGFloat,
         options: RecordingOptions = RecordingOptions()
     ) async throws {
-        guard sourceRect.width > 0, sourceRect.height > 0 else {
+        let validatedSourceRect: CGRect
+        do {
+            validatedSourceRect = try NumericInputValidation.captureRect(sourceRect)
+        } catch {
             throw CaptureError.invalidSourceRect
         }
+        _ = try NumericInputValidation.displayScale(displayScale)
+        _ = try NumericInputValidation.captureFPS(options.fps)
 
         let configuration = Self.configuration(
-            sourceRect: sourceRect,
+            sourceRect: validatedSourceRect,
             displayScale: displayScale,
             options: options
         )
@@ -63,12 +68,14 @@ public final class ScreenCaptureSession: NSObject, SCStreamDelegate, SCStreamOut
         options: RecordingOptions = RecordingOptions()
     ) -> SCStreamConfiguration {
         let configuration = SCStreamConfiguration()
-        let pixelSize = outputPixelSize(for: sourceRect.size, displayScale: displayScale, retinaCapture: options.retinaCapture)
+        let safeSourceRect = (try? NumericInputValidation.captureRect(sourceRect)) ?? CGRect(x: 0, y: 0, width: 2, height: 2)
+        let pixelSize = outputPixelSize(for: safeSourceRect.size, displayScale: displayScale, retinaCapture: options.retinaCapture)
+        let fps = (try? NumericInputValidation.captureFPS(options.fps)) ?? 60
 
-        configuration.sourceRect = sourceRect
+        configuration.sourceRect = safeSourceRect
         configuration.width = pixelSize.width
         configuration.height = pixelSize.height
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, options.fps)))
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         configuration.showsCursor = options.includeCursor
         configuration.capturesAudio = options.captureSystemAudio
         configuration.queueDepth = 8
@@ -93,16 +100,23 @@ public final class ScreenCaptureSession: NSObject, SCStreamDelegate, SCStreamOut
         displayScale: CGFloat,
         retinaCapture: Bool
     ) -> (width: Int, height: Int) {
-        let scale = max(displayScale, 1)
-        var width = Int((sourceSize.width * scale).rounded()) & ~1
-        var height = Int((sourceSize.height * scale).rounded()) & ~1
+        (try? validatedOutputPixelSize(
+            for: sourceSize,
+            displayScale: displayScale,
+            retinaCapture: retinaCapture
+        )) ?? (2, 2)
+    }
 
-        if retinaCapture {
-            width = (width * 2) & ~1
-            height = (height * 2) & ~1
-        }
-
-        return (max(width, 2), max(height, 2))
+    public static func validatedOutputPixelSize(
+        for sourceSize: CGSize,
+        displayScale: CGFloat,
+        retinaCapture: Bool
+    ) throws -> (width: Int, height: Int) {
+        try NumericInputValidation.capturePixelSize(
+            sourceSize: sourceSize,
+            displayScale: displayScale,
+            retinaCapture: retinaCapture
+        )
     }
 
     public func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {

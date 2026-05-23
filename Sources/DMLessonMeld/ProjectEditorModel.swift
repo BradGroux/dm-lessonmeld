@@ -3680,38 +3680,58 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     private func parseSeconds(_ value: String, label: String) throws -> Double {
-        guard let seconds = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)), seconds >= 0 else {
+        guard let seconds = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw ProjectEditorError.invalidNumber("\(label) must be a non-negative number.")
         }
-        return seconds
+        do {
+            return try NumericInputValidation.nonNegativeSeconds(seconds, label: label)
+        } catch {
+            throw ProjectEditorError.invalidNumber(error.localizedDescription)
+        }
     }
 
     private func parsePositive(_ value: String, label: String) throws -> Double {
-        guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)), number > 0 else {
+        guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw ProjectEditorError.invalidNumber("\(label) must be a positive number.")
         }
-        return number
+        do {
+            return try NumericInputValidation.positiveNumber(number, label: label)
+        } catch {
+            throw ProjectEditorError.invalidNumber(error.localizedDescription)
+        }
     }
 
     private func parseNonNegative(_ value: String, label: String) throws -> Double {
-        guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)), number >= 0 else {
+        guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw ProjectEditorError.invalidNumber("\(label) must be a non-negative number.")
         }
-        return number
+        do {
+            return try NumericInputValidation.nonNegativeNumber(number, label: label)
+        } catch {
+            throw ProjectEditorError.invalidNumber(error.localizedDescription)
+        }
     }
 
     private func parseUnitInterval(_ value: String, label: String) throws -> Double {
-        guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)), number >= 0, number <= 1 else {
+        guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw ProjectEditorError.invalidNumber("\(label) must be between 0 and 1.")
         }
-        return number
+        do {
+            return try NumericInputValidation.unitInterval(number, label: label)
+        } catch {
+            throw ProjectEditorError.invalidNumber(error.localizedDescription)
+        }
     }
 
     private func parseDimension(_ value: String, label: String) throws -> Int {
-        guard let number = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)), number >= 16 else {
-            throw ProjectEditorError.invalidNumber("\(label) must be at least 16 pixels.")
+        guard let number = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw ProjectEditorError.invalidNumber("\(label) must be from \(NumericInputValidation.minCanvasDimension) through \(NumericInputValidation.maxCanvasDimension) pixels.")
         }
-        return number
+        do {
+            return try NumericInputValidation.canvasDimension(number, label: label)
+        } catch {
+            throw ProjectEditorError.invalidNumber(error.localizedDescription)
+        }
     }
 
     private func optionalSeconds(_ value: String, label: String) throws -> Double? {

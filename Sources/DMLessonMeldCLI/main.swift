@@ -310,22 +310,22 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Usage: dmlesson record display|region|window --duration <seconds> --output <screen.mp4> [--system-audio] [--display-id <id>] [--window-id <id>] [--x <points> --y <points> --width <points> --height <points>] [--json]")
         }
         guard let durationValue = optionValue("--duration", in: arguments),
-              let duration = TimeInterval(durationValue),
               let output = optionValue("--output", in: arguments) else {
             throw CLIError.usage("Usage: dmlesson record display|region|window --duration <seconds> --output <screen.mp4> [--system-audio] [--display-id <id>] [--window-id <id>] [--x <points> --y <points> --width <points> --height <points>] [--json]")
         }
+        let duration = try recordingDurationValue(durationValue, label: "--duration")
 
         let displayID = optionValue("--display-id", in: arguments).flatMap { CGDirectDisplayID($0) }
         let sourceRect: CGRect?
         let windowID: UInt32?
         if mode == "region" {
-            guard let x = optionValue("--x", in: arguments).flatMap(Double.init),
-                  let y = optionValue("--y", in: arguments).flatMap(Double.init),
-                  let width = optionValue("--width", in: arguments).flatMap(Double.init),
-                  let height = optionValue("--height", in: arguments).flatMap(Double.init) else {
+            guard let x = optionValue("--x", in: arguments),
+                  let y = optionValue("--y", in: arguments),
+                  let width = optionValue("--width", in: arguments),
+                  let height = optionValue("--height", in: arguments) else {
                 throw CLIError.usage("Usage: dmlesson record region --duration <seconds> --output <screen.mp4> --x <points> --y <points> --width <points> --height <points> [--display-id <id>] [--json]")
             }
-            sourceRect = CGRect(x: x, y: y, width: width, height: height)
+            sourceRect = try captureRegion(x: x, y: y, width: width, height: height)
             windowID = nil
         } else if mode == "window" {
             windowID = try positiveUInt32Option("--window-id", in: arguments, required: true)
@@ -376,10 +376,10 @@ struct DMLessonMeldCLI {
 
     static func runMicrophoneRecording(_ arguments: [String]) async throws {
         guard let durationValue = optionValue("--duration", in: arguments),
-              let duration = TimeInterval(durationValue),
               let output = optionValue("--output", in: arguments) else {
             throw CLIError.usage("Usage: dmlesson record microphone --duration <seconds> --output <audio.caf|audio.m4a|audio.wav> [--format caf|m4a|wav] [--microphone-device-id <id>] [--json]")
         }
+        let duration = try recordingDurationValue(durationValue, label: "--duration")
 
         let outputURL = pathURL(output)
         let format = try audioFormat(explicit: optionValue("--format", in: arguments), outputURL: outputURL)
@@ -399,10 +399,10 @@ struct DMLessonMeldCLI {
 
     static func runWebcamRecording(_ arguments: [String]) async throws {
         guard let durationValue = optionValue("--duration", in: arguments),
-              let duration = TimeInterval(durationValue),
               let output = optionValue("--output", in: arguments) else {
             throw CLIError.usage("Usage: dmlesson record webcam --duration <seconds> --output <webcam.mov> [--camera-id <id>] [--resolution 720p|1080p|4K] [--fps 24|30|40|50|60] [--json]")
         }
+        let duration = try recordingDurationValue(durationValue, label: "--duration")
 
         let result = try await CameraRecorder().record(
             CameraRecordingRequest(
@@ -423,18 +423,18 @@ struct DMLessonMeldCLI {
 
     static func runProjectRecording(_ arguments: [String]) async throws {
         guard let durationValue = optionValue("--duration", in: arguments),
-              let duration = TimeInterval(durationValue),
               let output = optionValue("--output", in: arguments),
               let lessonTitle = optionValue("--lesson-title", in: arguments) else {
             throw CLIError.usage("Usage: dmlesson record project --duration <seconds> --output <project.dmlm> --lesson-title <title> [--course-title <title>] [--region x,y,w,h] [--window-id <id>] [--microphone] [--microphone-device-id <id>] [--webcam] [--camera-fps 24|30|40|50|60] [--webcam-format original|1:1|2:3|3:2|16:9] [--webcam-frame rounded|square|circle] [--mirror-webcam] [--webcam-border] [--system-audio] [--json]")
         }
+        let duration = try recordingDurationValue(durationValue, label: "--duration")
 
         let projectURL = pathURL(output)
         try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
         let screenURL = projectURL.appendingPathComponent("screen.mp4")
         let microphoneURL = projectURL.appendingPathComponent("microphone.m4a")
         let webcamURL = projectURL.appendingPathComponent("webcam.mov")
-        let sourceRect = optionValue("--region", in: arguments).flatMap(parseRegion)
+        let sourceRect = try optionValue("--region", in: arguments).map { try parseRegion($0) }
         let windowID = try positiveUInt32Option("--window-id", in: arguments)
         if sourceRect != nil, windowID != nil {
             throw CLIError.usage("--region and --window-id cannot be used together.")
@@ -1635,10 +1635,52 @@ struct DMLessonMeldCLI {
         return file
     }
 
-    static func parseRegion(_ value: String) -> CGRect? {
-        let parts = value.split(separator: ",").compactMap { Double(String($0).trimmingCharacters(in: .whitespaces)) }
-        guard parts.count == 4 else { return nil }
-        return CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+    static func parseRegion(_ value: String) throws -> CGRect {
+        let rawParts = value.split(separator: ",")
+        guard rawParts.count == 4 else {
+            throw CLIError.usage("--region must use x,y,width,height.")
+        }
+        return try captureRegion(
+            x: String(rawParts[0]),
+            y: String(rawParts[1]),
+            width: String(rawParts[2]),
+            height: String(rawParts[3])
+        )
+    }
+
+    static func captureRegion(x: String, y: String, width: String, height: String) throws -> CGRect {
+        let rect = CGRect(
+            x: try finiteDoubleValue(x, label: "Capture region x"),
+            y: try finiteDoubleValue(y, label: "Capture region y"),
+            width: try finiteDoubleValue(width, label: "Capture region width"),
+            height: try finiteDoubleValue(height, label: "Capture region height")
+        )
+        do {
+            return try NumericInputValidation.captureRect(rect)
+        } catch {
+            throw CLIError.usage(error.localizedDescription)
+        }
+    }
+
+    static func recordingDurationValue(_ value: String, label: String) throws -> TimeInterval {
+        let duration = try finiteDoubleValue(value, label: label)
+        do {
+            return try NumericInputValidation.recordingDuration(duration, label: label)
+        } catch {
+            throw CLIError.usage(error.localizedDescription)
+        }
+    }
+
+    static func finiteDoubleValue(_ value: String, label: String) throws -> Double {
+        guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw CLIError.usage("\(label) must be a number.")
+        }
+        do {
+            try NumericInputValidation.finite(number, label: label)
+        } catch {
+            throw CLIError.usage(error.localizedDescription)
+        }
+        return number
     }
 
     static func webcamFPSOption(_ name: String, in arguments: [String]) throws -> Int? {
@@ -1680,10 +1722,7 @@ struct DMLessonMeldCLI {
 
     static func doubleOption(_ name: String, in arguments: [String]) throws -> Double? {
         guard let value = optionValue(name, in: arguments) else { return nil }
-        guard let number = Double(value) else {
-            throw CLIError.usage("\(name) must be a number.")
-        }
-        return number
+        return try finiteDoubleValue(value, label: name)
     }
 
     static func positiveUInt32Option(_ name: String, in arguments: [String], required: Bool = false) throws -> UInt32? {
@@ -1770,7 +1809,7 @@ struct DMLessonMeldCLI {
         ))
 
         do {
-            try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            try await Task.sleep(nanoseconds: try NumericInputValidation.sleepNanoseconds(forRecordingDuration: duration))
             return try recorder.stopRecording()
         } catch {
             _ = try? recorder.stopRecording()

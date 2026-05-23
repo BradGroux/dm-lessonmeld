@@ -118,6 +118,7 @@ public enum CameraRecordingError: Error, Equatable, LocalizedError, Sendable {
     case noCameraAvailable
     case requestedCameraNotFound(String)
     case invalidDuration
+    case invalidFrameRate(String)
     case cannotAddCameraInput
     case cannotAddMovieOutput
     case recordingFailed(String)
@@ -131,7 +132,9 @@ public enum CameraRecordingError: Error, Equatable, LocalizedError, Sendable {
         case .requestedCameraNotFound(let id):
             "Requested camera was not found: \(id)."
         case .invalidDuration:
-            "Camera recording duration must be greater than zero."
+            "Camera recording duration must be finite, greater than zero, and no more than \(Int(NumericInputValidation.maxRecordingDurationSeconds)) seconds."
+        case .invalidFrameRate(let reason):
+            reason
         case .cannotAddCameraInput:
             "Could not add camera input to the capture session."
         case .cannotAddMovieOutput:
@@ -174,8 +177,17 @@ public final class CameraRecorder: @unchecked Sendable {
     }
 
     public func record(_ request: CameraRecordingRequest) async throws -> CameraRecordingResult {
-        guard request.durationSeconds > 0 else {
+        let durationSeconds: TimeInterval
+        do {
+            durationSeconds = try NumericInputValidation.recordingDuration(request.durationSeconds, label: "Camera recording duration")
+        } catch {
             throw CameraRecordingError.invalidDuration
+        }
+        let fps: Int?
+        do {
+            fps = try NumericInputValidation.optionalCaptureFPS(request.fps, label: "Camera FPS")
+        } catch {
+            throw CameraRecordingError.invalidFrameRate(error.localizedDescription)
         }
         guard CameraPermission.isGranted else {
             throw CameraRecordingError.permissionDenied
@@ -190,7 +202,7 @@ public final class CameraRecorder: @unchecked Sendable {
         }
 
         let device = try Self.selectDevice(id: request.deviceID)
-        try Self.configureFrameRate(request.fps, on: device)
+        try Self.configureFrameRate(fps, on: device)
         let session = AVCaptureSession()
         session.beginConfiguration()
         session.sessionPreset = Self.sessionPreset(for: request.resolution)
@@ -223,7 +235,7 @@ public final class CameraRecorder: @unchecked Sendable {
         setActiveCapture(session: session, output: output)
 
         do {
-            try await Task.sleep(nanoseconds: UInt64(request.durationSeconds * 1_000_000_000))
+            try await Task.sleep(nanoseconds: try NumericInputValidation.sleepNanoseconds(forRecordingDuration: durationSeconds, label: "Camera recording duration"))
             Self.stopOutputIfRecording(output)
             let result = try await delegate.waitForFinish()
             session.stopRunning()
@@ -265,15 +277,16 @@ public final class CameraRecorder: @unchecked Sendable {
     }
 
     private static func configureFrameRate(_ fps: Int?, on device: AVCaptureDevice) throws {
-        guard let fps, fps > 0 else { return }
-        let requestedFPS = Double(fps)
+        guard let fps else { return }
+        let validatedFPS = try NumericInputValidation.captureFPS(fps, label: "Camera FPS")
+        let requestedFPS = Double(validatedFPS)
         guard device.activeFormat.videoSupportedFrameRateRanges.contains(where: { range in
             range.minFrameRate <= requestedFPS && requestedFPS <= range.maxFrameRate
         }) else {
             return
         }
 
-        let frameDuration = CMTime(value: 1, timescale: CMTimeScale(fps))
+        let frameDuration = CMTime(value: 1, timescale: CMTimeScale(validatedFPS))
         try device.lockForConfiguration()
         device.activeVideoMinFrameDuration = frameDuration
         device.activeVideoMaxFrameDuration = frameDuration

@@ -638,6 +638,7 @@ final class WebcamPreviewSessionController: ObservableObject, @unchecked Sendabl
     }
 
     private static func configureFrameRate(_ fps: Int, on device: AVCaptureDevice) throws {
+        let fps = try NumericInputValidation.captureFPS(fps, label: "Camera FPS")
         let requestedFPS = Double(fps)
         guard device.activeFormat.videoSupportedFrameRateRanges.contains(where: { range in
             range.minFrameRate <= requestedFPS && requestedFPS <= range.maxFrameRate
