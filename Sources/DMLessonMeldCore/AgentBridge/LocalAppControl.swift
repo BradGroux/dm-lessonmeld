@@ -8,6 +8,14 @@ public enum LocalAppControl {
     public static let notificationObject = "io.digitalmeld.lessonmeld"
     public static let commandMaxAgeSeconds = 60
     static let legacyControlTokenProvenanceMarker = "io.digitalmeld.lessonmeld.local-control-token.v1"
+    static let maxRuntimeStatusBytes: Int64 = 64 * 1024
+    static let maxReplayCacheBytes: Int64 = 256 * 1024
+    static let maxLegacyControlTokenBytes: Int64 = 4 * 1024
+    static let maxLegacyControlTokenProvenanceBytes: Int64 = 1024
+    static let maxCommandNonceBytes = 128
+    static let maxCommandSignatureBytes = 512
+    static let maxIssuedAtStringBytes = 32
+    static let maxReplayCacheNonces = 4_096
 
     public static var statusURL: URL {
         get throws {
@@ -53,7 +61,15 @@ public enum LocalAppControl {
     }
 
     public static func readStatus() throws -> LocalAppControlStatus {
-        let data = try Data(contentsOf: try statusURL)
+        try readStatus(from: try statusURL)
+    }
+
+    static func readStatus(from inputURL: URL) throws -> LocalAppControlStatus {
+        let data = try runtimeData(
+            contentsOf: inputURL,
+            maxBytes: maxRuntimeStatusBytes,
+            name: "runtime status"
+        )
         return try DMLessonJSON.decoder().decode(LocalAppControlStatus.self, from: data)
     }
 
@@ -73,12 +89,22 @@ public enum LocalAppControl {
         if let legacyTokenURL,
            FileManager.default.fileExists(atPath: legacyTokenURL.path) {
             if legacyControlTokenHasProvenance(at: legacyTokenURL) {
-                let token = try readControlToken(at: legacyTokenURL)
-                try store.writeControlToken(token)
+                do {
+                    let token = try readControlToken(at: legacyTokenURL)
+                    try store.writeControlToken(token)
+                    try removeLegacyControlToken(at: legacyTokenURL)
+                    return token
+                } catch let error as LocalAppControlError {
+                    switch error {
+                    case .emptyControlToken, .runtimeFileTooLarge, .invalidRuntimeFileEncoding:
+                        try removeLegacyControlToken(at: legacyTokenURL)
+                    case .keychainNeedsUserInteraction, .keychainReadFailed, .keychainWriteFailed:
+                        throw error
+                    }
+                }
+            } else {
                 try removeLegacyControlToken(at: legacyTokenURL)
-                return token
             }
-            try removeLegacyControlToken(at: legacyTokenURL)
         }
 
         let token = generateControlToken()
@@ -165,7 +191,11 @@ public enum LocalAppControl {
 
     private static func readControlToken(at url: URL) throws -> String {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        let token = try String(contentsOf: url, encoding: .utf8)
+        let token = try runtimeString(
+            contentsOf: url,
+            maxBytes: maxLegacyControlTokenBytes,
+            name: "legacy control token"
+        )
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
             throw LocalAppControlError.emptyControlToken
@@ -195,7 +225,11 @@ public enum LocalAppControl {
 
     private static func legacyControlTokenHasProvenance(at url: URL) -> Bool {
         let provenanceURL = legacyControlTokenProvenanceURL(for: url)
-        guard let marker = try? String(contentsOf: provenanceURL, encoding: .utf8)
+        guard let marker = try? runtimeString(
+            contentsOf: provenanceURL,
+            maxBytes: maxLegacyControlTokenProvenanceBytes,
+            name: "legacy control token provenance"
+        )
             .trimmingCharacters(in: .whitespacesAndNewlines) else {
             return false
         }
@@ -212,6 +246,7 @@ public enum LocalAppControl {
         let oldestAllowed = nowSeconds - commandMaxAgeSeconds
         var cache = try loadReplayCache(from: cacheURL)
         cache.nonces = cache.nonces.filter { $0.value >= oldestAllowed }
+        cache.nonces = boundedReplayNonces(cache.nonces)
 
         guard cache.nonces[nonce] == nil else {
             try writeReplayCache(cache, to: cacheURL)
@@ -219,6 +254,7 @@ public enum LocalAppControl {
         }
 
         cache.nonces[nonce] = issuedAt
+        cache.nonces = boundedReplayNonces(cache.nonces)
         try writeReplayCache(cache, to: cacheURL)
         return true
     }
@@ -227,15 +263,56 @@ public enum LocalAppControl {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return LocalAppControlReplayCache()
         }
-        let data = try Data(contentsOf: url)
+        let data = try runtimeData(
+            contentsOf: url,
+            maxBytes: maxReplayCacheBytes,
+            name: "replay cache"
+        )
         return try DMLessonJSON.decoder().decode(LocalAppControlReplayCache.self, from: data)
     }
 
     private static func writeReplayCache(_ cache: LocalAppControlReplayCache, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try DMLessonJSON.encoder().encode(cache)
+        var boundedCache = cache
+        boundedCache.nonces = boundedReplayNonces(cache.nonces)
+        let data = try DMLessonJSON.encoder().encode(boundedCache)
         try data.write(to: url, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private static func boundedReplayNonces(_ nonces: [String: Int]) -> [String: Int] {
+        guard nonces.count > maxReplayCacheNonces else {
+            return nonces
+        }
+        return Dictionary(uniqueKeysWithValues: nonces
+            .sorted { first, second in
+                if first.value == second.value {
+                    return first.key < second.key
+                }
+                return first.value > second.value
+            }
+            .prefix(maxReplayCacheNonces)
+            .map { ($0.key, $0.value) })
+    }
+
+    private static func runtimeString(contentsOf url: URL, maxBytes: Int64, name: String) throws -> String {
+        let data = try runtimeData(contentsOf: url, maxBytes: maxBytes, name: name)
+        guard let value = String(data: data, encoding: .utf8) else {
+            throw LocalAppControlError.invalidRuntimeFileEncoding(name)
+        }
+        return value
+    }
+
+    private static func runtimeData(contentsOf url: URL, maxBytes: Int64, name: String) throws -> Data {
+        if let byteCount = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init),
+           byteCount > maxBytes {
+            throw LocalAppControlError.runtimeFileTooLarge(name, byteCount: byteCount, limit: maxBytes)
+        }
+        let data = try Data(contentsOf: url)
+        if Int64(data.count) > maxBytes {
+            throw LocalAppControlError.runtimeFileTooLarge(name, byteCount: Int64(data.count), limit: maxBytes)
+        }
+        return data
     }
 
     private static func generateControlToken() -> String {
@@ -396,9 +473,11 @@ public struct LocalAppControlCommand: Codable, Equatable, Sendable {
               let action = LocalAppControlAction(rawValue: actionValue),
               let nonce = userInfo["nonce"] as? String,
               !nonce.isEmpty,
+              nonce.utf8.count <= LocalAppControl.maxCommandNonceBytes,
               let issuedAt = Self.intValue(userInfo["issuedAt"]),
               let signature = userInfo["signature"] as? String,
-              !signature.isEmpty else {
+              !signature.isEmpty,
+              signature.utf8.count <= LocalAppControl.maxCommandSignatureBytes else {
             return nil
         }
 
@@ -413,6 +492,9 @@ public struct LocalAppControlCommand: Codable, Equatable, Sendable {
             return number.intValue
         }
         if let string = value as? String {
+            guard string.utf8.count <= LocalAppControl.maxIssuedAtStringBytes else {
+                return nil
+            }
             return Int(string)
         }
         return nil
@@ -421,6 +503,8 @@ public struct LocalAppControlCommand: Codable, Equatable, Sendable {
 
 public enum LocalAppControlError: Error, Equatable, LocalizedError {
     case emptyControlToken
+    case runtimeFileTooLarge(String, byteCount: Int64, limit: Int64)
+    case invalidRuntimeFileEncoding(String)
     case keychainNeedsUserInteraction(OSStatus)
     case keychainReadFailed(OSStatus)
     case keychainWriteFailed(OSStatus)
@@ -429,6 +513,10 @@ public enum LocalAppControlError: Error, Equatable, LocalizedError {
         switch self {
         case .emptyControlToken:
             "Local app-control token is empty."
+        case .runtimeFileTooLarge(let name, let byteCount, let limit):
+            "Local app-control \(name) file is too large: \(byteCount) bytes exceeds the \(limit) byte limit."
+        case .invalidRuntimeFileEncoding(let name):
+            "Local app-control \(name) file is not valid UTF-8."
         case .keychainNeedsUserInteraction(let status):
             "Local app-control token needs Keychain user interaction (OSStatus \(status))."
         case .keychainReadFailed(let status):
