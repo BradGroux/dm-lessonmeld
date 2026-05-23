@@ -1,7 +1,7 @@
 import AVFoundation
 import CoreMedia
 import CoreVideo
-import DMLessonMeldCore
+@testable import DMLessonMeldCore
 import Foundation
 import ImageIO
 import Testing
@@ -611,6 +611,47 @@ struct RenderPlanTests {
         })
     }
 
+    @Test("Click sound writer handles longer timelines with bounded buffers")
+    func clickSoundWriterHandlesLongerTimelinesWithBoundedBuffers() async throws {
+        let soundURL = try AVFoundationRenderService().writeClickSoundTrack(
+            clicks: [
+                CursorClick(timestampSeconds: 0.2, position: NormalizedCapturePoint(x: 0.2, y: 0.2)),
+                CursorClick(timestampSeconds: 18.8, position: NormalizedCapturePoint(x: 0.8, y: 0.8), button: .right)
+            ],
+            settings: EditorClickEffectSettings(soundEnabled: true, soundVolume: 0.7),
+            durationSeconds: 20
+        )
+        defer { try? FileManager.default.removeItem(at: soundURL) }
+
+        let asset = AVURLAsset(url: soundURL)
+        let duration = try await asset.load(.duration)
+        let attributes = try FileManager.default.attributesOfItem(atPath: soundURL.path)
+        let byteCount = try #require(attributes[.size] as? Int64)
+
+        #expect(abs(duration.seconds - 20) < 0.25)
+        #expect(byteCount > 0)
+        #expect(RenderAudioBounds.clickAudioChunkFrames < AVAudioFrameCount(20 * RenderAudioBounds.clickSampleRate))
+    }
+
+    @Test("Background music loop policy caps tiny or excessive loops")
+    func backgroundMusicLoopPolicyCapsTinyOrExcessiveLoops() {
+        #expect(!RenderAudioBounds.shouldLoopBackgroundMusic(
+            sourceAvailableSeconds: RenderAudioBounds.minimumLoopableSourceDurationSeconds / 2,
+            desiredDurationSeconds: 60,
+            loopEnabled: true
+        ))
+        #expect(!RenderAudioBounds.shouldLoopBackgroundMusic(
+            sourceAvailableSeconds: 1,
+            desiredDurationSeconds: Double(RenderAudioBounds.maxBackgroundMusicLoopInsertions + 1),
+            loopEnabled: true
+        ))
+        #expect(RenderAudioBounds.shouldLoopBackgroundMusic(
+            sourceAvailableSeconds: 2,
+            desiredDurationSeconds: 6,
+            loopEnabled: true
+        ))
+    }
+
     @Test("Validation rejects mismatched destination extension and existing output")
     func validationRejectsBadDestination() throws {
         let temp = try TemporaryDirectory()
@@ -1039,6 +1080,66 @@ struct RenderPlanTests {
         #expect(byteCount > 0)
     }
 
+    @Test("Exports synthetic media with click sounds and tiny looped music")
+    func exportsSyntheticMediaWithClickSoundsAndTinyLoopedMusic() async throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let mediaURL = projectURL.appendingPathComponent("media", isDirectory: true)
+        let audioURL = projectURL.appendingPathComponent("audio/tiny.caf")
+        let cursorURL = projectURL.appendingPathComponent("cursor-metadata.json")
+        let outputURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+        try FileManager.default.createDirectory(at: mediaURL, withIntermediateDirectories: true)
+
+        try await SyntheticVideoWriter.write(
+            outputURL: mediaURL.appendingPathComponent("screen.mp4"),
+            size: CGSize(width: 160, height: 90),
+            color: (red: 28, green: 38, blue: 58)
+        )
+        try SyntheticAudioWriter.write(outputURL: audioURL, frameCount: 1)
+        try DMLessonJSON.encoder().encode(InteractionMetadataDocument(
+            captureSize: CGSize(width: 160, height: 90),
+            clicks: [
+                CursorClick(timestampSeconds: 0.15, position: NormalizedCapturePoint(x: 0.25, y: 0.25), button: .left, phase: .down),
+                CursorClick(timestampSeconds: 0.65, position: NormalizedCapturePoint(x: 0.7, y: 0.5), button: .right, phase: .down)
+            ]
+        )).write(to: cursorURL, options: [.atomic])
+        try EditorSettingsFile.save(
+            EditorSettings(
+                cursor: EditorCursorSettings(clickEffects: EditorClickEffectSettings(soundEnabled: true, soundVolume: 0.6)),
+                audio: EditorAudioSettings(
+                    backgroundMusic: EditorBackgroundMusicSettings(
+                        relativePath: "audio/tiny.caf",
+                        durationSeconds: 1,
+                        loop: true
+                    )
+                )
+            ),
+            toProject: projectURL
+        )
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Audio Bounds"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo, mimeType: "video/mp4"),
+                    cursorMetadata: ProjectFile(relativePath: "cursor-metadata.json", role: .cursorMetadata, mimeType: "application/json")
+                )
+            ),
+            to: projectURL
+        )
+
+        let renderedURL = try await AVFoundationRenderService().export(
+            projectURL: projectURL,
+            destinationURL: outputURL,
+            preset: RenderPreset(fileType: .mp4)
+        )
+
+        let asset = AVURLAsset(url: renderedURL)
+        let duration = try await asset.load(.duration)
+
+        #expect(renderedURL.pathExtension == "mp4")
+        #expect(duration.seconds > 0.5)
+    }
+
     @Test("Exports synthetic media with speed-region retiming")
     func exportsSyntheticMediaWithSpeedRegionRetiming() async throws {
         let temp = try TemporaryDirectory()
@@ -1263,6 +1364,39 @@ private enum SyntheticImageWriter {
         let destination = try #require(CGImageDestinationCreateWithURL(outputURL as CFURL, "public.png" as CFString, 1, nil))
         CGImageDestinationAddImage(destination, image, nil)
         #expect(CGImageDestinationFinalize(destination))
+    }
+}
+
+private enum SyntheticAudioWriter {
+    static func write(
+        outputURL: URL,
+        frameCount: AVAudioFrameCount,
+        sampleRate: Double = 44_100,
+        channelCount: AVAudioChannelCount = 1
+    ) throws {
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try FileManager.default.removeItem(at: outputURL)
+        }
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
+              let channels = buffer.floatChannelData else {
+            throw RenderExportError.unableToCreateCompositionTrack
+        }
+
+        buffer.frameLength = frameCount
+        for frame in 0..<Int(frameCount) {
+            let sample = Float(sin(2 * Double.pi * 220 * Double(frame) / sampleRate) * 0.12)
+            for channel in 0..<Int(channelCount) {
+                channels[channel][frame] = sample
+            }
+        }
+
+        let file = try AVAudioFile(forWriting: outputURL, settings: format.settings)
+        try file.write(from: buffer)
     }
 }
 

@@ -17,6 +17,45 @@ public protocol RenderService: Sendable {
     func export(plan: RenderPlan, progress: RenderProgressHandler?) async throws -> URL
 }
 
+enum RenderAudioBounds {
+    static let clickSampleRate = 44_100.0
+    static let clickToneDurationSeconds = 0.055
+    static let clickAudioChunkFrames: AVAudioFrameCount = 16_384
+    static let minimumLoopableSourceDurationSeconds = 0.25
+    static let maxBackgroundMusicLoopInsertions = 2_000
+
+    static func shouldLoopBackgroundMusic(
+        sourceAvailableSeconds: Double,
+        desiredDurationSeconds: Double,
+        loopEnabled: Bool
+    ) -> Bool {
+        guard loopEnabled,
+              sourceAvailableSeconds.isFinite,
+              desiredDurationSeconds.isFinite,
+              sourceAvailableSeconds >= minimumLoopableSourceDurationSeconds,
+              desiredDurationSeconds > sourceAvailableSeconds else {
+            return false
+        }
+        return estimatedBackgroundMusicLoopInsertions(
+            sourceAvailableSeconds: sourceAvailableSeconds,
+            desiredDurationSeconds: desiredDurationSeconds
+        ) <= maxBackgroundMusicLoopInsertions
+    }
+
+    static func estimatedBackgroundMusicLoopInsertions(
+        sourceAvailableSeconds: Double,
+        desiredDurationSeconds: Double
+    ) -> Int {
+        guard sourceAvailableSeconds.isFinite,
+              desiredDurationSeconds.isFinite,
+              sourceAvailableSeconds > 0,
+              desiredDurationSeconds > 0 else {
+            return 0
+        }
+        return Int(ceil(desiredDurationSeconds / sourceAvailableSeconds))
+    }
+}
+
 public final class AVFoundationRenderService: RenderService, @unchecked Sendable {
     public init() {}
 
@@ -451,42 +490,49 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         _ = try await insertAudioTracks(from: asset, role: .all, into: composition, duration: duration)
     }
 
-    private func writeClickSoundTrack(
+    func writeClickSoundTrack(
         clicks: [CursorClick],
         settings: EditorClickEffectSettings,
         durationSeconds: Double
     ) throws -> URL {
-        let sampleRate = 44_100.0
+        let sampleRate = RenderAudioBounds.clickSampleRate
         let channelCount: AVAudioChannelCount = 2
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount) else {
             throw RenderExportError.unableToCreateCompositionTrack
         }
 
-        let frameCount = AVAudioFrameCount(ceil(durationSeconds * sampleRate))
-        guard frameCount > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
+        let totalFrameCount = Int64(ceil(durationSeconds * sampleRate))
+        guard totalFrameCount > 0 else {
+            throw RenderExportError.unableToCreateCompositionTrack
+        }
+        let chunkFrameCapacity = min(
+            RenderAudioBounds.clickAudioChunkFrames,
+            AVAudioFrameCount(min(totalFrameCount, Int64(AVAudioFrameCount.max)))
+        )
+        guard chunkFrameCapacity > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrameCapacity),
               let channels = buffer.floatChannelData else {
             throw RenderExportError.unableToCreateCompositionTrack
         }
-        buffer.frameLength = frameCount
 
-        let maxFrame = Int(frameCount)
-        let volume = Float(settings.soundVolume)
-        for click in clicks {
-            let startFrame = max(0, Int(click.timestampSeconds * sampleRate))
-            let toneFrameCount = Int(0.055 * sampleRate)
-            let frequency = clickSoundFrequency(for: click.button)
-            for frameOffset in 0..<toneFrameCount where startFrame + frameOffset < maxFrame {
-                let t = Double(frameOffset) / sampleRate
-                let progress = Double(frameOffset) / Double(max(toneFrameCount, 1))
-                let envelope = Float(pow(max(0, 1 - progress), 2.2))
-                let sample = Float(sin(2 * Double.pi * frequency * t)) * volume * envelope * 0.28
-                for channel in 0..<Int(channelCount) {
-                    let next = channels[channel][startFrame + frameOffset] + sample
-                    channels[channel][startFrame + frameOffset] = min(1, max(-1, next))
-                }
-            }
+        struct ClickTone {
+            var startFrame: Int64
+            var endFrame: Int64
+            var frequency: Double
         }
+
+        let toneFrameCount = Int64(ceil(RenderAudioBounds.clickToneDurationSeconds * sampleRate))
+        let volume = Float(settings.soundVolume)
+        let tones = clicks.map { click in
+            let startFrame = max(0, Int64(click.timestampSeconds * sampleRate))
+            return ClickTone(
+                startFrame: startFrame,
+                endFrame: min(totalFrameCount, startFrame + toneFrameCount),
+                frequency: clickSoundFrequency(for: click.button)
+            )
+        }
+        .filter { $0.startFrame < totalFrameCount && $0.endFrame > $0.startFrame }
+        .sorted { $0.startFrame < $1.startFrame }
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("dm-lessonmeld-clicks-\(UUID().uuidString)")
@@ -494,7 +540,49 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         var fileSettings = format.settings
         fileSettings[AVLinearPCMIsNonInterleaved] = false
         let file = try AVAudioFile(forWriting: url, settings: fileSettings)
-        try file.write(from: buffer)
+
+        var firstRelevantToneIndex = 0
+        var chunkStartFrame: Int64 = 0
+        while chunkStartFrame < totalFrameCount {
+            let remainingFrames = totalFrameCount - chunkStartFrame
+            let chunkFrameCount = AVAudioFrameCount(min(Int64(chunkFrameCapacity), remainingFrames))
+            let chunkEndFrame = chunkStartFrame + Int64(chunkFrameCount)
+
+            for channel in 0..<Int(channelCount) {
+                memset(channels[channel], 0, Int(chunkFrameCount) * MemoryLayout<Float>.stride)
+            }
+            buffer.frameLength = chunkFrameCount
+
+            while firstRelevantToneIndex < tones.count,
+                  tones[firstRelevantToneIndex].endFrame <= chunkStartFrame {
+                firstRelevantToneIndex += 1
+            }
+
+            var toneIndex = firstRelevantToneIndex
+            while toneIndex < tones.count, tones[toneIndex].startFrame < chunkEndFrame {
+                let tone = tones[toneIndex]
+                let toneStartOffset = max(Int64(0), chunkStartFrame - tone.startFrame)
+                let toneEndOffset = min(toneFrameCount, chunkEndFrame - tone.startFrame)
+                if toneEndOffset > toneStartOffset {
+                    for toneFrameOffset in toneStartOffset..<toneEndOffset {
+                        let chunkFrameOffset = Int(tone.startFrame + toneFrameOffset - chunkStartFrame)
+                        let t = Double(toneFrameOffset) / sampleRate
+                        let progress = Double(toneFrameOffset) / Double(max(toneFrameCount, 1))
+                        let envelope = Float(pow(max(0, 1 - progress), 2.2))
+                        let sample = Float(sin(2 * Double.pi * tone.frequency * t)) * volume * envelope * 0.28
+                        for channel in 0..<Int(channelCount) {
+                            let next = channels[channel][chunkFrameOffset] + sample
+                            channels[channel][chunkFrameOffset] = min(1, max(-1, next))
+                        }
+                    }
+                }
+                toneIndex += 1
+            }
+
+            try file.write(from: buffer)
+            chunkStartFrame = chunkEndFrame
+        }
+
         return url
     }
 
@@ -553,13 +641,6 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let asset = AVURLAsset(url: musicURL)
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
         guard let audioTrack = audioTracks.first else { return [] }
-        guard let compositionTrack = composition.addMutableTrack(
-            withMediaType: .audio,
-            preferredTrackID: kCMPersistentTrackID_Invalid
-        ) else {
-            throw RenderExportError.unableToCreateCompositionTrack
-        }
-
         let sourceDuration = try await asset.load(.duration)
         let sourceDurationSeconds = max(0, sourceDuration.seconds.isFinite ? sourceDuration.seconds : 0)
         let renderDurationSeconds = max(0, duration.seconds.isFinite ? duration.seconds : 0)
@@ -568,16 +649,31 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             max(0, settings.durationSeconds ?? (renderDurationSeconds - startSeconds)),
             max(0, renderDurationSeconds - startSeconds)
         )
-        guard sourceDurationSeconds > 0, desiredDurationSeconds > 0 else {
-            return [InsertedAudioTrack(track: compositionTrack, role: .backgroundMusic)]
-        }
+        guard sourceDurationSeconds > 0, desiredDurationSeconds > 0 else { return [] }
 
         let sourceStartSeconds = min(settings.sourceStartSeconds, max(0, sourceDurationSeconds - 0.01))
+        let sourceAvailableSeconds = max(0, sourceDurationSeconds - sourceStartSeconds)
+        guard sourceAvailableSeconds > 0 else { return [] }
+        if settings.loop,
+           desiredDurationSeconds > sourceAvailableSeconds,
+           sourceAvailableSeconds < RenderAudioBounds.minimumLoopableSourceDurationSeconds {
+            return []
+        }
+        let shouldLoop = RenderAudioBounds.shouldLoopBackgroundMusic(
+            sourceAvailableSeconds: sourceAvailableSeconds,
+            desiredDurationSeconds: desiredDurationSeconds,
+            loopEnabled: settings.loop
+        )
+        guard let compositionTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw RenderExportError.unableToCreateCompositionTrack
+        }
         var outputCursorSeconds = startSeconds
         let outputEndSeconds = startSeconds + desiredDurationSeconds
 
         repeat {
-            let sourceAvailableSeconds = max(0, sourceDurationSeconds - sourceStartSeconds)
             let segmentDurationSeconds = min(outputEndSeconds - outputCursorSeconds, sourceAvailableSeconds)
             guard segmentDurationSeconds > 0 else { break }
 
@@ -590,7 +686,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 at: CMTime(seconds: outputCursorSeconds, preferredTimescale: 600)
             )
             outputCursorSeconds += segmentDurationSeconds
-        } while settings.loop && outputCursorSeconds < outputEndSeconds
+        } while shouldLoop && outputCursorSeconds < outputEndSeconds
 
         return [InsertedAudioTrack(track: compositionTrack, role: .backgroundMusic)]
     }
