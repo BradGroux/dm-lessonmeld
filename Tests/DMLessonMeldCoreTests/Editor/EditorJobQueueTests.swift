@@ -166,6 +166,33 @@ struct EditorJobQueueTests {
         #expect(loaded.map(\.id) == ["job-0", "job-1", "job-2"])
     }
 
+    @Test("Job history load caps manually expanded history")
+    func jobHistoryLoadCapsManuallyExpandedHistory() throws {
+        let temp = try TemporaryDirectory()
+        let records = (0..<(EditorJobHistoryFile.defaultRecordLimit + 5)).map { index in
+            EditorJobRecord(id: "job-\(index)", kind: .renderVideo)
+        }
+        try DMLessonJSON.encoder()
+            .encode(records)
+            .write(to: EditorJobHistoryFile.url(inProject: temp.url), options: [.atomic])
+
+        let loaded = try EditorJobHistoryFile.load(fromProject: temp.url)
+
+        #expect(loaded.count == EditorJobHistoryFile.defaultRecordLimit)
+        #expect(loaded.last?.id == "job-\(EditorJobHistoryFile.defaultRecordLimit - 1)")
+    }
+
+    @Test("Job history load rejects oversized sidecars")
+    func jobHistoryLoadRejectsOversizedSidecars() throws {
+        let temp = try TemporaryDirectory()
+        try Data(repeating: UInt8(ascii: "{"), count: RenderSidecarLimits.maxSidecarBytes + 1)
+            .write(to: EditorJobHistoryFile.url(inProject: temp.url), options: [.atomic])
+
+        #expect(throws: RenderSidecarLimitError.self) {
+            try EditorJobHistoryFile.load(fromProject: temp.url)
+        }
+    }
+
     @Test("Job history persistence redacts absolute paths")
     func jobHistoryPersistenceRedactsAbsolutePaths() throws {
         let temp = try TemporaryDirectory()

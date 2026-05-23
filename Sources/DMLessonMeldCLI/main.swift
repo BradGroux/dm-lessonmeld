@@ -1973,8 +1973,10 @@ struct DMLessonMeldCLI {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return AnnotationStore()
         }
-        let data = try Data(contentsOf: url)
-        return try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+        let data = try RenderSidecarLimits.data(contentsOf: url, displayPath: url.lastPathComponent)
+        let store = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+        try RenderSidecarLimits.checkAnnotationStore(store, displayPath: url.lastPathComponent)
+        return store
     }
 
     static func loadTranscript(from inputURL: URL) throws -> TranscriptDocument {
@@ -1988,12 +1990,19 @@ struct DMLessonMeldCLI {
             guard let file else {
                 throw CLIError.usage("Project has no JSON transcript or caption sidecar.")
             }
-            let data = try Data(contentsOf: ProjectBundle.projectLocalFileURL(for: file, in: inputURL))
-            return try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
+            let data = try RenderSidecarLimits.data(
+                contentsOf: ProjectBundle.projectLocalFileURL(for: file, in: inputURL),
+                displayPath: file.relativePath
+            )
+            let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
+            try RenderSidecarLimits.checkTranscript(transcript, displayPath: file.relativePath)
+            return transcript
         }
 
-        let transcriptData = try Data(contentsOf: inputURL)
-        return try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: transcriptData)
+        let transcriptData = try RenderSidecarLimits.data(contentsOf: inputURL, displayPath: inputURL.lastPathComponent)
+        let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: transcriptData)
+        try RenderSidecarLimits.checkTranscript(transcript, displayPath: inputURL.lastPathComponent)
+        return transcript
     }
 
     static func writeAnnotationStore(_ store: AnnotationStore, to url: URL) throws {

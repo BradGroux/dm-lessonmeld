@@ -277,8 +277,13 @@ public enum EditorJobHistoryFile {
 
     public static func load(fromProject projectURL: URL, fileManager: FileManager = .default) throws -> [EditorJobRecord] {
         guard exists(in: projectURL, fileManager: fileManager) else { return [] }
-        let data = try Data(contentsOf: url(inProject: projectURL))
-        return try DMLessonJSON.decoder().decode([EditorJobRecord].self, from: data)
+        let data = try RenderSidecarLimits.data(
+            contentsOf: url(inProject: projectURL),
+            displayPath: defaultFileName,
+            fileManager: fileManager
+        )
+        let records = try DMLessonJSON.decoder().decode([EditorJobRecord].self, from: data)
+        return Array(records.prefix(defaultRecordLimit))
     }
 
     public static func save(

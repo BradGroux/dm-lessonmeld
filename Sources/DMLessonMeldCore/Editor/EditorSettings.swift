@@ -43,7 +43,7 @@ public enum EditorSettingsFile {
     }
 
     public static func load(fromProject projectURL: URL) throws -> EditorSettings {
-        let data = try Data(contentsOf: url(in: projectURL))
+        let data = try RenderSidecarLimits.data(contentsOf: url(in: projectURL), displayPath: defaultFileName)
         return try DMLessonJSON.decoder().decode(EditorSettings.self, from: data)
     }
 

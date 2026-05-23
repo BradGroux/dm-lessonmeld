@@ -109,6 +109,17 @@ struct EditorSettingsTests {
         #expect(try EditorSettingsFile.load(fromProject: temp.url) == settings)
     }
 
+    @Test("Editor settings load rejects oversized sidecars")
+    func editorSettingsLoadRejectsOversizedSidecars() throws {
+        let temp = try TemporaryDirectory()
+        try Data(repeating: UInt8(ascii: "{"), count: RenderSidecarLimits.maxSidecarBytes + 1)
+            .write(to: EditorSettingsFile.url(in: temp.url), options: [.atomic])
+
+        #expect(throws: RenderSidecarLimitError.self) {
+            try EditorSettingsFile.load(fromProject: temp.url)
+        }
+    }
+
     @Test("Canvas geometry resolves aspect, padding, crop, and rounded corners")
     func resolvesCanvasGeometry() {
         let settings = EditorCanvasSettings(

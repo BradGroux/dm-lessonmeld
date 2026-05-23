@@ -50,6 +50,26 @@ struct QuickRecordingCompletionExporterTests {
         #expect(try String(contentsOf: outputDirectory.appendingPathComponent("transcript.md"), encoding: .utf8).contains("Welcome."))
         #expect(try String(contentsOf: outputDirectory.appendingPathComponent("captions.vtt"), encoding: .utf8).contains("WEBVTT"))
     }
+
+    @Test("Completion sidecar export rejects oversized transcripts")
+    func completionSidecarExportRejectsOversizedTranscripts() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        try Data(repeating: UInt8(ascii: "{"), count: RenderSidecarLimits.maxSidecarBytes + 1)
+            .write(to: projectURL.appendingPathComponent("transcript.json"), options: [.atomic])
+        let manifest = ProjectManifest(
+            metadata: LessonMetadata(lessonTitle: "Lesson"),
+            media: ProjectMedia(
+                transcripts: [ProjectFile(relativePath: "transcript.json", role: .transcript, mimeType: "application/json")]
+            )
+        )
+        try ProjectBundle.writeManifest(manifest, to: projectURL)
+
+        #expect(throws: RenderSidecarLimitError.self) {
+            try QuickRecordingCompletionExporter.exportCompletionCaptionSidecars(projectURL: projectURL)
+        }
+    }
 }
 
 @Suite("Quick recording completion service")

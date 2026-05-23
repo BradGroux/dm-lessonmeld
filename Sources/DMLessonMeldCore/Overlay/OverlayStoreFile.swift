@@ -17,8 +17,10 @@ public enum OverlayStoreFile {
     }
 
     public static func load(fromProject projectURL: URL) throws -> OverlayStore {
-        let data = try Data(contentsOf: url(inProject: projectURL))
-        return try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
+        let data = try RenderSidecarLimits.data(contentsOf: url(inProject: projectURL), displayPath: defaultFileName)
+        let store = try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
+        try RenderSidecarLimits.checkOverlayStore(store, displayPath: defaultFileName)
+        return store
     }
 
     public static func save(_ store: OverlayStore, toProject projectURL: URL) throws {

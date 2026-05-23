@@ -61,8 +61,12 @@ public enum QuickRecordingCompletionExporter {
         }
 
         let transcriptURL = try ProjectBundle.projectLocalFileURL(for: transcriptFile, in: projectURL)
-        let transcriptData = try Data(contentsOf: transcriptURL)
+        let transcriptData = try RenderSidecarLimits.data(
+            contentsOf: transcriptURL,
+            displayPath: transcriptFile.relativePath
+        )
         let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: transcriptData)
+        try RenderSidecarLimits.checkTranscript(transcript, displayPath: transcriptFile.relativePath)
         let outputDirectory = completionCaptionExportDirectory(for: projectURL)
         try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
