@@ -95,6 +95,7 @@ public enum RenderPlanValidator {
         if let overlaySource = plan.overlaySource {
             validateOverlays(overlaySource, projectURL: plan.projectURL, issues: &issues, fileManager: fileManager)
         }
+        validateMediaSources(plan.requiredMediaSources, projectURL: plan.projectURL, issues: &issues)
 
         if options.checkFileExistence {
             for source in plan.requiredMediaSources {
@@ -221,10 +222,7 @@ public enum RenderPlanValidator {
                 ))
             }
 
-            if region.focusRect.width <= 0 ||
-                region.focusRect.height <= 0 ||
-                region.focusRect.x + region.focusRect.width > 1 ||
-                region.focusRect.y + region.focusRect.height > 1 {
+            if !isNormalizedRectInsideFrame(region.focusRect) {
                 issues.append(RenderValidationIssue(
                     severity: .error,
                     message: "Zoom focus rect must have positive size and stay inside the normalized frame.",
@@ -591,10 +589,7 @@ public enum RenderPlanValidator {
                         path: "\(path).timeRange"
                     ))
                 }
-                if overlay.frame.width <= 0 ||
-                    overlay.frame.height <= 0 ||
-                    overlay.frame.x + overlay.frame.width > 1 ||
-                    overlay.frame.y + overlay.frame.height > 1 {
+                if !isNormalizedRectInsideFrame(overlay.frame) {
                     issues.append(RenderValidationIssue(
                         severity: .error,
                         message: "Overlay frame must have positive size and stay inside the normalized frame.",
@@ -653,6 +648,58 @@ public enum RenderPlanValidator {
                 path: source.relativePath
             ))
         }
+    }
+
+    private static func validateMediaSources(
+        _ sources: [RenderMediaSource],
+        projectURL: URL,
+        issues: inout [RenderValidationIssue]
+    ) {
+        for source in sources {
+            guard source.url.isFileURL else {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "\(source.role.rawValue) source must be a local file URL.",
+                    path: source.relativePath
+                ))
+                continue
+            }
+
+            do {
+                let expectedURL = try ProjectBundle.projectLocalFileURL(
+                    for: ProjectFile(relativePath: source.relativePath, role: .attachment),
+                    in: projectURL
+                )
+                let expectedPath = expectedURL.standardizedFileURL.resolvingSymlinksInPath().path
+                let sourcePath = source.url.standardizedFileURL.resolvingSymlinksInPath().path
+                if sourcePath != expectedPath {
+                    issues.append(RenderValidationIssue(
+                        severity: .error,
+                        message: "\(source.role.rawValue) source URL must match its project-local relative path.",
+                        path: source.relativePath
+                    ))
+                }
+            } catch {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: error.localizedDescription,
+                    path: source.relativePath
+                ))
+            }
+        }
+    }
+
+    private static func isNormalizedRectInsideFrame(_ rect: NormalizedEditRect) -> Bool {
+        rect.x.isFinite &&
+            rect.y.isFinite &&
+            rect.width.isFinite &&
+            rect.height.isFinite &&
+            rect.x >= 0 &&
+            rect.y >= 0 &&
+            rect.width > 0 &&
+            rect.height > 0 &&
+            rect.x + rect.width <= 1 &&
+            rect.y + rect.height <= 1
     }
 }
 

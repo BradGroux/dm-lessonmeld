@@ -152,11 +152,28 @@ public struct NormalizedEditRect: Codable, Equatable, Sendable {
     public var width: Double
     public var height: Double
 
+    private enum CodingKeys: String, CodingKey {
+        case x
+        case y
+        case width
+        case height
+    }
+
     public init(x: Double, y: Double, width: Double, height: Double) {
         self.x = Self.clamped(x)
         self.y = Self.clamped(y)
         self.width = Self.clamped(width)
         self.height = Self.clamped(height)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            x: try container.decodeIfPresent(Double.self, forKey: .x) ?? 0,
+            y: try container.decodeIfPresent(Double.self, forKey: .y) ?? 0,
+            width: try container.decodeIfPresent(Double.self, forKey: .width) ?? 0,
+            height: try container.decodeIfPresent(Double.self, forKey: .height) ?? 0
+        )
     }
 
     public static let center = NormalizedEditRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
@@ -170,7 +187,8 @@ public struct NormalizedEditRect: Codable, Equatable, Sendable {
     }
 
     private static func clamped(_ value: Double) -> Double {
-        min(1, max(0, value))
+        guard value.isFinite else { return 0 }
+        return min(1, max(0, value))
     }
 }
 

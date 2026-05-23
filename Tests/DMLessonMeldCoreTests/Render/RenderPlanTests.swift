@@ -354,6 +354,83 @@ struct RenderPlanTests {
         }
     }
 
+    @Test("Validation rejects direct render plan source URLs outside the project")
+    func validationRejectsDirectRenderPlanExternalURLs() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let externalURL = temp.url.appendingPathComponent("external.mp4")
+        try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("media"), withIntermediateDirectories: true)
+        try Data("project video".utf8).write(to: projectURL.appendingPathComponent("media/screen.mp4"))
+        try Data("external video".utf8).write(to: externalURL)
+
+        let plan = RenderPlan(
+            projectURL: projectURL,
+            destinationURL: temp.url.appendingPathComponent("lesson.mp4"),
+            screenVideo: RenderMediaSource(
+                role: .screenVideo,
+                relativePath: "media/screen.mp4",
+                url: externalURL,
+                mimeType: "video/mp4"
+            )
+        )
+
+        let issues = plan.validate(options: .export)
+
+        #expect(issues.contains {
+            $0.severity == .error &&
+                $0.path == "media/screen.mp4" &&
+                $0.message == "screenVideo source URL must match its project-local relative path."
+        })
+    }
+
+    @Test("Validation rejects negative normalized origins in direct render plans")
+    func validationRejectsNegativeNormalizedOrigins() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        var focusRect = NormalizedEditRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2)
+        focusRect.x = -0.1
+        let plan = try RenderPlan.make(
+            manifest: ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo)
+                )
+            ),
+            projectURL: projectURL,
+            destinationURL: temp.url.appendingPathComponent("lesson.mp4"),
+            editDecisionList: EditDecisionList(
+                id: "edits",
+                zoomRegions: [
+                    ZoomRegion(
+                        id: "bad-origin",
+                        range: EditTimeRange(startSeconds: 0, durationSeconds: 1),
+                        focusRect: focusRect,
+                        scale: 2
+                    )
+                ]
+            )
+        )
+
+        let issues = plan.validate()
+
+        #expect(issues.contains {
+            $0.severity == .error && $0.path == "zoomRegions[0].focusRect"
+        })
+    }
+
+    @Test("Decoded normalized edit rectangles are clamped")
+    func decodedNormalizedEditRectsAreClamped() throws {
+        let decoded = try DMLessonJSON.decoder().decode(
+            NormalizedEditRect.self,
+            from: Data(#"{"x":-0.5,"y":1.5,"width":2,"height":-1}"#.utf8)
+        )
+
+        #expect(decoded.x == 0)
+        #expect(decoded.y == 1)
+        #expect(decoded.width == 1)
+        #expect(decoded.height == 0)
+    }
+
     @Test("Validation checks annotation and overlay timing and normalized coordinates")
     func validationChecksAnnotationsAndOverlays() throws {
         let temp = try TemporaryDirectory()

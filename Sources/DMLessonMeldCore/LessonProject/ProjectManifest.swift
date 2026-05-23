@@ -216,6 +216,21 @@ public struct ProjectCaptureSettings: Codable, Equatable, Sendable {
     public var captureSystemAudio: Bool
     public var webcam: ProjectWebcamCaptureSettings
 
+    private enum CodingKeys: String, CodingKey {
+        case target
+        case displayID
+        case windowID
+        case region
+        case screenFPS
+        case includeCursor
+        case captureInteractionMetadata
+        case captureMicrophone
+        case microphoneDeviceID
+        case captureWebcam
+        case captureSystemAudio
+        case webcam
+    }
+
     public init(
         target: ProjectCaptureTarget = .screen,
         displayID: UInt32? = nil,
@@ -234,7 +249,7 @@ public struct ProjectCaptureSettings: Codable, Equatable, Sendable {
         self.displayID = displayID
         self.windowID = windowID
         self.region = region
-        self.screenFPS = screenFPS
+        self.screenFPS = [30, 60].contains(screenFPS) ? screenFPS : 60
         self.includeCursor = includeCursor
         self.captureInteractionMetadata = captureInteractionMetadata
         self.captureMicrophone = captureMicrophone
@@ -243,6 +258,24 @@ public struct ProjectCaptureSettings: Codable, Equatable, Sendable {
         self.captureWebcam = captureWebcam
         self.captureSystemAudio = captureSystemAudio
         self.webcam = webcam
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            target: try container.decodeIfPresent(ProjectCaptureTarget.self, forKey: .target) ?? .screen,
+            displayID: try container.decodeIfPresent(UInt32.self, forKey: .displayID),
+            windowID: try container.decodeIfPresent(UInt32.self, forKey: .windowID),
+            region: try container.decodeIfPresent(ProjectCaptureRegion.self, forKey: .region),
+            screenFPS: try container.decodeIfPresent(Int.self, forKey: .screenFPS) ?? 60,
+            includeCursor: try container.decodeIfPresent(Bool.self, forKey: .includeCursor) ?? true,
+            captureInteractionMetadata: try container.decodeIfPresent(Bool.self, forKey: .captureInteractionMetadata) ?? true,
+            captureMicrophone: try container.decodeIfPresent(Bool.self, forKey: .captureMicrophone) ?? true,
+            microphoneDeviceID: try container.decodeIfPresent(String.self, forKey: .microphoneDeviceID),
+            captureWebcam: try container.decodeIfPresent(Bool.self, forKey: .captureWebcam) ?? true,
+            captureSystemAudio: try container.decodeIfPresent(Bool.self, forKey: .captureSystemAudio) ?? false,
+            webcam: try container.decodeIfPresent(ProjectWebcamCaptureSettings.self, forKey: .webcam) ?? ProjectWebcamCaptureSettings()
+        )
     }
 
     public var pictureInPicturePlacement: PictureInPicturePlacement {
@@ -305,6 +338,19 @@ public struct ProjectWebcamCaptureSettings: Codable, Equatable, Sendable {
     public var borderEnabled: Bool
     public var shadowEnabled: Bool
 
+    private enum CodingKeys: String, CodingKey {
+        case cameraID
+        case resolution
+        case fps
+        case aspectRatio
+        case frameShape
+        case cornerRadius
+        case relativeSize
+        case isMirrored
+        case borderEnabled
+        case shadowEnabled
+    }
+
     public init(
         cameraID: String? = nil,
         resolution: CameraResolution = .p1080,
@@ -327,6 +373,22 @@ public struct ProjectWebcamCaptureSettings: Codable, Equatable, Sendable {
         self.isMirrored = isMirrored
         self.borderEnabled = borderEnabled
         self.shadowEnabled = shadowEnabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            cameraID: try container.decodeIfPresent(String.self, forKey: .cameraID),
+            resolution: try container.decodeIfPresent(CameraResolution.self, forKey: .resolution) ?? .p1080,
+            fps: try container.decodeIfPresent(Int.self, forKey: .fps) ?? 30,
+            aspectRatio: try container.decodeIfPresent(WebcamAspectRatio.self, forKey: .aspectRatio) ?? .widescreen16x9,
+            frameShape: try container.decodeIfPresent(WebcamFrameShape.self, forKey: .frameShape) ?? .roundedRectangle,
+            cornerRadius: try container.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? 18,
+            relativeSize: try container.decodeIfPresent(Double.self, forKey: .relativeSize) ?? 0.24,
+            isMirrored: try container.decodeIfPresent(Bool.self, forKey: .isMirrored) ?? false,
+            borderEnabled: try container.decodeIfPresent(Bool.self, forKey: .borderEnabled) ?? false,
+            shadowEnabled: try container.decodeIfPresent(Bool.self, forKey: .shadowEnabled) ?? true
+        )
     }
 
     public var pictureInPictureAspectRatio: PictureInPictureAspectRatio {
