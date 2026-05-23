@@ -131,6 +131,45 @@ public struct LessonMeldPreferences: Codable, Equatable, Sendable {
     }
 }
 
+public enum LessonMeldPreferencesFileError: Error, Equatable, LocalizedError {
+    case oversizedPreferences(URL, byteCount: Int64, limit: Int64)
+    case unreadablePreferences(URL, String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .oversizedPreferences(let url, let byteCount, let limit):
+            "LessonMeld preferences file is too large: \(url.path) is \(byteCount) bytes, limit is \(limit) bytes."
+        case .unreadablePreferences(let url, let reason):
+            "LessonMeld preferences file could not be decoded at \(url.path): \(reason)"
+        }
+    }
+}
+
+public enum LessonMeldPreferencesFile {
+    public static let maxPreferencesBytes: Int64 = 1 * 1024 * 1024
+
+    public static func load(from url: URL) throws -> LessonMeldPreferences {
+        let data = try boundedPreferencesData(from: url)
+        do {
+            return try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data)
+        } catch {
+            throw LessonMeldPreferencesFileError.unreadablePreferences(url, error.localizedDescription)
+        }
+    }
+
+    private static func boundedPreferencesData(from url: URL) throws -> Data {
+        if let byteCount = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init),
+           byteCount > maxPreferencesBytes {
+            throw LessonMeldPreferencesFileError.oversizedPreferences(url, byteCount: byteCount, limit: maxPreferencesBytes)
+        }
+        let data = try Data(contentsOf: url)
+        if Int64(data.count) > maxPreferencesBytes {
+            throw LessonMeldPreferencesFileError.oversizedPreferences(url, byteCount: Int64(data.count), limit: maxPreferencesBytes)
+        }
+        return data
+    }
+}
+
 public struct GeneralPreferences: Codable, Equatable, Sendable {
     public var appearance: AppAppearance
     public var defaultProjectDirectory: String
