@@ -147,7 +147,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let screenAsset = AVURLAsset(url: plan.screenVideo.url)
         let screenDuration = try await screenAsset.load(.duration)
         let screenVideoTracks = try await screenAsset.loadTracks(withMediaType: .video)
-        let interactionMetadata = try plan.cursorSource.map { try loadInteractionMetadata(from: $0.url) }
+        try Task.checkCancellation()
+        let interactionMetadata = try plan.cursorSource.map { try loadInteractionMetadata(from: $0) }
         var temporaryRenderFiles: [URL] = []
         defer {
             for url in temporaryRenderFiles {
@@ -252,6 +253,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             )
         }
         if let interactionMetadata {
+            try Task.checkCancellation()
             try await insertClickSoundTrack(
                 for: interactionMetadata.clicks,
                 settings: plan.cursor.clickEffects,
@@ -268,6 +270,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         videoComposition.renderSize = renderSize
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
         videoComposition.instructions = [instruction]
+        try Task.checkCancellation()
         try applyOverlayLayersIfNeeded(
             plan: plan,
             videoComposition: videoComposition,

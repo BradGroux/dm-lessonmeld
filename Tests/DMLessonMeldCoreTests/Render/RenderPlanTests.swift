@@ -503,6 +503,114 @@ struct RenderPlanTests {
         })
     }
 
+    @Test("Validation rejects oversized render sidecars")
+    func validationRejectsOversizedRenderSidecars() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let annotationsURL = projectURL.appendingPathComponent("annotations.json")
+        try Data(repeating: UInt8(ascii: "{"), count: RenderSidecarLimits.maxSidecarBytes + 1)
+            .write(to: annotationsURL, options: [.atomic])
+
+        let plan = try RenderPlan.make(
+            manifest: ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo),
+                    annotations: ProjectFile(relativePath: "annotations.json", role: .annotations, mimeType: "application/json")
+                )
+            ),
+            projectURL: projectURL,
+            destinationURL: temp.url.appendingPathComponent("lesson.mp4")
+        )
+
+        let issues = plan.validate()
+
+        #expect(issues.contains {
+            $0.severity == .error &&
+                $0.path == "annotations.json" &&
+                $0.message.contains("too large to render safely")
+        })
+    }
+
+    @Test("Validation rejects render sidecars above item limits")
+    func validationRejectsRenderSidecarsAboveItemLimits() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let overlaysURL = projectURL.appendingPathComponent("overlays.json")
+        let overlays = (0...RenderSidecarLimits.maxOverlays).map {
+            OverlayItem(
+                id: "overlay-\($0)",
+                kind: .text,
+                timeRange: EditTimeRange(startSeconds: 0, durationSeconds: 1),
+                frame: NormalizedEditRect(x: 0.2, y: 0.2, width: 0.4, height: 0.2)
+            )
+        }
+        try DMLessonJSON.encoder().encode(OverlayStore(overlays: overlays))
+            .write(to: overlaysURL, options: [.atomic])
+
+        let plan = try RenderPlan.make(
+            manifest: ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo),
+                    overlays: ProjectFile(relativePath: "overlays.json", role: .overlays, mimeType: "application/json")
+                )
+            ),
+            projectURL: projectURL,
+            destinationURL: temp.url.appendingPathComponent("lesson.mp4")
+        )
+
+        let issues = plan.validate()
+
+        #expect(issues.contains {
+            $0.severity == .error &&
+                $0.path == "overlays.json" &&
+                $0.message.contains("contains too many overlays")
+        })
+    }
+
+    @Test("Validation rejects cursor metadata above item limits")
+    func validationRejectsCursorMetadataAboveItemLimits() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let cursorURL = projectURL.appendingPathComponent("cursor-metadata.json")
+        let clicks = (0...RenderSidecarLimits.maxCursorClicks).map { index in
+            CursorClick(
+                timestampSeconds: Double(index) / 60,
+                position: NormalizedCapturePoint(x: 0.5, y: 0.5),
+                button: .left,
+                phase: .down
+            )
+        }
+        try DMLessonJSON.encoder().encode(InteractionMetadataDocument(
+            captureSize: CGSize(width: 1280, height: 720),
+            clicks: clicks
+        )).write(to: cursorURL, options: [.atomic])
+
+        let plan = try RenderPlan.make(
+            manifest: ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo),
+                    cursorMetadata: ProjectFile(relativePath: "cursor-metadata.json", role: .cursorMetadata, mimeType: "application/json")
+                )
+            ),
+            projectURL: projectURL,
+            destinationURL: temp.url.appendingPathComponent("lesson.mp4")
+        )
+
+        let issues = plan.validate()
+
+        #expect(issues.contains {
+            $0.severity == .error &&
+                $0.path == "cursor-metadata.json.clicks" &&
+                $0.message.contains("contains too many clicks")
+        })
+    }
+
     @Test("Validation rejects mismatched destination extension and existing output")
     func validationRejectsBadDestination() throws {
         let temp = try TemporaryDirectory()
