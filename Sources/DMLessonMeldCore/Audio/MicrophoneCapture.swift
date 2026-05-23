@@ -64,6 +64,8 @@ private extension MicrophoneCaptureDevices {
 }
 
 public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
+    static let finishWritingTimeoutSeconds: TimeInterval = 15
+
     private let queue = DispatchQueue(label: "io.digitalmeld.dm-lessonmeld.microphone-recorder", qos: .userInitiated)
     private let lock = NSLock()
     private var session: AVCaptureSession?
@@ -185,6 +187,47 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
     }
 
     public func stopRecording() throws -> AudioRecordingResult {
+        let state = try takeActiveRecordingState()
+        state.session.stopRunning()
+
+        if let writerError = state.writerError {
+            state.writer.cancelWriting()
+            state.outputFile?.discard()
+            throw AudioCaptureError.recordingFailed(writerError.localizedDescription)
+        }
+        guard state.writtenSamples > 0 else {
+            state.writer.cancelWriting()
+            state.outputFile?.discard()
+            throw AudioCaptureError.inputUnavailable
+        }
+
+        state.audioInput.markAsFinished()
+        do {
+            try Self.finishWriting(state.writer)
+        } catch {
+            state.outputFile?.discard()
+            throw error
+        }
+        let outputURL: URL
+        do {
+            outputURL = try state.outputFile?.commit() ?? state.request.outputURL
+        } catch {
+            state.outputFile?.discard()
+            throw AudioCaptureError.recordingFailed(error.localizedDescription)
+        }
+
+        let endedAt = Date()
+        return AudioRecordingResult(
+            source: state.request.source,
+            outputURL: outputURL,
+            options: state.request.options,
+            durationSeconds: max(0, endedAt.timeIntervalSince(state.startedAt) - state.pausedDuration),
+            startedAt: state.startedAt,
+            endedAt: endedAt
+        )
+    }
+
+    private func takeActiveRecordingState() throws -> MicrophoneRecordingState {
         lock.lock()
         guard let session, let writer, let audioInput, let request = activeRequest, let startedAt else {
             lock.unlock()
@@ -210,40 +253,16 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
         self.outputFile = nil
         lock.unlock()
 
-        if let writerError {
-            writer.cancelWriting()
-            outputFile?.discard()
-            throw AudioCaptureError.recordingFailed(writerError.localizedDescription)
-        }
-        guard writtenSamples > 0 else {
-            writer.cancelWriting()
-            outputFile?.discard()
-            throw AudioCaptureError.inputUnavailable
-        }
-
-        audioInput.markAsFinished()
-        do {
-            try Self.finishWriting(writer)
-        } catch {
-            outputFile?.discard()
-            throw error
-        }
-        let outputURL: URL
-        do {
-            outputURL = try outputFile?.commit() ?? request.outputURL
-        } catch {
-            outputFile?.discard()
-            throw AudioCaptureError.recordingFailed(error.localizedDescription)
-        }
-
-        let endedAt = Date()
-        return AudioRecordingResult(
-            source: request.source,
-            outputURL: outputURL,
-            options: request.options,
-            durationSeconds: max(0, endedAt.timeIntervalSince(startedAt) - pausedDuration),
+        return MicrophoneRecordingState(
+            session: session,
+            writer: writer,
+            audioInput: audioInput,
+            request: request,
             startedAt: startedAt,
-            endedAt: endedAt
+            pausedDuration: pausedDuration,
+            writerError: writerError,
+            writtenSamples: writtenSamples,
+            outputFile: outputFile
         )
     }
 
@@ -256,12 +275,14 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
 
         lock.lock()
         let isPaused = self.isPaused
+        let pauseOffset = totalPausedDuration
         let writer = self.writer
         let audioInput = self.audioInput
         lock.unlock()
 
         guard !isPaused, let writer, let audioInput else { return }
 
+        let sampleBuffer = SampleBufferTiming.adjusted(sampleBuffer, offsetSeconds: pauseOffset)
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         lock.lock()
         if firstPresentationTime == nil {
@@ -377,7 +398,7 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
         }
     }
 
-    private static func finishWriting(_ writer: AVAssetWriter) throws {
+    static func finishWriting(_ writer: AVAssetWriter, timeoutSeconds: TimeInterval = finishWritingTimeoutSeconds) throws {
         let semaphore = DispatchSemaphore(value: 0)
         final class FinishBox: @unchecked Sendable {
             let writer: AVAssetWriter
@@ -392,9 +413,26 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
             box.error = box.writer.error
             semaphore.signal()
         }
-        semaphore.wait()
+        let timeoutNanoseconds = Int(max(0.001, timeoutSeconds) * 1_000_000_000)
+        let waitResult = semaphore.wait(timeout: .now() + .nanoseconds(timeoutNanoseconds))
+        guard waitResult == .success else {
+            writer.cancelWriting()
+            throw AudioCaptureError.recordingFailed("Timed out finishing audio writer.")
+        }
         if let error = box.error {
             throw AudioCaptureError.recordingFailed(error.localizedDescription)
         }
     }
+}
+
+private struct MicrophoneRecordingState {
+    var session: AVCaptureSession
+    var writer: AVAssetWriter
+    var audioInput: AVAssetWriterInput
+    var request: AudioRecordingRequest
+    var startedAt: Date
+    var pausedDuration: TimeInterval
+    var writerError: Error?
+    var writtenSamples: Int
+    var outputFile: RecordingOutputFile?
 }

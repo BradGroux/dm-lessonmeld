@@ -1,4 +1,5 @@
 @testable import DMLessonMeldCore
+import AVFoundation
 import Foundation
 import Testing
 
@@ -142,6 +143,19 @@ struct RecordingOptionsTests {
         }
     }
 
+    @Test("Sample buffer timing subtracts pause offsets")
+    func sampleBufferTimingSubtractsPauseOffsets() throws {
+        let sampleBuffer = try makeTimedSampleBuffer(presentationSeconds: 5, decodeSeconds: 4.5)
+        let adjusted = SampleBufferTiming.adjusted(sampleBuffer, offsetSeconds: 1.25)
+
+        var timing = CMSampleTimingInfo()
+        let status = CMSampleBufferGetSampleTimingInfo(adjusted, at: 0, timingInfoOut: &timing)
+
+        #expect(status == noErr)
+        #expect(abs(CMTimeGetSeconds(timing.presentationTimeStamp) - 3.75) < 0.001)
+        #expect(abs(CMTimeGetSeconds(timing.decodeTimeStamp) - 3.25) < 0.001)
+    }
+
     @Test("Window capture source keeps stable JSON fields")
     func windowCaptureSourceJSONFields() throws {
         let source = WindowCaptureSource(
@@ -208,4 +222,40 @@ private final class TemporaryDirectory {
     deinit {
         try? FileManager.default.removeItem(at: url)
     }
+}
+
+private func makeTimedSampleBuffer(presentationSeconds: Double, decodeSeconds: Double) throws -> CMSampleBuffer {
+    var formatDescription: CMVideoFormatDescription?
+    let formatStatus = CMVideoFormatDescriptionCreate(
+        allocator: kCFAllocatorDefault,
+        codecType: kCMVideoCodecType_H264,
+        width: 2,
+        height: 2,
+        extensions: nil,
+        formatDescriptionOut: &formatDescription
+    )
+    try #require(formatStatus == noErr)
+
+    var timing = CMSampleTimingInfo(
+        duration: CMTime(value: 1, timescale: 30),
+        presentationTimeStamp: CMTime(seconds: presentationSeconds, preferredTimescale: 600),
+        decodeTimeStamp: CMTime(seconds: decodeSeconds, preferredTimescale: 600)
+    )
+    var sampleBuffer: CMSampleBuffer?
+    let bufferStatus = CMSampleBufferCreate(
+        allocator: kCFAllocatorDefault,
+        dataBuffer: nil,
+        dataReady: true,
+        makeDataReadyCallback: nil,
+        refcon: nil,
+        formatDescription: formatDescription,
+        sampleCount: 1,
+        sampleTimingEntryCount: 1,
+        sampleTimingArray: &timing,
+        sampleSizeEntryCount: 0,
+        sampleSizeArray: nil,
+        sampleBufferOut: &sampleBuffer
+    )
+    try #require(bufferStatus == noErr)
+    return try #require(sampleBuffer)
 }

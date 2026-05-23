@@ -205,7 +205,15 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
     public func stopRecording(fps: Int, captureQuality: CaptureQuality, isHDR: Bool) async throws -> RecordingResult {
         let stream = try activeStream()
 
-        try await stream.stopCapture()
+        do {
+            try await stream.stopCapture()
+        } catch {
+            clearStreamState()
+            let writerState = takeWriterState()
+            writerState.writer?.cancelWriting()
+            writerState.outputFile?.discard()
+            throw error
+        }
         clearStreamState()
 
         let writerState = takeWriterState()
@@ -240,7 +248,7 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             return
         }
 
-        let sampleBuffer = adjustedSampleBuffer(sampleBuffer, offsetSeconds: totalPausedDuration)
+        let sampleBuffer = SampleBufferTiming.adjusted(sampleBuffer, offsetSeconds: totalPausedDuration)
 
         switch type {
         case .screen:
@@ -282,61 +290,6 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             writer.startSession(atSourceTime: pts)
             firstFrameHandler?()
         }
-    }
-
-    private func adjustedSampleBuffer(_ sampleBuffer: CMSampleBuffer, offsetSeconds: TimeInterval) -> CMSampleBuffer {
-        guard offsetSeconds > 0 else {
-            return sampleBuffer
-        }
-
-        var timingCount = 0
-        var status = CMSampleBufferGetSampleTimingInfoArray(
-            sampleBuffer,
-            entryCount: 0,
-            arrayToFill: nil,
-            entriesNeededOut: &timingCount
-        )
-        guard status == noErr, timingCount > 0 else {
-            return sampleBuffer
-        }
-
-        var timing = Array(
-            repeating: CMSampleTimingInfo(
-                duration: .invalid,
-                presentationTimeStamp: .invalid,
-                decodeTimeStamp: .invalid
-            ),
-            count: timingCount
-        )
-        status = CMSampleBufferGetSampleTimingInfoArray(
-            sampleBuffer,
-            entryCount: timingCount,
-            arrayToFill: &timing,
-            entriesNeededOut: &timingCount
-        )
-        guard status == noErr else {
-            return sampleBuffer
-        }
-
-        let offset = CMTime(seconds: offsetSeconds, preferredTimescale: 600)
-        for index in timing.indices {
-            if timing[index].presentationTimeStamp.isValid {
-                timing[index].presentationTimeStamp = CMTimeSubtract(timing[index].presentationTimeStamp, offset)
-            }
-            if timing[index].decodeTimeStamp.isValid {
-                timing[index].decodeTimeStamp = CMTimeSubtract(timing[index].decodeTimeStamp, offset)
-            }
-        }
-
-        var adjustedBuffer: CMSampleBuffer?
-        status = CMSampleBufferCreateCopyWithNewTiming(
-            allocator: kCFAllocatorDefault,
-            sampleBuffer: sampleBuffer,
-            sampleTimingEntryCount: timingCount,
-            sampleTimingArray: &timing,
-            sampleBufferOut: &adjustedBuffer
-        )
-        return status == noErr ? adjustedBuffer ?? sampleBuffer : sampleBuffer
     }
 
     public func stream(_ stream: SCStream, didStopWithError error: any Error) {
