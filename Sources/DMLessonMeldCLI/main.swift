@@ -4,6 +4,51 @@ import Foundation
 
 @main
 struct DMLessonMeldCLI {
+    static let valueOptions: Set<String> = [
+        "-m",
+        "--camera-fps",
+        "--camera-id",
+        "--camera-resolution",
+        "--codec",
+        "--concurrency",
+        "--course-title",
+        "--display-id",
+        "--duration",
+        "--end",
+        "--final-video",
+        "--format",
+        "--fps",
+        "--height",
+        "--lesson-title",
+        "--message",
+        "--microphone-device-id",
+        "--name",
+        "--normalized-x",
+        "--normalized-y",
+        "--output",
+        "--preset",
+        "--quality",
+        "--reason",
+        "--region",
+        "--resolution",
+        "--scale",
+        "--settings",
+        "--size",
+        "--start",
+        "--summary",
+        "--target",
+        "--template",
+        "--text",
+        "--webcam-corner-radius",
+        "--webcam-format",
+        "--webcam-frame",
+        "--webcam-size",
+        "--width",
+        "--window-id",
+        "--x",
+        "--y"
+    ]
+
     static func main() {
         do {
             try run(Array(CommandLine.arguments.dropFirst()))
@@ -18,6 +63,7 @@ struct DMLessonMeldCLI {
             printHelp()
             return
         }
+        try validateOptionSyntax(arguments)
 
         switch command {
         case "--help", "-h", "help":
@@ -78,7 +124,7 @@ struct DMLessonMeldCLI {
             guard let template = LessonTemplateLibrary.template(id: templateID) else {
                 throw CLIError.usage("Unknown template: \(templateID)")
             }
-            let outputURL = URL(fileURLWithPath: output)
+            let outputURL = pathURL(output)
             let manifest = template.seedManifest(
                 lessonTitle: lessonTitle,
                 courseTitle: optionValue("--course-title", in: arguments)
@@ -93,7 +139,7 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2 else {
                 throw CLIError.usage("Usage: dmlesson project inspect <project> [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let summary = try ProjectBundle.inspect(at: projectURL)
             if arguments.contains("--json") {
                 try printJSON(summary)
@@ -109,7 +155,7 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2 else {
                 throw CLIError.usage("Usage: dmlesson project repair <project> [--lesson-title <title>] [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let result = try ProjectBundle.repair(
                 at: projectURL,
                 lessonTitle: optionValue("--lesson-title", in: arguments)
@@ -125,7 +171,7 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2 else {
                 throw CLIError.usage("Usage: dmlesson project attach <project> [sidecar options] [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let updated = try ProjectBundle.updateManifest(at: projectURL) { manifest in
                 try attachSidecars(from: arguments, projectURL: projectURL, manifest: &manifest)
             }
@@ -138,10 +184,10 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2, let output = optionValue("--output", in: arguments) else {
                 throw CLIError.usage("Usage: dmlesson project extract-assets <project> --output <directory> [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let result = try RawAssetExtractor().extract(
                 projectURL: projectURL,
-                outputDirectory: URL(fileURLWithPath: output, isDirectory: true)
+                outputDirectory: pathURL(output, isDirectory: true)
             )
             if arguments.contains("--json") {
                 try printJSON(result)
@@ -292,7 +338,7 @@ struct DMLessonMeldCLI {
         let result = try await DisplayScreenRecorder().record(
             DisplayRecordingRequest(
                 displayID: displayID,
-                outputURL: URL(fileURLWithPath: output),
+                outputURL: pathURL(output),
                 durationSeconds: duration,
                 options: RecordingOptions(captureSystemAudio: arguments.contains("--system-audio")),
                 sourceRect: sourceRect,
@@ -333,7 +379,7 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Usage: dmlesson record microphone --duration <seconds> --output <audio.caf|audio.m4a|audio.wav> [--format caf|m4a|wav] [--microphone-device-id <id>] [--json]")
         }
 
-        let outputURL = URL(fileURLWithPath: output)
+        let outputURL = pathURL(output)
         let format = try audioFormat(explicit: optionValue("--format", in: arguments), outputURL: outputURL)
         let result = try await recordMicrophoneFile(
             outputURL: outputURL,
@@ -358,7 +404,7 @@ struct DMLessonMeldCLI {
 
         let result = try await CameraRecorder().record(
             CameraRecordingRequest(
-                outputURL: URL(fileURLWithPath: output),
+                outputURL: pathURL(output),
                 durationSeconds: duration,
                 deviceID: optionValue("--camera-id", in: arguments),
                 resolution: optionValue("--resolution", in: arguments) ?? "1080p",
@@ -381,7 +427,7 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Usage: dmlesson record project --duration <seconds> --output <project.dmlm> --lesson-title <title> [--course-title <title>] [--region x,y,w,h] [--window-id <id>] [--microphone] [--microphone-device-id <id>] [--webcam] [--camera-fps 24|30|40|50|60] [--webcam-format original|1:1|2:3|3:2|16:9] [--webcam-frame rounded|square|circle] [--mirror-webcam] [--webcam-border] [--system-audio] [--json]")
         }
 
-        let projectURL = URL(fileURLWithPath: output)
+        let projectURL = pathURL(output)
         try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
         let screenURL = projectURL.appendingPathComponent("screen.mp4")
         let microphoneURL = projectURL.appendingPathComponent("microphone.m4a")
@@ -551,7 +597,7 @@ struct DMLessonMeldCLI {
             guard let output = optionValue("--output", in: arguments) else {
                 throw CLIError.usage("Usage: dmlesson settings write-defaults --output <settings.json>")
             }
-            let outputURL = URL(fileURLWithPath: output)
+            let outputURL = pathURL(output)
             try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try DMLessonJSON.encoder().encode(LessonMeldPreferences())
             try data.write(to: outputURL, options: [.atomic])
@@ -564,7 +610,7 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2 else {
                 throw CLIError.usage("Usage: dmlesson settings validate <settings.json> [--json]")
             }
-            let inputURL = URL(fileURLWithPath: arguments[1])
+            let inputURL = pathURL(arguments[1])
             let data = try Data(contentsOf: inputURL)
             let decoded = try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data)
             let normalized = decoded.normalized()
@@ -591,7 +637,7 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2 else {
                 throw CLIError.usage("Usage: dmlesson edit decisions <project.dmlm> [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let manifest = try ProjectBundle.loadManifest(at: projectURL)
             let editDecisionList = try loadOrCreateEditDecisionList(projectURL: projectURL, manifest: manifest)
             if arguments.contains("--json") {
@@ -609,7 +655,7 @@ struct DMLessonMeldCLI {
                   end > start else {
                 throw CLIError.usage("Usage: dmlesson edit add-cut <project.dmlm> --start <seconds> --end <seconds> [--reason <text>] [--disabled] [--duration <seconds>] [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let manifest = try ProjectBundle.loadManifest(at: projectURL)
             var editDecisionList = try loadOrCreateEditDecisionList(projectURL: projectURL, manifest: manifest)
             if let durationValue = optionValue("--duration", in: arguments), let duration = TimeInterval(durationValue) {
@@ -645,7 +691,7 @@ struct DMLessonMeldCLI {
                   end > start else {
                 throw CLIError.usage("Usage: dmlesson edit add-zoom <project.dmlm> --start <seconds> --end <seconds> --scale <factor> [--x 0...1] [--y 0...1] [--size 0...1] [--disabled] [--duration <seconds>] [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let manifest = try ProjectBundle.loadManifest(at: projectURL)
             var editDecisionList = try loadOrCreateEditDecisionList(projectURL: projectURL, manifest: manifest)
             if let durationValue = optionValue("--duration", in: arguments), let duration = TimeInterval(durationValue) {
@@ -687,7 +733,7 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2 else {
                 throw CLIError.usage("Usage: dmlesson edit validate <project.dmlm> [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let manifest = try ProjectBundle.loadManifest(at: projectURL)
             let editDecisionList = try loadOrCreateEditDecisionList(projectURL: projectURL, manifest: manifest)
             let issues = editDecisionList.validate()
@@ -704,13 +750,13 @@ struct DMLessonMeldCLI {
                   let output = optionValue("--output", in: arguments) else {
                 throw CLIError.usage("Usage: dmlesson edit export-decisions <project.dmlm> --output <video.mp4|video.mov> [--duration <seconds>] [--quality passthrough|medium|highest] [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let manifest = try ProjectBundle.loadManifest(at: projectURL)
             var editDecisionList = try loadOrCreateEditDecisionList(projectURL: projectURL, manifest: manifest)
             if let durationValue = optionValue("--duration", in: arguments), let duration = TimeInterval(durationValue) {
                 editDecisionList.sourceDurationSeconds = duration
             }
-            let destinationURL = URL(fileURLWithPath: output)
+            let destinationURL = pathURL(output)
             let plan = try ExportJob(
                 id: "edit-decisions-\(UUID().uuidString)",
                 editDecisionList: editDecisionList,
@@ -731,10 +777,10 @@ struct DMLessonMeldCLI {
                   let duration = TimeInterval(durationValue) else {
                 throw CLIError.usage("Usage: dmlesson edit plan <project.dmlm> --duration <seconds> [--output <video.mp4>] [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let manifest = try ProjectBundle.loadManifest(at: projectURL)
             let sourceURL = try screenMediaURL(projectURL: projectURL, manifest: manifest)
-            let destinationURL = URL(fileURLWithPath: optionValue("--output", in: arguments) ?? projectURL.appendingPathComponent("Exports/\(slug(manifest.metadata.lessonTitle)).mp4").path)
+            let destinationURL = pathURL(optionValue("--output", in: arguments) ?? projectURL.appendingPathComponent("Exports/\(slug(manifest.metadata.lessonTitle)).mp4").path)
             let plan = try ExportJob(
                 id: "edit-\(UUID().uuidString)",
                 editDecisionList: EditDecisionList(
@@ -761,10 +807,10 @@ struct DMLessonMeldCLI {
                   let output = optionValue("--output", in: arguments) else {
                 throw CLIError.usage("Usage: dmlesson edit export-trim <project.dmlm> --start <seconds> --end <seconds> --output <video.mp4|video.mov> [--quality passthrough|medium|highest] [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let manifest = try ProjectBundle.loadManifest(at: projectURL)
             let sourceURL = try screenMediaURL(projectURL: projectURL, manifest: manifest)
-            let destinationURL = URL(fileURLWithPath: output)
+            let destinationURL = pathURL(output)
             let plan = try ExportJob(
                 id: "trim-\(UUID().uuidString)",
                 editDecisionList: EditDecisionList(
@@ -796,7 +842,7 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2 else {
                 throw CLIError.usage("Usage: dmlesson annotations init <project.dmlm> [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let storeURL = projectURL.appendingPathComponent("annotations.json")
             try writeAnnotationStore(AnnotationStore(), to: storeURL)
             let manifest = try attachAnnotationStore(projectURL: projectURL, storeURL: storeURL)
@@ -809,7 +855,7 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2 else {
                 throw CLIError.usage("Usage: dmlesson annotations list <project.dmlm> [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let store = try loadAnnotationStore(projectURL: projectURL)
             if arguments.contains("--json") {
                 try printJSON(store)
@@ -821,7 +867,7 @@ struct DMLessonMeldCLI {
                   let text = optionValue("--text", in: arguments) else {
                 throw CLIError.usage("Usage: dmlesson annotations add-text <project.dmlm> --text <text> (--x <points> --y <points> | --normalized-x 0...1 --normalized-y 0...1) [--start <seconds>] [--end <seconds>] [--display-id <id>] [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let storeURL = try annotationStoreURL(projectURL: projectURL, createIfMissing: true)
             var store = try loadAnnotationStore(at: storeURL)
             let displayID = optionValue("--display-id", in: arguments).flatMap(UInt32.init) ?? 0
@@ -863,7 +909,7 @@ struct DMLessonMeldCLI {
                 throw CLIError.usage("Usage: dmlesson transcript export <project.dmlm|transcript.json> --format vtt|srt|md|txt --output <path>")
             }
 
-            let transcript = try loadTranscript(from: URL(fileURLWithPath: arguments[1]))
+            let transcript = try loadTranscript(from: pathURL(arguments[1]))
             let rendered: String
             switch format {
             case "vtt":
@@ -877,7 +923,7 @@ struct DMLessonMeldCLI {
             default:
                 throw CLIError.usage("Unsupported transcript format: \(format)")
             }
-            let outputURL = URL(fileURLWithPath: output)
+            let outputURL = pathURL(output)
             try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(rendered.utf8).write(to: outputURL, options: [.atomic])
             if arguments.contains("--json") {
@@ -924,11 +970,11 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Unsupported chapter format: \(formatValue)")
         }
 
-        let projectURL = URL(fileURLWithPath: arguments[1])
+        let projectURL = pathURL(arguments[1])
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
         let entries = ChapterExporter.entries(from: manifest)
         let rendered = try ChapterExporter.render(entries, format: format)
-        let outputURL = URL(fileURLWithPath: output)
+        let outputURL = pathURL(output)
         try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(rendered.utf8).write(to: outputURL, options: [.atomic])
         if arguments.contains("--json") {
@@ -947,9 +993,9 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Usage: dmlesson render \(subcommand) <project.dmlm> --output <video.mp4|video.mov> [--quality medium|highest] [--resolution source|720p|1080p|1440p|4K] [--fps source|24|30|60] [--codec h264|hevc|prores] [--prores] [--json]")
         }
 
-        let projectURL = URL(fileURLWithPath: arguments[1])
-        let outputURL = URL(fileURLWithPath: output)
-        let preset = renderPreset(from: arguments, outputURL: outputURL)
+        let projectURL = pathURL(arguments[1])
+        let outputURL = pathURL(output)
+        let preset = try renderPreset(from: arguments, outputURL: outputURL)
         let renderer = AVFoundationRenderService()
 
         switch subcommand {
@@ -988,7 +1034,7 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Usage: dmlesson export <project> --preset <id> [--json]")
         }
 
-        let projectURL = URL(fileURLWithPath: arguments[0])
+        let projectURL = pathURL(arguments[0])
         guard let presetIndex = arguments.firstIndex(of: "--preset"), arguments.indices.contains(presetIndex + 1) else {
             throw CLIError.usage("Usage: dmlesson export <project> --preset <id> [--json]")
         }
@@ -1024,7 +1070,7 @@ struct DMLessonMeldCLI {
                 lessonTitle: lessonTitle,
                 courseTitle: optionValue("--course-title", in: arguments)
             )
-            let outputURL = URL(fileURLWithPath: output)
+            let outputURL = pathURL(output)
             try ProjectBundle.writeManifest(manifest, to: outputURL)
             if arguments.contains("--json") {
                 try printJSON(try ProjectBundle.inspect(at: outputURL))
@@ -1076,7 +1122,7 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2 else {
                 throw CLIError.usage("Usage: dmlesson presets inspect <preset.dmlpreset> [--json]")
             }
-            let preset = try LessonPresetFile.load(from: URL(fileURLWithPath: arguments[1]))
+            let preset = try LessonPresetFile.load(from: pathURL(arguments[1]))
             if arguments.contains("--json") {
                 try printJSON(preset)
             } else {
@@ -1096,9 +1142,9 @@ struct DMLessonMeldCLI {
                   let name = optionValue("--name", in: arguments) else {
                 throw CLIError.usage("Usage: dmlesson presets create-from-project <project> --output <preset.dmlpreset> --name <name> [--summary <text>] [--settings <settings.json>] [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
+            let projectURL = pathURL(arguments[1])
             let preferences = try optionValue("--settings", in: arguments).map { path in
-                let data = try Data(contentsOf: URL(fileURLWithPath: path))
+                let data = try Data(contentsOf: pathURL(path))
                 return try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data)
             }
             let preset = try LessonPreset.make(
@@ -1107,7 +1153,7 @@ struct DMLessonMeldCLI {
                 name: name,
                 summary: optionValue("--summary", in: arguments)
             )
-            let outputURL = normalizedPresetURL(URL(fileURLWithPath: output))
+            let outputURL = normalizedPresetURL(pathURL(output))
             try LessonPresetFile.save(preset, to: outputURL)
             if arguments.contains("--json") {
                 try printJSON(preset)
@@ -1118,8 +1164,8 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2, let presetPath = optionValue("--preset", in: arguments) else {
                 throw CLIError.usage("Usage: dmlesson presets apply <project> --preset <preset.dmlpreset> [--json]")
             }
-            let projectURL = URL(fileURLWithPath: arguments[1])
-            let preset = try LessonPresetFile.load(from: URL(fileURLWithPath: presetPath))
+            let projectURL = pathURL(arguments[1])
+            let preset = try LessonPresetFile.load(from: pathURL(presetPath))
             let preview = try LessonPresetApplier.apply(preset, toProject: projectURL)
             if arguments.contains("--json") {
                 try printJSON(preview)
@@ -1131,8 +1177,8 @@ struct DMLessonMeldCLI {
             guard arguments.count >= 2, let presetPath = optionValue("--preset", in: arguments) else {
                 throw CLIError.usage("Usage: dmlesson presets preview <project> --preset <preset.dmlpreset> [--json]")
             }
-            _ = try ProjectBundle.loadManifest(at: URL(fileURLWithPath: arguments[1]))
-            let preset = try LessonPresetFile.load(from: URL(fileURLWithPath: presetPath))
+            _ = try ProjectBundle.loadManifest(at: pathURL(arguments[1]))
+            let preset = try LessonPresetFile.load(from: pathURL(presetPath))
             let preview = LessonPresetApplier.preview(preset)
             if arguments.contains("--json") {
                 try printJSON(preview)
@@ -1153,12 +1199,12 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Usage: dmlesson learnhouse package <project> --output <directory> [--json]")
         }
 
-        let projectURL = URL(fileURLWithPath: arguments[1])
+        let projectURL = pathURL(arguments[1])
         guard let outputIndex = arguments.firstIndex(of: "--output"), arguments.indices.contains(outputIndex + 1) else {
             throw CLIError.usage("Usage: dmlesson learnhouse package <project> --output <directory> [--json]")
         }
 
-        let outputURL = URL(fileURLWithPath: arguments[outputIndex + 1])
+        let outputURL = pathURL(arguments[outputIndex + 1])
         let result = try LearnHousePackageBuilder().buildPackage(
             projectURL: projectURL,
             outputDirectory: outputURL,
@@ -1184,9 +1230,9 @@ struct DMLessonMeldCLI {
         }
 
         let result = try LocalSharePackageBuilder().buildPackage(
-            projectURL: URL(fileURLWithPath: arguments[1]),
-            outputDirectory: URL(fileURLWithPath: output, isDirectory: true),
-            finalVideoURL: optionValue("--final-video", in: arguments).map { URL(fileURLWithPath: $0) },
+            projectURL: pathURL(arguments[1]),
+            outputDirectory: pathURL(output, isDirectory: true),
+            finalVideoURL: optionValue("--final-video", in: arguments).map { pathURL($0) },
             archive: arguments.contains("--archive")
         )
         if arguments.contains("--json") {
@@ -1206,8 +1252,8 @@ struct DMLessonMeldCLI {
 
         let kind = arguments[0]
         let action = arguments[1]
-        let projectURL = URL(fileURLWithPath: arguments[2])
-        let outputURL = URL(fileURLWithPath: output, isDirectory: true)
+        let projectURL = pathURL(arguments[2])
+        let outputURL = pathURL(output, isDirectory: true)
         let result: ConnectorPackageResult
         let label: String
 
@@ -1259,7 +1305,7 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Usage: dmlesson config plan|init|status|commit <config-root> [--message <message>] [--json]")
         }
 
-        let rootURL = URL(fileURLWithPath: arguments[1])
+        let rootURL = pathURL(arguments[1])
         let manager = ConfigGitBackupManager()
 
         switch subcommand {
@@ -1311,7 +1357,7 @@ struct DMLessonMeldCLI {
                 includeMediaPaths: arguments.contains("--include-media-paths"),
                 includeTranscriptReferences: arguments.contains("--include-transcript-references")
             )
-            let manifest = try AgentManifestBuilder.build(projectURL: URL(fileURLWithPath: arguments[1]), options: options)
+            let manifest = try AgentManifestBuilder.build(projectURL: pathURL(arguments[1]), options: options)
             try printJSON(manifest)
         case "workflows":
             let target = try optionValue("--target", in: arguments).map { rawTarget in
@@ -1464,7 +1510,7 @@ struct DMLessonMeldCLI {
 
     static func loadPreferences(from path: String?) throws -> LessonMeldPreferences {
         guard let path else { return LessonMeldPreferences() }
-        let data = try Data(contentsOf: URL(fileURLWithPath: path))
+        let data = try Data(contentsOf: pathURL(path))
         return try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data).normalized()
     }
 
@@ -1481,7 +1527,34 @@ struct DMLessonMeldCLI {
         guard let index = arguments.firstIndex(of: option), arguments.indices.contains(index + 1) else {
             return nil
         }
-        return arguments[index + 1]
+        let value = arguments[index + 1]
+        return looksLikeMissingOptionValue(value) ? nil : value
+    }
+
+    static func validateOptionSyntax(_ arguments: [String]) throws {
+        for (index, argument) in arguments.enumerated() where valueOptions.contains(argument) {
+            guard arguments.indices.contains(index + 1),
+                  !looksLikeMissingOptionValue(arguments[index + 1]) else {
+                throw CLIError.usage("Missing value for \(argument).")
+            }
+        }
+    }
+
+    static func looksLikeMissingOptionValue(_ value: String) -> Bool {
+        value.hasPrefix("--") || valueOptions.contains(value)
+    }
+
+    static func pathURL(_ path: String, isDirectory: Bool = false) -> URL {
+        let homePath = ProcessInfo.processInfo.environment["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let expandedPath: String
+        if path == "~" {
+            expandedPath = homePath
+        } else if path.hasPrefix("~/") {
+            expandedPath = homePath + "/" + path.dropFirst(2)
+        } else {
+            expandedPath = path
+        }
+        return URL(fileURLWithPath: expandedPath, isDirectory: isDirectory)
     }
 
     static func postAppControl(_ action: LocalAppControlAction) throws {
@@ -1506,7 +1579,7 @@ struct DMLessonMeldCLI {
     }
 
     static func relativePath(_ path: String, projectURL: URL) -> String {
-        let url = URL(fileURLWithPath: path)
+        let url = pathURL(path)
         let projectPath = projectURL.standardizedFileURL.path
         let filePath = url.standardizedFileURL.path
         if filePath.hasPrefix(projectPath + "/") {
@@ -1783,24 +1856,49 @@ struct DMLessonMeldCLI {
         return ExportPreset(id: "local-\(quality.rawValue)", fileType: fileType, quality: quality)
     }
 
-    static func renderPreset(from arguments: [String], outputURL: URL) -> RenderPreset {
-        let quality = optionValue("--quality", in: arguments).flatMap(RenderQuality.init(rawValue:)) ?? .highest
+    static func renderPreset(from arguments: [String], outputURL: URL) throws -> RenderPreset {
+        let quality = try enumOption("--quality", in: arguments, default: RenderQuality.highest)
         let fileType: RenderFileType = outputURL.pathExtension.lowercased() == "mov" ? .mov : .mp4
         let codec = arguments.contains("--prores")
             ? RenderCodec.proRes
-            : optionValue("--codec", in: arguments).flatMap(RenderCodec.init(rawValue:)) ?? .h264
+            : try enumOption("--codec", in: arguments, default: RenderCodec.h264)
         return RenderPreset(
             fileType: fileType,
             quality: quality,
-            resolution: optionValue("--resolution", in: arguments).flatMap(RenderResolution.init(rawValue:)) ?? .source,
-            frameRate: optionValue("--fps", in: arguments).flatMap(RenderFrameRate.init(rawValue:)) ?? .source,
+            resolution: try enumOption("--resolution", in: arguments, default: RenderResolution.source),
+            frameRate: try enumOption("--fps", in: arguments, default: RenderFrameRate.source),
             codec: codec,
             hardwareAccelerationEnabled: !arguments.contains("--disable-hardware-acceleration"),
-            maxConcurrentExports: optionValue("--concurrency", in: arguments).flatMap(Int.init) ?? 1,
+            maxConcurrentExports: try integerOption("--concurrency", in: arguments, default: 1, range: 1...8),
             alphaChannelEnabled: arguments.contains("--alpha"),
             animatedGIFEnabled: arguments.contains("--gif"),
             proResEnabled: codec == .proRes
         )
+    }
+
+    static func enumOption<T>(
+        _ name: String,
+        in arguments: [String],
+        default defaultValue: T
+    ) throws -> T where T: CaseIterable & RawRepresentable, T.RawValue == String {
+        guard let value = optionValue(name, in: arguments) else {
+            return defaultValue
+        }
+        guard let parsed = T(rawValue: value) else {
+            let allowed = T.allCases.map(\.rawValue).joined(separator: ", ")
+            throw CLIError.usage("\(name) must be one of \(allowed).")
+        }
+        return parsed
+    }
+
+    static func integerOption(_ name: String, in arguments: [String], default defaultValue: Int, range: ClosedRange<Int>) throws -> Int {
+        guard let value = optionValue(name, in: arguments) else {
+            return defaultValue
+        }
+        guard let parsed = Int(value), range.contains(parsed) else {
+            throw CLIError.usage("\(name) must be an integer from \(range.lowerBound) through \(range.upperBound).")
+        }
+        return parsed
     }
 
     static func normalizedPresetURL(_ url: URL) -> URL {
@@ -1877,7 +1975,7 @@ struct DMLessonMeldCLI {
     }
 
     static func mimeType(for path: String) -> String? {
-        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+        switch pathURL(path).pathExtension.lowercased() {
         case "mp4": "video/mp4"
         case "mov": "video/quicktime"
         case "jpg", "jpeg": "image/jpeg"

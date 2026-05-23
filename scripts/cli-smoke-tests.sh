@@ -216,7 +216,7 @@ run_expected_failure() {
   status=$?
   set -e
 
-  if [[ "$status" -ne 0 ]] && grep -Fq "$expected_stderr" "$stderr_log"; then
+  if [[ "$status" -ne 0 ]] && grep -Fq -- "$expected_stderr" "$stderr_log"; then
     record_status "PASS" "$name" "expected failure: $stderr_log"
     return 0
   fi
@@ -318,8 +318,9 @@ share_url="$work_dir/shares"
 learnhouse_url="$work_dir/lesson-export"
 connectors_url="$work_dir/connectors"
 config_root="$work_dir/config"
+home_dir="$work_dir/home"
 
-mkdir -p "$config_root"
+mkdir -p "$config_root" "$home_dir"
 
 run_step "help output" "$cli_path" --help
 run_step "mcp server self test" "$python_bin" scripts/dmlesson-mcp-server.py --self-test
@@ -377,6 +378,14 @@ run_json "other project create" "other-project-create" \
   "issues=list" \
   -- "$cli_path" project create --lesson-title "Other" --output "$other_project_url" --json
 
+run_json "project create with tilde output" "project-create-tilde-output" \
+  "lessonTitle=str" \
+  "schemaVersion=int" \
+  "issues=list" \
+  -- env HOME="$home_dir" "$cli_path" project create --lesson-title "Tilde" --output "~/Tilde.dmlm" --json
+
+run_step "tilde output was expanded" test -f "$home_dir/Tilde.dmlm/project.json"
+
 printf "screen" >"$screen_url"
 
 run_json "project attach screen" "project-attach-screen" \
@@ -406,6 +415,9 @@ run_json "render plan" "render-plan" \
   "issues=list" \
   "plan.destinationURL=str" \
   -- "$cli_path" render plan "$project_url" --output "$render_url" --resolution 1080p --fps 30 --codec h264 --json
+
+run_expected_failure "render concurrency bounds failure" "--concurrency must be an integer from 1 through 8." \
+  "$cli_path" render plan "$project_url" --output "$render_url" --concurrency 99 --json
 
 run_json "templates list" "templates-list" \
   "@=nonempty-list" \
@@ -515,6 +527,9 @@ run_expected_failure "invalid command failure" "Invalid command: not-a-command" 
 
 run_expected_failure "missing project create title failure" "Usage: dmlesson project create" \
   "$cli_path" project create --output "$work_dir/MissingTitle.dmlm"
+
+run_expected_failure "option value rejects flag token" "Missing value for --output." \
+  "$cli_path" project create --lesson-title "Intro" --output --json
 
 check_documented_commands
 

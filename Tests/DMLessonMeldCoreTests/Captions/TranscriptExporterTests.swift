@@ -45,4 +45,53 @@ struct TranscriptExporterTests {
         #expect(srtTranscript.segments.first?.endSeconds == 6.25)
         #expect(textTranscript.segments.map { $0.text } == ["One", "Two"])
     }
+
+    @Test("Malformed caption timestamps return import errors")
+    func malformedCaptionTimestampsReturnImportErrors() {
+        let malformedVTT = """
+        WEBVTT
+
+        --> 00:00:03.000
+        Missing start.
+        """
+        let malformedSRT = """
+        1
+        00:00:04,000 --> bad
+        Bad end.
+        """
+
+        #expect(throws: TranscriptImportError.malformedTimestamp("--> 00:00:03.000")) {
+            try TranscriptImporter.transcript(from: Data(malformedVTT.utf8), fileName: "captions.vtt")
+        }
+        #expect(throws: TranscriptImportError.malformedTimestamp("00:00:04,000 --> bad")) {
+            try TranscriptImporter.transcript(from: Data(malformedSRT.utf8), fileName: "captions.srt")
+        }
+    }
+
+    @Test("Oversized transcript imports are rejected before decoding")
+    func oversizedTranscriptImportsAreRejectedBeforeDecoding() {
+        let oversized = Data(repeating: UInt8(ascii: "A"), count: TranscriptImporter.maxImportBytes + 1)
+
+        #expect(throws: TranscriptImportError.importTooLarge(byteCount: oversized.count, limit: TranscriptImporter.maxImportBytes)) {
+            try TranscriptImporter.transcript(from: oversized, fileName: "captions.txt")
+        }
+    }
+
+    @Test("Transcript imports enforce segment count limits")
+    func transcriptImportsEnforceSegmentCountLimits() {
+        let captions = (0...TranscriptImporter.maxSegments)
+            .map { index in
+                let start = index * 2
+                let end = start + 1
+                return """
+                00:00:\(String(format: "%02d", start % 60)).000 --> 00:00:\(String(format: "%02d", end % 60)).000
+                Caption \(index)
+                """
+            }
+            .joined(separator: "\n\n")
+
+        #expect(throws: TranscriptImportError.tooManySegments(limit: TranscriptImporter.maxSegments)) {
+            try TranscriptImporter.webVTT(captions)
+        }
+    }
 }
