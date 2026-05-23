@@ -733,8 +733,9 @@ final class ProjectEditorModel: ObservableObject {
                     try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try data.write(to: outputURL, options: [.atomic])
                     isExportingFrame = false
-                    completeEditorJob(jobID, outputURL: outputURL, message: "Exported frame to \(outputURL.path).")
-                    setMessage("Exported frame \(outputURL.path).")
+                    let displayPath = Self.displayPath(outputURL, projectURL: projectURL)
+                    completeEditorJob(jobID, outputURL: outputURL, message: "Exported frame to \(displayPath).")
+                    setMessage("Exported frame \(displayPath).")
                     NSWorkspace.shared.activateFileViewerSelecting([outputURL])
                 } catch {
                     isExportingFrame = false
@@ -1487,7 +1488,7 @@ final class ProjectEditorModel: ObservableObject {
             let updated = try attachCaptionSidecars(projectURL: projectURL)
             manifest = updated
             summary = try ProjectBundle.inspect(at: projectURL)
-            completeEditorJob(jobID, outputURL: projectURL, message: "Exported caption sidecars into \(projectURL.path).")
+            completeEditorJob(jobID, outputURL: projectURL, message: "Exported caption sidecars into \(Self.displayPath(projectURL, projectURL: projectURL)).")
             setMessage("Exported caption sidecars.")
         } catch {
             if let jobID {
@@ -1540,8 +1541,9 @@ final class ProjectEditorModel: ObservableObject {
                     let output = try await AVAssetTrimExportService().export(plan: plan)
                     await MainActor.run {
                         self.isTrimming = false
-                        self.completeEditorJob(jobID, outputURL: output, message: "Exported cut list to \(output.path).")
-                        self.setMessage("Exported cut list \(output.path).")
+                        let displayPath = Self.displayPath(output, projectURL: projectURL)
+                        self.completeEditorJob(jobID, outputURL: output, message: "Exported cut list to \(displayPath).")
+                        self.setMessage("Exported cut list \(displayPath).")
                         NSWorkspace.shared.activateFileViewerSelecting([output])
                     }
                 } catch {
@@ -1615,7 +1617,7 @@ final class ProjectEditorModel: ObservableObject {
             let destinationURL = Self.presetURLWithExtension(url)
             try LessonPresetFile.save(preset, to: destinationURL)
             presetPreviewSummary = Self.presetPreviewSummary(LessonPresetApplier.preview(preset))
-            setMessage("Saved preset \(destinationURL.path).")
+            setMessage("Saved preset \(Self.displayPath(destinationURL, projectURL: projectURL)).")
         } catch {
             setError(error.localizedDescription)
         }
@@ -1946,8 +1948,9 @@ final class ProjectEditorModel: ObservableObject {
                         self.renderProgress = 1
                         self.renderTask = nil
                         self.activeRenderJobID = nil
-                        self.completeEditorJob(jobID, outputURL: output, message: "Rendered video to \(output.path).")
-                        self.setMessage("Rendered \(output.path).")
+                        let displayPath = Self.displayPath(output, projectURL: projectURL)
+                        self.completeEditorJob(jobID, outputURL: output, message: "Rendered video to \(displayPath).")
+                        self.setMessage("Rendered \(displayPath).")
                         NSWorkspace.shared.activateFileViewerSelecting([output])
                     }
                 } catch RenderExportError.exportCancelled {
@@ -2209,8 +2212,9 @@ final class ProjectEditorModel: ObservableObject {
                     let output = try await AVAssetTrimExportService().export(plan: plan)
                     await MainActor.run {
                         self.isTrimming = false
-                        self.completeEditorJob(jobID, outputURL: output, message: "Exported trim to \(output.path).")
-                        self.setMessage("Exported trim \(output.path).")
+                        let displayPath = Self.displayPath(output, projectURL: projectURL)
+                        self.completeEditorJob(jobID, outputURL: output, message: "Exported trim to \(displayPath).")
+                        self.setMessage("Exported trim \(displayPath).")
                         NSWorkspace.shared.activateFileViewerSelecting([output])
                     }
                 } catch {
@@ -2337,6 +2341,10 @@ final class ProjectEditorModel: ObservableObject {
 
     private static func normalizedProjectPath(_ url: URL?) -> String? {
         url?.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    private static func displayPath(_ url: URL, projectURL: URL?) -> String {
+        SafePathDisplay.projectRelativeOrBasename(url.path, projectPath: normalizedProjectPath(projectURL)) ?? url.lastPathComponent
     }
 
     private func loadEditorJobHistory(projectURL: URL) {
@@ -2501,16 +2509,25 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     private func restoreDestinationPath(_ outputPath: String, for kind: EditorJobKind) {
+        let restoredOutputPath: String
+        if outputPath.hasPrefix("/") {
+            restoredOutputPath = outputPath
+        } else if let projectURL {
+            restoredOutputPath = projectURL.appendingPathComponent(outputPath).path
+        } else {
+            restoredOutputPath = outputPath
+        }
+
         switch kind {
         case .renderVideo:
-            renderDestinationPath = outputPath
+            renderDestinationPath = restoredOutputPath
         case .trimExport,
              .editDecisionExport:
-            trimDestinationPath = outputPath
+            trimDestinationPath = restoredOutputPath
         case .rawAssetExtract:
-            rawAssetDestinationPath = outputPath
+            rawAssetDestinationPath = restoredOutputPath
         case .sharePackage:
-            sharePackageDestinationPath = outputPath
+            sharePackageDestinationPath = restoredOutputPath
         case .learnHousePackage,
              .frameExport,
              .frameCopy,
@@ -2520,20 +2537,20 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     func revealJobOutput(_ job: EditorJobRecord) {
-        guard let outputPath = job.outputPath, !outputPath.isEmpty else {
+        guard let outputURL = jobOutputURL(job) else {
             setError("No output path is available for \(job.title).")
             return
         }
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: outputPath)])
+        NSWorkspace.shared.activateFileViewerSelecting([outputURL])
     }
 
     func copyJobOutputPath(_ job: EditorJobRecord) {
-        guard let outputPath = job.outputPath, !outputPath.isEmpty else {
+        guard let outputURL = jobOutputURL(job) else {
             setError("No output path is available for \(job.title).")
             return
         }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(outputPath, forType: .string)
+        NSPasteboard.general.setString(outputURL.path, forType: .string)
         setMessage("Copied \(job.title) output path.")
     }
 
@@ -2547,7 +2564,17 @@ final class ProjectEditorModel: ObservableObject {
         if job.log.isEmpty {
             return "\(job.title) has no log entries."
         }
-        return job.log.joined(separator: "\n")
+        return job.log.map { SafePathDisplay.redactingAbsolutePaths(in: $0) }.joined(separator: "\n")
+    }
+
+    private func jobOutputURL(_ job: EditorJobRecord) -> URL? {
+        guard let outputPath = job.outputPath, !outputPath.isEmpty else {
+            return nil
+        }
+        if outputPath.hasPrefix("/") {
+            return URL(fileURLWithPath: outputPath)
+        }
+        return projectURL?.appendingPathComponent(outputPath)
     }
 
     private func removeTimeObserver() {
@@ -3876,12 +3903,12 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     private func setMessage(_ value: String) {
-        message = value
+        message = SafePathDisplay.redactingAbsolutePaths(in: value)
         messageIsError = false
     }
 
     private func setError(_ value: String) {
-        message = value
+        message = SafePathDisplay.redactingAbsolutePaths(in: value)
         messageIsError = true
     }
 

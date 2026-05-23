@@ -148,6 +148,21 @@ struct LocalAppControlTests {
         let permissions = try #require(FileManager.default.attributesOfItem(atPath: statusURL.path)[.posixPermissions] as? NSNumber)
         #expect(permissions.intValue & 0o777 == 0o600)
     }
+
+    @Test("Runtime status redaction hides absolute project paths")
+    func runtimeStatusRedactionHidesAbsoluteProjectPaths() {
+        let status = LocalAppControlStatus(
+            isRecording: false,
+            isPaused: false,
+            isStopping: false,
+            elapsedSeconds: 0,
+            lastProjectPath: "/Users/example/Client/Lesson.dmlm",
+            message: "Rendered /Users/example/Client/Lesson.dmlm/Exports/final.mp4."
+        ).redactedForAutomation()
+
+        #expect(status.lastProjectPath == "Lesson.dmlm")
+        #expect(status.message == "Rendered final.mp4.")
+    }
 }
 
 private final class InMemoryTokenStore: LocalAppControlTokenStore, @unchecked Sendable {

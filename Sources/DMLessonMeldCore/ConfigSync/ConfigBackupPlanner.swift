@@ -10,6 +10,14 @@ public struct ConfigBackupPlan: Codable, Equatable, Sendable {
         self.includePaths = includePaths
         self.excludedPaths = excludedPaths
     }
+
+    public func redactedForAutomation() -> ConfigBackupPlan {
+        ConfigBackupPlan(
+            rootPath: SafePathDisplay.basename(rootPath),
+            includePaths: includePaths,
+            excludedPaths: excludedPaths
+        )
+    }
 }
 
 public struct ExcludedConfigPath: Codable, Equatable, Sendable {

@@ -92,6 +92,27 @@ struct EditorJobQueueTests {
         let loaded = try EditorJobHistoryFile.load(fromProject: temp.url)
         #expect(loaded.map(\.id) == ["job-0", "job-1", "job-2"])
     }
+
+    @Test("Job history persistence redacts absolute paths")
+    func jobHistoryPersistenceRedactsAbsolutePaths() throws {
+        let temp = try TemporaryDirectory()
+        let outputPath = temp.url.appendingPathComponent("Exports/final.mp4").path
+        var record = EditorJobRecord(
+            id: "job-1",
+            kind: .renderVideo,
+            projectPath: temp.url.path,
+            outputPath: outputPath
+        )
+        record.complete(outputPath: outputPath, message: "Rendered video to \(outputPath).")
+
+        try EditorJobHistoryFile.save([record], toProject: temp.url)
+
+        let loaded = try #require(EditorJobHistoryFile.load(fromProject: temp.url).first)
+        #expect(loaded.projectPath == temp.url.lastPathComponent)
+        #expect(loaded.outputPath == "Exports/final.mp4")
+        #expect(!loaded.log.joined(separator: "\n").contains(temp.url.path))
+        #expect(loaded.outputDisplayPath == "Exports/final.mp4")
+    }
 }
 
 private final class TemporaryDirectory {

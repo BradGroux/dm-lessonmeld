@@ -28,7 +28,7 @@ struct QuickRecorderPanel: View {
                     }
                 }
 
-                Text(model.message)
+                Text(SafePathDisplay.redactingAbsolutePaths(in: model.message))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -43,7 +43,7 @@ struct QuickRecorderPanel: View {
                 }
 
                 if let projectPath = model.lastProjectPath {
-                    Text(projectPath)
+                    Text(SafePathDisplay.basename(projectPath))
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
@@ -1558,8 +1558,8 @@ final class QuickRecorderModel: ObservableObject {
             isPaused: isPaused,
             isStopping: isStopping,
             elapsedSeconds: elapsedSeconds,
-            lastProjectPath: lastProjectPath,
-            message: message
+            lastProjectPath: SafePathDisplay.basename(lastProjectPath),
+            message: SafePathDisplay.redactingAbsolutePaths(in: message)
         )
         try? LocalAppControl.writeStatus(status)
     }

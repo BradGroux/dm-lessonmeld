@@ -1309,22 +1309,23 @@ struct DMLessonMeldCLI {
 
         let rootURL = pathURL(arguments[1])
         let manager = ConfigGitBackupManager()
+        let includePaths = arguments.contains("--verbose") || arguments.contains("--debug")
 
         switch subcommand {
         case "plan":
             let plan = try ConfigBackupPlanner().plan(rootURL: rootURL)
             if arguments.contains("--json") {
-                try printJSON(plan)
+                try printJSON(includePaths ? plan : plan.redactedForAutomation())
             } else {
                 print("Syncable files: \(plan.includePaths.count)")
                 print("Excluded files: \(plan.excludedPaths.count)")
             }
         case "init":
             let status = try manager.ensureRepository(rootURL: rootURL)
-            try printConfigStatus(status, json: arguments.contains("--json"))
+            try printConfigStatus(status, json: arguments.contains("--json"), includePaths: includePaths)
         case "status":
             let status = try manager.status(rootURL: rootURL)
-            try printConfigStatus(status, json: arguments.contains("--json"))
+            try printConfigStatus(status, json: arguments.contains("--json"), includePaths: includePaths)
         case "commit":
             guard let message = optionValue("--message", in: arguments) ?? optionValue("-m", in: arguments),
                   !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -1333,7 +1334,7 @@ struct DMLessonMeldCLI {
 
             let result = try manager.commit(rootURL: rootURL, message: message)
             if arguments.contains("--json") {
-                try printJSON(result)
+                try printJSON(includePaths ? result : result.redactedForAutomation())
             } else if result.didCommit {
                 print("Committed config backup: \(result.commitHash ?? "unknown")")
                 print("Files: \(result.committedPaths.count)")
@@ -1353,11 +1354,12 @@ struct DMLessonMeldCLI {
         switch subcommand {
         case "manifest":
             guard arguments.count >= 2 else {
-                throw CLIError.usage("Usage: dmlesson agent manifest <project> [--include-media-paths] [--include-transcript-references] [--json]")
+                throw CLIError.usage("Usage: dmlesson agent manifest <project> [--include-media-paths] [--include-transcript-references] [--include-project-path] [--json]")
             }
             let options = AgentManifestOptions(
                 includeMediaPaths: arguments.contains("--include-media-paths"),
-                includeTranscriptReferences: arguments.contains("--include-transcript-references")
+                includeTranscriptReferences: arguments.contains("--include-transcript-references"),
+                includeProjectPath: arguments.contains("--include-project-path") || arguments.contains("--verbose") || arguments.contains("--debug")
             )
             let manifest = try AgentManifestBuilder.build(projectURL: pathURL(arguments[1]), options: options)
             try printJSON(manifest)
@@ -1426,19 +1428,22 @@ struct DMLessonMeldCLI {
             message: "Digital Meld LessonMeld is not reporting runtime status."
         )
 
+        let includePaths = arguments.contains("--verbose") || arguments.contains("--debug")
+        let printableStatus = includePaths ? status : status.redactedForAutomation()
+
         if arguments.contains("--json") {
-            try printJSON(status)
+            try printJSON(printableStatus)
         } else if subcommand == "status" {
-            print("App: \(status.isAppRunning ? "running" : "not reporting")")
-            print("State: \(status.stateLabel)")
-            print("Elapsed: \(formatClock(status.elapsedSeconds))")
-            if let lastProjectPath = status.lastProjectPath {
+            print("App: \(printableStatus.isAppRunning ? "running" : "not reporting")")
+            print("State: \(printableStatus.stateLabel)")
+            print("Elapsed: \(formatClock(printableStatus.elapsedSeconds))")
+            if let lastProjectPath = printableStatus.lastProjectPath {
                 print("Last project: \(lastProjectPath)")
             }
-            print("Message: \(status.message)")
+            print("Message: \(printableStatus.message)")
         } else {
             print("Sent app command: \(subcommand)")
-            print("State: \(status.stateLabel)")
+            print("State: \(printableStatus.stateLabel)")
         }
     }
 
@@ -1485,11 +1490,11 @@ struct DMLessonMeldCLI {
           share package <project> --output <directory> [--final-video <video.mp4|video.mov>] [--archive] [--json]
           connectors common-cartridge|scorm|xapi package <project> --output <directory> [--no-archive] [--json]
           connectors video-host handoff <project> --output <directory> [--archive] [--json]
-          config plan|init|status <config-root> [--json]
-          config commit <config-root> --message <message> [--json]
-          agent manifest <project> [--include-media-paths] [--include-transcript-references]
+          config plan|init|status <config-root> [--json] [--verbose]
+          config commit <config-root> --message <message> [--json] [--verbose]
+          agent manifest <project> [--include-media-paths] [--include-transcript-references] [--include-project-path]
           agent workflows [--target openclaw|codex|veritas-kanban] [--json]
-          app status|show-controls|start|pause|resume|toggle-pause|stop [--json]
+          app status|show-controls|start|pause|resume|toggle-pause|stop [--json] [--verbose]
         """)
     }
 
@@ -1516,9 +1521,9 @@ struct DMLessonMeldCLI {
         return try DMLessonJSON.decoder().decode(LessonMeldPreferences.self, from: data).normalized()
     }
 
-    static func printConfigStatus(_ status: ConfigGitBackupStatus, json: Bool) throws {
+    static func printConfigStatus(_ status: ConfigGitBackupStatus, json: Bool, includePaths: Bool = false) throws {
         if json {
-            try printJSON(status)
+            try printJSON(includePaths ? status : status.redactedForAutomation())
         } else {
             print("Repository: \(status.repositoryInitialized ? "initialized" : "not initialized")")
             print("Changed files: \(status.changedPaths.count)")

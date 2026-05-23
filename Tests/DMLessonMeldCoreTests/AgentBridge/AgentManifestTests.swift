@@ -25,6 +25,7 @@ struct AgentManifestTests {
 
         #expect(agentManifest.files.count == 2)
         #expect(agentManifest.files.allSatisfy { $0.path == nil })
+        #expect(agentManifest.project.urlPath == "Agent.dmlm")
         #expect(agentManifest.availableCommands.contains { $0.name == "learnhouse package" })
         #expect(agentManifest.workflows.contains { $0.target == .codex })
         #expect(agentManifest.workflows.allSatisfy { !$0.steps.isEmpty })
@@ -81,6 +82,22 @@ struct AgentManifestTests {
         #expect(agentManifest.files.contains { $0.role == .screenVideo && $0.path == nil })
         #expect(agentManifest.files.contains { $0.role == .transcript && $0.path == "transcript.md" })
         #expect(agentManifest.redactionPolicy.contains("transcript references included"))
+    }
+
+    @Test("Can include project path by explicit request")
+    func includesProjectPathWhenRequested() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Agent.dmlm", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let manifest = ProjectManifest(metadata: LessonMetadata(lessonTitle: "Agent Safe"))
+        try ProjectBundle.writeManifest(manifest, to: projectURL)
+
+        let agentManifest = try AgentManifestBuilder.build(
+            projectURL: projectURL,
+            options: AgentManifestOptions(includeProjectPath: true)
+        )
+
+        #expect(agentManifest.project.urlPath == projectURL.path)
     }
 
     @Test("Agent workflows are target specific and use stable slugs")
