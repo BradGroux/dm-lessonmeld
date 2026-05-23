@@ -7,6 +7,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,10 +16,21 @@ from typing import Any
 PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOLS = {PROTOCOL_VERSION, "2025-03-26"}
 REPO_ROOT = Path(__file__).resolve().parents[1]
+MAX_OUTPUT_BYTES = int(os.environ.get("DMLESSON_MCP_MAX_OUTPUT_BYTES", "131072"))
+DISCLOSURE_POLICY_ENV = "DMLESSON_MCP_ALLOW_DISCLOSURE"
 
 
 class ToolError(Exception):
     pass
+
+
+@dataclass
+class CommandResult:
+    returncode: int
+    stdout: str
+    stderr: str
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
 
 
 TOOLS: list[dict[str, Any]] = [
@@ -106,9 +119,10 @@ def main() -> int:
             continue
         try:
             message = json.loads(line)
-            response = handle_message(message)
-        except Exception as error:  # noqa: BLE001 - keep stdio server alive on malformed messages.
+        except Exception as error:  # noqa: BLE001 - keep stdio server alive on malformed JSON.
             response = error_response(None, -32700, str(error))
+        else:
+            response = handle_message(message)
         if response is not None:
             write_message(response)
     return 0
@@ -132,9 +146,49 @@ def self_test() -> int:
             "params": {"name": "dmlesson_agent_workflows", "arguments": {"target": "codex"}},
         }
     )
+    disclosure_denied = handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "dmlesson_agent_manifest",
+                "arguments": {"project": "/tmp/lesson.dmlm", "includeMediaPaths": True},
+            },
+        }
+    )
+    with tempfile.TemporaryDirectory(prefix="dm-lessonmeld-mcp-test.") as temp_dir:
+        slow_cli = Path(temp_dir) / "slow-dmlesson"
+        slow_cli.write_text("#!/bin/sh\nsleep 1\necho '{}'\n", encoding="utf-8")
+        slow_cli.chmod(0o700)
+        old_cli = os.environ.get("DMLESSON_CLI")
+        old_timeout = os.environ.get("DMLESSON_MCP_TIMEOUT")
+        os.environ["DMLESSON_CLI"] = str(slow_cli)
+        os.environ["DMLESSON_MCP_TIMEOUT"] = "0.01"
+        try:
+            timeout_result = handle_message(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/call",
+                    "params": {"name": "dmlesson_project_inspect", "arguments": {"project": "/tmp/lesson.dmlm"}},
+                }
+            )
+        finally:
+            restore_env("DMLESSON_CLI", old_cli)
+            restore_env("DMLESSON_MCP_TIMEOUT", old_timeout)
+    with tempfile.TemporaryFile() as output_file:
+        output_file.write(b"x" * (MAX_OUTPUT_BYTES + 1))
+        oversized_output, oversized_truncated = read_limited_output(output_file, MAX_OUTPUT_BYTES)
     assert initialize and initialize["result"]["capabilities"]["tools"]["listChanged"] is False
     assert tools and len(tools["result"]["tools"]) >= 5
     assert workflow and workflow["result"]["isError"] is False
+    assert disclosure_denied and disclosure_denied["id"] == 4
+    assert disclosure_denied["result"]["isError"] is True
+    assert timeout_result and timeout_result["id"] == 5
+    assert timeout_result["result"]["isError"] is True
+    assert oversized_truncated is True
+    assert len(oversized_output) == MAX_OUTPUT_BYTES
     return 0
 
 
@@ -170,6 +224,11 @@ def handle_message(message: dict[str, Any]) -> dict[str, Any] | None:
                 request_id,
                 {"content": [{"type": "text", "text": str(error)}], "isError": True},
             )
+        except Exception as error:  # noqa: BLE001 - preserve JSON-RPC id for tool failures.
+            return result_response(
+                request_id,
+                {"content": [{"type": "text", "text": f"Tool failed: {error}"}], "isError": True},
+            )
 
     return error_response(request_id, -32601, f"Method not found: {method}")
 
@@ -191,9 +250,15 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         append_option(args, "--codec", arguments.get("codec"))
     elif name == "dmlesson_agent_manifest":
         args = ["agent", "manifest", required_string(arguments, "project")]
-        if bool(arguments.get("includeMediaPaths", False)):
+        include_media_paths = bool(arguments.get("includeMediaPaths", False))
+        include_transcript_references = bool(arguments.get("includeTranscriptReferences", False))
+        if (include_media_paths or include_transcript_references) and not disclosure_policy_allows_paths():
+            raise ToolError(
+                f"Media path and transcript disclosure requires {DISCLOSURE_POLICY_ENV}=1 in the MCP host environment."
+            )
+        if include_media_paths:
             args.append("--include-media-paths")
-        if bool(arguments.get("includeTranscriptReferences", False)):
+        if include_transcript_references:
             args.append("--include-transcript-references")
     elif name == "dmlesson_agent_workflows":
         args = ["agent", "workflows", "--json"]
@@ -205,10 +270,17 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         raise ToolError(f"Unknown tool: {name}")
 
     completed = run_dmlesson(args)
-    text = completed.stdout.strip() or completed.stderr.strip()
-    parsed = parse_json(text)
+    output_text = completed.stdout.strip() if completed.stdout.strip() else completed.stderr.strip()
+    if completed.stdout_truncated or completed.stderr_truncated:
+        output_text = f"{output_text}\n[output truncated by MCP wrapper]"
+    parsed = parse_json(completed.stdout.strip())
+    content_text = (
+        "Structured JSON response returned."
+        if parsed is not None and completed.returncode == 0
+        else output_text
+    )
     result: dict[str, Any] = {
-        "content": [{"type": "text", "text": text}],
+        "content": [{"type": "text", "text": content_text}],
         "isError": completed.returncode != 0,
     }
     if parsed is not None:
@@ -216,18 +288,36 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def run_dmlesson(args: list[str]) -> subprocess.CompletedProcess[str]:
+def run_dmlesson(args: list[str]) -> CommandResult:
     command = dmlesson_command() + args
     timeout = float(os.environ.get("DMLESSON_MCP_TIMEOUT", "60"))
-    return subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-    )
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        process = subprocess.Popen(
+            command,
+            cwd=REPO_ROOT,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            text=False,
+        )
+        timed_out = False
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            process.kill()
+            returncode = process.wait()
+
+        stdout, stdout_truncated = read_limited_output(stdout_file, MAX_OUTPUT_BYTES)
+        stderr, stderr_truncated = read_limited_output(stderr_file, MAX_OUTPUT_BYTES)
+        if timed_out:
+            return CommandResult(
+                returncode=124,
+                stdout=stdout,
+                stderr=f"{stderr}\nCommand timed out after {timeout:g} seconds.".strip(),
+                stdout_truncated=stdout_truncated,
+                stderr_truncated=stderr_truncated,
+            )
+        return CommandResult(returncode, stdout, stderr, stdout_truncated, stderr_truncated)
 
 
 def dmlesson_command() -> list[str]:
@@ -253,6 +343,26 @@ def append_option(args: list[str], option: str, value: Any) -> None:
     text = str(value).strip()
     if text:
         args.extend([option, text])
+
+
+def disclosure_policy_allows_paths() -> bool:
+    return os.environ.get(DISCLOSURE_POLICY_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def read_limited_output(handle: Any, max_bytes: int) -> tuple[str, bool]:
+    handle.seek(0)
+    data = handle.read(max_bytes + 1)
+    truncated = len(data) > max_bytes
+    if truncated:
+        data = data[:max_bytes]
+    return data.decode("utf-8", errors="replace"), truncated
+
+
+def restore_env(name: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
 
 
 def parse_json(text: str) -> Any | None:
