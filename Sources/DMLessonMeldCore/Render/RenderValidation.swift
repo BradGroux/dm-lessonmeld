@@ -132,22 +132,6 @@ public enum RenderPlanValidator {
             ))
         }
 
-        if preset.resolution != .source {
-            issues.append(RenderValidationIssue(
-                severity: .warning,
-                message: "Resolution override is recorded in the render plan, but the current renderer still uses source or canvas sizing.",
-                path: "preset.resolution"
-            ))
-        }
-
-        if preset.frameRate != .source {
-            issues.append(RenderValidationIssue(
-                severity: .warning,
-                message: "Frame-rate override is recorded in the render plan, but the current renderer still uses source timing.",
-                path: "preset.frameRate"
-            ))
-        }
-
         if !preset.hardwareAccelerationEnabled || preset.maxConcurrentExports > 1 {
             issues.append(RenderValidationIssue(
                 severity: .warning,

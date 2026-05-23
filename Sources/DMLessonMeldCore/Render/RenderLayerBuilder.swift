@@ -11,14 +11,14 @@ extension AVFoundationRenderService {
         videoComposition: AVMutableVideoComposition,
         renderSize: CGSize,
         canvasGeometry: EditorCanvasRenderGeometry,
-        webcamGeometry: PictureInPictureRenderGeometry?,
+        webcamStyleSegments: [PictureInPictureStyleSegment],
         interactionMetadata: InteractionMetadataDocument?,
         timelineMapper: TimelineRetimingMapper
     ) throws {
         let overlayLayers = try overlayLayers(
             plan: plan,
             renderSize: renderSize,
-            webcamGeometry: webcamGeometry,
+            webcamStyleSegments: webcamStyleSegments,
             interactionMetadata: interactionMetadata,
             timelineMapper: timelineMapper
         )
@@ -67,7 +67,7 @@ extension AVFoundationRenderService {
     private func overlayLayers(
         plan: RenderPlan,
         renderSize: CGSize,
-        webcamGeometry: PictureInPictureRenderGeometry?,
+        webcamStyleSegments: [PictureInPictureStyleSegment],
         interactionMetadata: InteractionMetadataDocument?,
         timelineMapper: TimelineRetimingMapper
     ) throws -> [CALayer] {
@@ -113,10 +113,9 @@ extension AVFoundationRenderService {
             layers.append(screenBoundContainer)
         }
 
-        if let webcamOverlay = plan.webcamOverlay, let webcamGeometry {
+        if !webcamStyleSegments.isEmpty {
             layers.append(contentsOf: pictureInPictureStyleLayers(
-                for: webcamOverlay,
-                geometry: webcamGeometry,
+                for: webcamStyleSegments,
                 renderSize: renderSize
             ))
         }
@@ -178,19 +177,18 @@ extension AVFoundationRenderService {
     }
 
     private func pictureInPictureStyleLayers(
-        for overlay: PictureInPictureOverlay,
-        geometry: PictureInPictureRenderGeometry,
+        for segments: [PictureInPictureStyleSegment],
         renderSize: CGSize
     ) -> [CALayer] {
         var layers: [CALayer] = []
 
-        if overlay.placement.shadowEnabled {
+        for segment in segments where segment.placement.shadowEnabled {
             let shadowLayer = CAShapeLayer()
-            shadowLayer.frame = geometry.frame
+            shadowLayer.frame = segment.geometry.frame
             shadowLayer.path = pictureInPicturePath(
-                frameShape: overlay.placement.frameShape,
+                frameShape: segment.placement.frameShape,
                 bounds: shadowLayer.bounds,
-                cornerRadius: geometry.cornerRadius
+                cornerRadius: segment.geometry.cornerRadius
             )
             shadowLayer.fillColor = CGColor(red: 0, green: 0, blue: 0, alpha: 0.001)
             shadowLayer.shadowColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
@@ -201,26 +199,58 @@ extension AVFoundationRenderService {
                 height: -max(3, min(renderSize.width, renderSize.height) * 0.006)
             )
             shadowLayer.shadowPath = shadowLayer.path
+            applyPictureInPictureStyleTiming(to: shadowLayer, segment: segment)
             layers.append(shadowLayer)
         }
 
-        if overlay.placement.borderEnabled {
+        for segment in segments where segment.placement.borderEnabled {
             let borderWidth = max(1, min(renderSize.width, renderSize.height) * 0.0018)
             let borderLayer = CAShapeLayer()
-            borderLayer.frame = geometry.frame
+            borderLayer.frame = segment.geometry.frame
             borderLayer.path = pictureInPicturePath(
-                frameShape: overlay.placement.frameShape,
+                frameShape: segment.placement.frameShape,
                 bounds: borderLayer.bounds,
-                cornerRadius: geometry.cornerRadius,
+                cornerRadius: segment.geometry.cornerRadius,
                 inset: borderWidth / 2
             )
             borderLayer.fillColor = nil
             borderLayer.strokeColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.68)
             borderLayer.lineWidth = borderWidth
+            applyPictureInPictureStyleTiming(to: borderLayer, segment: segment)
             layers.append(borderLayer)
         }
 
         return layers
+    }
+
+    private func applyPictureInPictureStyleTiming(
+        to layer: CALayer,
+        segment: PictureInPictureStyleSegment
+    ) {
+        let start = segment.range.startSeconds
+        let duration = max(segment.range.durationSeconds, 0.05)
+        let fade = min(segment.transitionSeconds, duration / 2)
+        layer.opacity = 0
+
+        let opacity = CAKeyframeAnimation(keyPath: "opacity")
+        if fade > 0 {
+            let fadeOutStart = max(0, (duration - fade) / duration)
+            opacity.values = [0, 1, 1, 0]
+            opacity.keyTimes = [
+                NSNumber(value: 0),
+                NSNumber(value: fade / duration),
+                NSNumber(value: fadeOutStart),
+                NSNumber(value: 1)
+            ]
+        } else {
+            opacity.values = [1, 1]
+            opacity.keyTimes = [NSNumber(value: 0), NSNumber(value: 1)]
+        }
+        opacity.beginTime = AVCoreAnimationBeginTimeAtZero + start
+        opacity.duration = duration
+        opacity.fillMode = .removed
+        opacity.isRemovedOnCompletion = true
+        layer.add(opacity, forKey: "pip-style-\(segment.id)")
     }
 
     private func cameraReactionLayers(

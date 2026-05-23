@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import Foundation
 
 public protocol ExportService: Sendable {
@@ -60,11 +61,18 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
         let asset = AVURLAsset(url: plan.sourceMediaURL)
         let composition = AVMutableComposition()
 
-        try await insertTracks(from: asset, mediaType: .video, retainedRanges: retainedRanges, into: composition)
+        let insertedVideoTracks = try await insertTracks(from: asset, mediaType: .video, retainedRanges: retainedRanges, into: composition)
         try await insertTracks(from: asset, mediaType: .audio, retainedRanges: retainedRanges, into: composition)
 
         guard let session = AVAssetExportSession(asset: composition, presetName: exportSessionPresetName(for: plan.preset.quality)) else {
             throw AVAssetTrimExportServiceError.unableToCreateExportSession
+        }
+        if plan.preset.quality != .passthrough,
+           let firstVideoTrack = insertedVideoTracks.first {
+            session.videoComposition = try await videoComposition(
+                for: firstVideoTrack,
+                duration: composition.duration
+            )
         }
 
         try await TrimExportSessionRunner.export(
@@ -75,13 +83,15 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
         return plan.destinationURL
     }
 
+    @discardableResult
     private func insertTracks(
         from asset: AVAsset,
         mediaType: AVMediaType,
         retainedRanges: [EditTimeRange],
         into composition: AVMutableComposition
-    ) async throws {
+    ) async throws -> [InsertedTrimTrack] {
         let sourceTracks = try await asset.loadTracks(withMediaType: mediaType)
+        var insertedTracks: [InsertedTrimTrack] = []
         for sourceTrack in sourceTracks {
             try Task.checkCancellation()
             guard let compositionTrack = composition.addMutableTrack(
@@ -89,6 +99,9 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
                 preferredTrackID: kCMPersistentTrackID_Invalid
             ) else {
                 throw AVAssetTrimExportServiceError.unableToCreateExportSession
+            }
+            if mediaType == .video {
+                compositionTrack.preferredTransform = try await sourceTrack.load(.preferredTransform)
             }
 
             var outputCursor = CMTime.zero
@@ -101,7 +114,55 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
                 try compositionTrack.insertTimeRange(sourceTimeRange, of: sourceTrack, at: outputCursor)
                 outputCursor = outputCursor + sourceTimeRange.duration
             }
+            insertedTracks.append(InsertedTrimTrack(source: sourceTrack, composition: compositionTrack))
         }
+        return insertedTracks
+    }
+
+    private func videoComposition(
+        for insertedTrack: InsertedTrimTrack,
+        duration: CMTime
+    ) async throws -> AVMutableVideoComposition {
+        let naturalSize = try await insertedTrack.source.load(.naturalSize)
+        let preferredTransform = try await insertedTrack.source.load(.preferredTransform)
+        let nominalFrameRate = try await insertedTrack.source.load(.nominalFrameRate)
+        let display = displayGeometry(naturalSize: naturalSize, preferredTransform: preferredTransform)
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
+
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: insertedTrack.composition)
+        layerInstruction.setTransform(display.transform, at: .zero)
+        instruction.layerInstructions = [layerInstruction]
+
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.renderSize = evenSize(display.size)
+        videoComposition.frameDuration = frameDuration(sourceFrameRate: Double(nominalFrameRate))
+        videoComposition.instructions = [instruction]
+        return videoComposition
+    }
+
+    private func displayGeometry(naturalSize: CGSize, preferredTransform: CGAffineTransform) -> DisplayGeometry {
+        let transformed = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+        let normalize = CGAffineTransform(translationX: -transformed.minX, y: -transformed.minY)
+        return DisplayGeometry(
+            size: CGSize(width: abs(transformed.width), height: abs(transformed.height)),
+            transform: preferredTransform.concatenating(normalize)
+        )
+    }
+
+    private func evenSize(_ size: CGSize) -> CGSize {
+        CGSize(width: evenDimension(size.width), height: evenDimension(size.height))
+    }
+
+    private func evenDimension(_ value: CGFloat) -> CGFloat {
+        let rounded = Int(value.rounded())
+        return CGFloat(rounded.isMultiple(of: 2) ? rounded : rounded + 1)
+    }
+
+    private func frameDuration(sourceFrameRate: Double) -> CMTime {
+        let framesPerSecond = sourceFrameRate.isFinite && sourceFrameRate > 0 ? sourceFrameRate : 30
+        return CMTime(seconds: 1 / framesPerSecond, preferredTimescale: 60_000)
     }
 
     private func exportSessionPresetName(for quality: ExportQuality) -> String {
@@ -123,6 +184,16 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
             .mov
         }
     }
+}
+
+private struct InsertedTrimTrack {
+    var source: AVAssetTrack
+    var composition: AVMutableCompositionTrack
+}
+
+private struct DisplayGeometry {
+    var size: CGSize
+    var transform: CGAffineTransform
 }
 
 private enum TrimExportSessionRunner {
