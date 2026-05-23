@@ -61,6 +61,30 @@ struct ProjectBundleTests {
         #expect(summary.issues.isEmpty)
     }
 
+    @Test("Decoded capture settings use initializer normalization")
+    func decodedCaptureSettingsUseInitializerNormalization() throws {
+        let capture = try DMLessonJSON.decoder().decode(
+            ProjectCaptureSettings.self,
+            from: Data("""
+            {
+              "screenFPS": 999,
+              "microphoneDeviceID": "   ",
+              "webcam": {
+                "fps": 999,
+                "cornerRadius": 999,
+                "relativeSize": 3
+              }
+            }
+            """.utf8)
+        )
+
+        #expect(capture.screenFPS == 60)
+        #expect(capture.microphoneDeviceID == nil)
+        #expect(capture.webcam.fps == 30)
+        #expect(capture.webcam.cornerRadius == 64)
+        #expect(capture.webcam.relativeSize == 0.40)
+    }
+
     @Test("Validation reports missing referenced files as warnings")
     func validationReportsMissingFiles() {
         let manifest = ProjectManifest(
