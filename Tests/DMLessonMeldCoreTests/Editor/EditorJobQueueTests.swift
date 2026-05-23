@@ -75,6 +75,79 @@ struct EditorJobQueueTests {
         #expect(otherProjectConflict == nil)
     }
 
+    @Test("Long-running editor jobs support cancellation")
+    func longRunningEditorJobsSupportCancellation() {
+        let cancellableKinds: Set<EditorJobKind> = [
+            .renderVideo,
+            .trimExport,
+            .editDecisionExport,
+            .learnHousePackage,
+            .rawAssetExtract,
+            .sharePackage,
+            .frameExport,
+            .frameCopy
+        ]
+
+        for kind in EditorJobKind.allCases {
+            #expect(kind.supportsCancellation == cancellableKinds.contains(kind))
+        }
+    }
+
+    @Test("Cancellation policy selects active cancellable jobs for the current project")
+    func cancellationPolicySelectsActiveCancellableJobsForCurrentProject() {
+        let projectPath = "/tmp/project.dmlm"
+        let cancellableKinds: [EditorJobKind] = [
+            .renderVideo,
+            .trimExport,
+            .editDecisionExport,
+            .learnHousePackage,
+            .rawAssetExtract,
+            .sharePackage,
+            .frameExport,
+            .frameCopy
+        ]
+        var records = cancellableKinds.map { kind in
+            var record = EditorJobRecord(
+                id: kind.rawValue,
+                kind: kind,
+                projectPath: projectPath
+            )
+            record.start()
+            return record
+        }
+        var completed = EditorJobRecord(
+            id: "completed-render",
+            kind: .renderVideo,
+            projectPath: projectPath
+        )
+        completed.start()
+        completed.complete()
+        records.append(completed)
+
+        var otherProject = EditorJobRecord(
+            id: "other-project",
+            kind: .sharePackage,
+            projectPath: "/tmp/other.dmlm"
+        )
+        otherProject.start()
+        records.append(otherProject)
+
+        var captionSidecars = EditorJobRecord(
+            id: "caption-sidecars",
+            kind: .captionSidecars,
+            projectPath: projectPath
+        )
+        captionSidecars.start()
+        records.append(captionSidecars)
+
+        let selectedIDs = Set(EditorJobCancellationPolicy.cancellableActiveJobIDs(
+            in: records,
+            projectPath: projectPath
+        ))
+
+        #expect(selectedIDs == Set(cancellableKinds.map(\.rawValue)))
+    }
+
     @Test("Job history persists recent records")
     func jobHistoryPersistsRecentRecords() throws {
         let temp = try TemporaryDirectory()

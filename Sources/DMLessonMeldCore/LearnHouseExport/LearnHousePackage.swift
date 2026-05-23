@@ -363,6 +363,7 @@ public struct LearnHouseArchiveBuilder {
 
     @discardableResult
     public func buildArchive(packageDirectory: URL, archiveURL requestedArchiveURL: URL? = nil) throws -> URL {
+        try Task.checkCancellation()
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: packageDirectory.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
@@ -380,6 +381,7 @@ public struct LearnHouseArchiveBuilder {
             withIntermediateDirectories: true
         )
         if FileManager.default.fileExists(atPath: archiveURL.path) {
+            try Task.checkCancellation()
             try FileManager.default.removeItem(at: archiveURL)
         }
 
@@ -397,8 +399,15 @@ public struct LearnHouseArchiveBuilder {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        try Task.checkCancellation()
         try process.run()
-        process.waitUntilExit()
+        while process.isRunning {
+            if Task.isCancelled {
+                process.terminate()
+                throw CancellationError()
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
 
         guard process.terminationStatus == 0 else {
             let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
@@ -417,6 +426,7 @@ public struct LearnHousePackageBuilder {
     }
 
     public func buildPackage(projectURL: URL, outputDirectory: URL, archive: Bool = false) throws -> LearnHousePackageResult {
+        try Task.checkCancellation()
         let manifest = try ProjectBundle.loadManifest(at: projectURL)
         guard manifest.media.screen != nil else {
             throw LearnHousePackageError.missingPrimaryVideo
@@ -426,20 +436,25 @@ public struct LearnHousePackageBuilder {
         let packageURL = outputDirectory.appendingPathComponent("\(packageName).learnhouse", isDirectory: true)
         let assetsURL = packageURL.appendingPathComponent("assets", isDirectory: true)
 
+        try Task.checkCancellation()
         try ensureSafeDirectory(packageURL, within: outputDirectory)
         try ensureSafeDirectory(assetsURL, within: packageURL)
+        try Task.checkCancellation()
         try writeProjectManifest(manifest, packageURL: packageURL)
 
+        try Task.checkCancellation()
         let packagedFiles = try copyPackageFiles(
             files: manifest.media.allFiles,
             projectURL: projectURL,
             assetsURL: assetsURL
         )
 
+        try Task.checkCancellation()
         let checksumPath = try writeChecksums(files: packagedFiles, packageURL: packageURL)
         let courseUUID = stableID(prefix: "course", value: manifest.metadata.courseTitle ?? manifest.metadata.lessonTitle)
         let chapterTitle = manifest.metadata.moduleTitle ?? "Lessons"
         let activityTitle = manifest.metadata.lessonTitle
+        try Task.checkCancellation()
         try writeLearnHouseNativeLayer(
             manifest: manifest,
             packageURL: packageURL,
@@ -483,12 +498,14 @@ public struct LearnHousePackageBuilder {
         )
 
         let data = try DMLessonJSON.encoder().encode(packageManifest)
+        try Task.checkCancellation()
         try data.write(
             to: packageURL.appendingPathComponent("learnhouse-package.json"),
             options: [.atomic]
         )
         try data.write(to: packageURL.appendingPathComponent("manifest.json"), options: [.atomic])
 
+        try Task.checkCancellation()
         let archiveURL = archive ? try archiveBuilder.buildArchive(packageDirectory: packageURL) : nil
         return LearnHousePackageResult(
             packagePath: packageURL.path,
@@ -504,11 +521,13 @@ public struct LearnHousePackageBuilder {
     private func writeProjectManifest(_ manifest: ProjectManifest, packageURL: URL) throws {
         let data = try DMLessonJSON.encoder().encode(manifest)
         try ensureSafeDirectory(packageURL, within: packageURL.deletingLastPathComponent())
+        try Task.checkCancellation()
         try data.write(to: packageURL.appendingPathComponent("project-manifest.json"), options: [.atomic])
     }
 
     private func copyPackageFiles(files: [ProjectFile], projectURL: URL, assetsURL: URL) throws -> [LearnHousePackageFile] {
         try files.compactMap { file in
+            try Task.checkCancellation()
             let sourceURL = try ProjectBundle.projectLocalFileURL(for: file, in: projectURL)
             guard FileManager.default.fileExists(atPath: sourceURL.path) else {
                 return nil
@@ -527,7 +546,9 @@ public struct LearnHousePackageBuilder {
                 }
                 try FileManager.default.removeItem(at: destinationURL)
             }
+            try Task.checkCancellation()
             try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            try Task.checkCancellation()
 
             return LearnHousePackageFile(
                 role: file.role,
@@ -577,12 +598,14 @@ public struct LearnHousePackageBuilder {
     private func writeChecksums(files: [LearnHousePackageFile], packageURL: URL) throws -> String? {
         guard !files.isEmpty else { return nil }
         let lines = try files.compactMap { file -> String? in
+            try Task.checkCancellation()
             guard let sha256 = file.sha256 else { return nil }
             try validatePackageRelativePath(file.relativePath)
             return "\(sha256)  \(file.relativePath)"
         }.joined(separator: "\n")
         let relativePath = "assets/checksums.sha256"
         try ensureSafeDirectory(packageURL.appendingPathComponent("assets", isDirectory: true), within: packageURL)
+        try Task.checkCancellation()
         try "\(lines)\n".write(
             to: packageURL.appendingPathComponent(relativePath),
             atomically: true,
@@ -610,6 +633,7 @@ public struct LearnHousePackageBuilder {
 
         try ensureSafeDirectory(thumbnailURL, within: packageURL)
         try ensureSafeDirectory(videoURL, within: packageURL)
+        try Task.checkCancellation()
 
         let nativeManifest: [String: String] = [
             "format": "learnhouse-course-export",
@@ -631,6 +655,7 @@ public struct LearnHousePackageBuilder {
             "activities": .array([.string(activityUUID)])
         ]
         try FileManager.default.createDirectory(at: chapterURL, withIntermediateDirectories: true)
+        try Task.checkCancellation()
         try writeJSONObject(chapterJSON, to: chapterURL.appendingPathComponent("chapter.json"))
 
         let activityJSON: [String: AnyCodableValue] = [
@@ -655,6 +680,7 @@ public struct LearnHousePackageBuilder {
                 }
                 try FileManager.default.removeItem(at: destination)
             }
+            try Task.checkCancellation()
             try FileManager.default.copyItem(at: source, to: destination)
         }
 
@@ -668,6 +694,7 @@ public struct LearnHousePackageBuilder {
                 }
                 try FileManager.default.removeItem(at: destination)
             }
+            try Task.checkCancellation()
             try FileManager.default.copyItem(at: source, to: destination)
         }
     }
@@ -675,6 +702,7 @@ public struct LearnHousePackageBuilder {
     private func writeJSONObject<T: Encodable>(_ object: T, to url: URL) throws {
         let data = try DMLessonJSON.encoder().encode(object)
         try ensureSafeDirectory(url.deletingLastPathComponent(), within: url.deletingLastPathComponent().deletingLastPathComponent())
+        try Task.checkCancellation()
         try data.write(to: url, options: [.atomic])
     }
 

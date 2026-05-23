@@ -40,14 +40,12 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
             duration: CMTime(seconds: plan.sourceTimeRange.durationSeconds, preferredTimescale: 600)
         )
 
-        do {
-            try await session.export(to: plan.destinationURL, as: outputFileType(for: plan.preset.fileType))
-            return plan.destinationURL
-        } catch is CancellationError {
-            throw AVAssetTrimExportServiceError.exportCancelled
-        } catch {
-            throw AVAssetTrimExportServiceError.exportFailed(error.localizedDescription)
-        }
+        try await TrimExportSessionRunner.export(
+            session: session,
+            to: plan.destinationURL,
+            as: outputFileType(for: plan.preset.fileType)
+        )
+        return plan.destinationURL
     }
 
     private func exportCutComposition(plan: ExportPlan) async throws -> URL {
@@ -69,14 +67,12 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
             throw AVAssetTrimExportServiceError.unableToCreateExportSession
         }
 
-        do {
-            try await session.export(to: plan.destinationURL, as: outputFileType(for: plan.preset.fileType))
-            return plan.destinationURL
-        } catch is CancellationError {
-            throw AVAssetTrimExportServiceError.exportCancelled
-        } catch {
-            throw AVAssetTrimExportServiceError.exportFailed(error.localizedDescription)
-        }
+        try await TrimExportSessionRunner.export(
+            session: session,
+            to: plan.destinationURL,
+            as: outputFileType(for: plan.preset.fileType)
+        )
+        return plan.destinationURL
     }
 
     private func insertTracks(
@@ -87,6 +83,7 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
     ) async throws {
         let sourceTracks = try await asset.loadTracks(withMediaType: mediaType)
         for sourceTrack in sourceTracks {
+            try Task.checkCancellation()
             guard let compositionTrack = composition.addMutableTrack(
                 withMediaType: mediaType,
                 preferredTrackID: kCMPersistentTrackID_Invalid
@@ -96,6 +93,7 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
 
             var outputCursor = CMTime.zero
             for retainedRange in retainedRanges {
+                try Task.checkCancellation()
                 let sourceTimeRange = CMTimeRange(
                     start: CMTime(seconds: retainedRange.startSeconds, preferredTimescale: 600),
                     duration: CMTime(seconds: retainedRange.durationSeconds, preferredTimescale: 600)
@@ -124,5 +122,37 @@ public final class AVAssetTrimExportService: ExportService, @unchecked Sendable 
         case .mov:
             .mov
         }
+    }
+}
+
+private enum TrimExportSessionRunner {
+    static func export(
+        session: AVAssetExportSession,
+        to destinationURL: URL,
+        as fileType: AVFileType
+    ) async throws {
+        let sessionBox = TrimExportSessionBox(session)
+
+        do {
+            try Task.checkCancellation()
+            try await withTaskCancellationHandler {
+                try await sessionBox.session.export(to: destinationURL, as: fileType)
+            } onCancel: {
+                sessionBox.session.cancelExport()
+            }
+        } catch is CancellationError {
+            session.cancelExport()
+            throw AVAssetTrimExportServiceError.exportCancelled
+        } catch {
+            throw AVAssetTrimExportServiceError.exportFailed(error.localizedDescription)
+        }
+    }
+}
+
+private final class TrimExportSessionBox: @unchecked Sendable {
+    let session: AVAssetExportSession
+
+    init(_ session: AVAssetExportSession) {
+        self.session = session
     }
 }
