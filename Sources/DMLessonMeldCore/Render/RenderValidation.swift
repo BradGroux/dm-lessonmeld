@@ -86,6 +86,9 @@ public enum RenderPlanValidator {
         validateCameraSettings(plan.camera, issues: &issues)
         validateAudioSettings(plan.audio, projectURL: plan.projectURL, issues: &issues, fileManager: fileManager, checkFileExistence: options.checkFileExistence)
         validateCaptionSettings(plan.captions, issues: &issues)
+        if let cursorSource = plan.cursorSource {
+            validateCursorMetadata(cursorSource, issues: &issues, fileManager: fileManager)
+        }
         if let annotationSource = plan.annotationSource {
             validateAnnotations(annotationSource, issues: &issues, fileManager: fileManager)
         }
@@ -449,8 +452,17 @@ public enum RenderPlanValidator {
     ) {
         guard fileManager.fileExists(atPath: source.url.path) else { return }
         do {
-            let data = try Data(contentsOf: source.url)
+            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath, fileManager: fileManager)
             let store = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+            if appendCountLimitIssue(
+                count: store.annotations.count,
+                limit: RenderSidecarLimits.maxAnnotations,
+                displayPath: source.relativePath,
+                itemName: "annotations",
+                issues: &issues
+            ) {
+                return
+            }
             for (index, annotation) in store.annotations.enumerated() {
                 let path = "annotations[\(index)]"
                 if let timeRange = annotation.timeRange, !timeRange.isValid {
@@ -486,6 +498,8 @@ public enum RenderPlanValidator {
                     ))
                 }
             }
+        } catch let error as RenderSidecarLimitError {
+            appendSidecarLimitIssue(error, issues: &issues, path: source.relativePath)
         } catch {
             issues.append(RenderValidationIssue(
                 severity: .error,
@@ -536,8 +550,17 @@ public enum RenderPlanValidator {
     ) {
         guard fileManager.fileExists(atPath: source.url.path) else { return }
         do {
-            let data = try Data(contentsOf: source.url)
+            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath, fileManager: fileManager)
             let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
+            if appendCountLimitIssue(
+                count: transcript.segments.count,
+                limit: RenderSidecarLimits.maxCaptionSegments,
+                displayPath: source.relativePath,
+                itemName: "caption segments",
+                issues: &issues
+            ) {
+                return
+            }
             for (index, segment) in transcript.segments.enumerated() {
                 let path = "captions[\(index)]"
                 if !segment.startSeconds.isFinite ||
@@ -558,6 +581,8 @@ public enum RenderPlanValidator {
                     ))
                 }
             }
+        } catch let error as RenderSidecarLimitError {
+            appendSidecarLimitIssue(error, issues: &issues, path: source.relativePath)
         } catch {
             issues.append(RenderValidationIssue(
                 severity: .error,
@@ -575,8 +600,17 @@ public enum RenderPlanValidator {
     ) {
         guard fileManager.fileExists(atPath: source.url.path) else { return }
         do {
-            let data = try Data(contentsOf: source.url)
+            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath, fileManager: fileManager)
             let store = try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
+            if appendCountLimitIssue(
+                count: store.overlays.count,
+                limit: RenderSidecarLimits.maxOverlays,
+                displayPath: source.relativePath,
+                itemName: "overlays",
+                issues: &issues
+            ) {
+                return
+            }
             for (index, overlay) in store.overlays.enumerated() {
                 let path = "overlays[\(index)]"
                 if !overlay.timeRange.startSeconds.isFinite ||
@@ -641,6 +675,8 @@ public enum RenderPlanValidator {
                     }
                 }
             }
+        } catch let error as RenderSidecarLimitError {
+            appendSidecarLimitIssue(error, issues: &issues, path: source.relativePath)
         } catch {
             issues.append(RenderValidationIssue(
                 severity: .error,
@@ -648,6 +684,76 @@ public enum RenderPlanValidator {
                 path: source.relativePath
             ))
         }
+    }
+
+    private static func validateCursorMetadata(
+        _ source: RenderMediaSource,
+        issues: inout [RenderValidationIssue],
+        fileManager: FileManager
+    ) {
+        guard fileManager.fileExists(atPath: source.url.path) else { return }
+        do {
+            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath, fileManager: fileManager)
+            let metadata = try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
+            _ = appendCountLimitIssue(
+                count: metadata.cursorSamples.count,
+                limit: RenderSidecarLimits.maxCursorSamples,
+                displayPath: "\(source.relativePath).cursorSamples",
+                itemName: "cursor samples",
+                issues: &issues
+            )
+            _ = appendCountLimitIssue(
+                count: metadata.clicks.count,
+                limit: RenderSidecarLimits.maxCursorClicks,
+                displayPath: "\(source.relativePath).clicks",
+                itemName: "clicks",
+                issues: &issues
+            )
+            _ = appendCountLimitIssue(
+                count: metadata.keystrokes.count,
+                limit: RenderSidecarLimits.maxKeystrokes,
+                displayPath: "\(source.relativePath).keystrokes",
+                itemName: "keystrokes",
+                issues: &issues
+            )
+        } catch let error as RenderSidecarLimitError {
+            appendSidecarLimitIssue(error, issues: &issues, path: source.relativePath)
+        } catch {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Cursor metadata sidecar could not be decoded.",
+                path: source.relativePath
+            ))
+        }
+    }
+
+    @discardableResult
+    private static func appendCountLimitIssue(
+        count: Int,
+        limit: Int,
+        displayPath: String,
+        itemName: String,
+        issues: inout [RenderValidationIssue]
+    ) -> Bool {
+        guard count > limit else { return false }
+        issues.append(RenderValidationIssue(
+            severity: .error,
+            message: "\(displayPath) contains too many \(itemName): \(count) exceeds the \(limit) item limit.",
+            path: displayPath
+        ))
+        return true
+    }
+
+    private static func appendSidecarLimitIssue(
+        _ error: RenderSidecarLimitError,
+        issues: inout [RenderValidationIssue],
+        path: String
+    ) {
+        issues.append(RenderValidationIssue(
+            severity: .error,
+            message: error.localizedDescription,
+            path: path
+        ))
     }
 
     private static func validateMediaSources(

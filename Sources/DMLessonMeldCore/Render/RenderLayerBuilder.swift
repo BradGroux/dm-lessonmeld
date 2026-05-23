@@ -75,16 +75,19 @@ extension AVFoundationRenderService {
         var screenBoundLayers: [CALayer] = []
 
         if let annotationSource = plan.annotationSource {
-            let store = try loadAnnotationStore(from: annotationSource.url)
+            try Task.checkCancellation()
+            let store = try loadAnnotationStore(from: annotationSource)
             if store.isVisible {
-                screenBoundLayers.append(contentsOf: store.annotations.filter(\.isVisible).map {
-                    annotationLayer(for: $0, renderSize: renderSize, timelineMapper: timelineMapper)
-                })
+                for annotation in store.annotations where annotation.isVisible {
+                    try Task.checkCancellation()
+                    screenBoundLayers.append(annotationLayer(for: annotation, renderSize: renderSize, timelineMapper: timelineMapper))
+                }
             }
         }
 
         if let interactionMetadata {
-            screenBoundLayers.append(contentsOf: cursorLayers(
+            try Task.checkCancellation()
+            screenBoundLayers.append(contentsOf: try cursorLayers(
                 for: interactionMetadata,
                 settings: plan.cursor,
                 renderSize: renderSize,
@@ -127,34 +130,43 @@ extension AVFoundationRenderService {
         }
 
         if let overlaySource = plan.overlaySource {
-            let store = try loadOverlayStore(from: overlaySource.url)
+            try Task.checkCancellation()
+            let store = try loadOverlayStore(from: overlaySource)
             if store.isVisible {
-                layers.append(contentsOf: store.overlays
+                let overlays = store.overlays
                     .filter(\.isEnabled)
                     .sorted { $0.zIndex < $1.zIndex }
-                    .map { overlayLayer(
-                        for: $0,
+                for overlay in overlays {
+                    try Task.checkCancellation()
+                    layers.append(overlayLayer(
+                        for: overlay,
                         projectURL: plan.projectURL,
                         renderSize: renderSize,
                         timelineMapper: timelineMapper
-                    ) })
+                    ))
+                }
             }
         }
 
         if let captionSource = plan.captionSource, plan.captions.burnInEnabled {
-            let transcript = try loadTranscript(from: captionSource.url)
-            layers.append(contentsOf: transcript.segments.compactMap {
-                captionLayer(
-                    for: $0,
+            try Task.checkCancellation()
+            let transcript = try loadTranscript(from: captionSource)
+            for segment in transcript.segments {
+                try Task.checkCancellation()
+                if let layer = captionLayer(
+                    for: segment,
                     settings: plan.captions,
                     renderSize: renderSize,
                     timelineMapper: timelineMapper
-                )
-            })
+                ) {
+                    layers.append(layer)
+                }
+            }
         }
 
         if let interactionMetadata, plan.cursor.keyboardOverlay.isVisible {
-            layers.append(contentsOf: keyboardLayers(
+            try Task.checkCancellation()
+            layers.append(contentsOf: try keyboardLayers(
                 for: interactionMetadata,
                 settings: plan.cursor.keyboardOverlay,
                 renderSize: renderSize,
@@ -352,30 +364,70 @@ extension AVFoundationRenderService {
         return layer
     }
 
-    private func loadAnnotationStore(from url: URL) throws -> AnnotationStore {
-        guard FileManager.default.fileExists(atPath: url.path) else {
+    private func loadAnnotationStore(from source: RenderMediaSource) throws -> AnnotationStore {
+        guard FileManager.default.fileExists(atPath: source.url.path) else {
             return AnnotationStore()
         }
-        let data = try Data(contentsOf: url)
-        return try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+        let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
+        let store = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+        try RenderSidecarLimits.checkCount(
+            store.annotations.count,
+            limit: RenderSidecarLimits.maxAnnotations,
+            displayPath: source.relativePath,
+            itemName: "annotations"
+        )
+        return store
     }
 
-    private func loadOverlayStore(from url: URL) throws -> OverlayStore {
-        guard FileManager.default.fileExists(atPath: url.path) else {
+    private func loadOverlayStore(from source: RenderMediaSource) throws -> OverlayStore {
+        guard FileManager.default.fileExists(atPath: source.url.path) else {
             return OverlayStore()
         }
-        let data = try Data(contentsOf: url)
-        return try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
+        let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
+        let store = try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
+        try RenderSidecarLimits.checkCount(
+            store.overlays.count,
+            limit: RenderSidecarLimits.maxOverlays,
+            displayPath: source.relativePath,
+            itemName: "overlays"
+        )
+        return store
     }
 
-    private func loadTranscript(from url: URL) throws -> TranscriptDocument {
-        let data = try Data(contentsOf: url)
-        return try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
+    private func loadTranscript(from source: RenderMediaSource) throws -> TranscriptDocument {
+        let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
+        let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
+        try RenderSidecarLimits.checkCount(
+            transcript.segments.count,
+            limit: RenderSidecarLimits.maxCaptionSegments,
+            displayPath: source.relativePath,
+            itemName: "caption segments"
+        )
+        return transcript
     }
 
-    func loadInteractionMetadata(from url: URL) throws -> InteractionMetadataDocument {
-        let data = try Data(contentsOf: url)
-        return try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
+    func loadInteractionMetadata(from source: RenderMediaSource) throws -> InteractionMetadataDocument {
+        let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
+        let metadata = try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
+        try RenderSidecarLimits.checkCount(
+            metadata.cursorSamples.count,
+            limit: RenderSidecarLimits.maxCursorSamples,
+            displayPath: "\(source.relativePath).cursorSamples",
+            itemName: "cursor samples"
+        )
+        try RenderSidecarLimits.checkCount(
+            metadata.clicks.count,
+            limit: RenderSidecarLimits.maxCursorClicks,
+            displayPath: "\(source.relativePath).clicks",
+            itemName: "clicks"
+        )
+        try RenderSidecarLimits.checkCount(
+            metadata.keystrokes.count,
+            limit: RenderSidecarLimits.maxKeystrokes,
+            displayPath: "\(source.relativePath).keystrokes",
+            itemName: "keystrokes"
+        )
+        return metadata
     }
 
     func loadEditDecisionListIfPresent(projectURL: URL) throws -> EditDecisionList? {
@@ -572,12 +624,12 @@ extension AVFoundationRenderService {
         settings: EditorCursorSettings,
         renderSize: CGSize,
         timelineMapper: TimelineRetimingMapper
-    ) -> [CALayer] {
+    ) throws -> [CALayer] {
         var layers: [CALayer] = []
 
         if metadata.rendersCursorPointer,
            settings.pointerVisible,
-           let cursorLayer = animatedCursorLayer(
+           let cursorLayer = try animatedCursorLayer(
             for: metadata.cursorSamples,
             settings: settings,
             renderSize: renderSize,
@@ -587,14 +639,17 @@ extension AVFoundationRenderService {
         }
 
         if settings.clickEffects.rippleVisible {
-            layers.append(contentsOf: metadata.clicks.compactMap {
-                clickLayer(
-                    for: $0,
+            for click in metadata.clicks {
+                try Task.checkCancellation()
+                if let layer = clickLayer(
+                    for: click,
                     settings: settings.clickEffects,
                     renderSize: renderSize,
                     timelineMapper: timelineMapper
-                )
-            })
+                ) {
+                    layers.append(layer)
+                }
+            }
         }
 
         return layers
@@ -605,7 +660,8 @@ extension AVFoundationRenderService {
         settings: EditorCursorSettings,
         renderSize: CGSize,
         timelineMapper: TimelineRetimingMapper
-    ) -> CALayer? {
+    ) throws -> CALayer? {
+        try Task.checkCancellation()
         let visibleSamples = samples
             .sorted { $0.timestampSeconds < $1.timestampSeconds }
             .map { sample in
@@ -615,6 +671,7 @@ extension AVFoundationRenderService {
                     isVisible: sample.isVisible && !settings.hiddenRanges.contains { $0.contains(sample.timestampSeconds) }
                 )
             }
+        try Task.checkCancellation()
         guard let first = visibleSamples.first else { return nil }
 
         let layer = CAShapeLayer()
@@ -742,15 +799,20 @@ extension AVFoundationRenderService {
         settings: EditorKeyboardOverlaySettings,
         renderSize: CGSize,
         timelineMapper: TimelineRetimingMapper
-    ) -> [CALayer] {
-        metadata.keystrokes.compactMap {
-            keyboardLayer(
-                for: $0,
+    ) throws -> [CALayer] {
+        var layers: [CALayer] = []
+        for event in metadata.keystrokes {
+            try Task.checkCancellation()
+            if let layer = keyboardLayer(
+                for: event,
                 settings: settings,
                 renderSize: renderSize,
                 timelineMapper: timelineMapper
-            )
+            ) {
+                layers.append(layer)
+            }
         }
+        return layers
     }
 
     private func keyboardLayer(
