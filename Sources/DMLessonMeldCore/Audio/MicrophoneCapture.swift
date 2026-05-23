@@ -73,6 +73,8 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
     private var writerError: Error?
     private var writtenSamples = 0
     private var activeRequest: AudioRecordingRequest?
+    private var outputFile: RecordingOutputFile?
+    private var isStarting = false
     private var startedAt: Date?
     private var isPaused = false
     private var pauseStartedAt: Date?
@@ -85,7 +87,7 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
     public var isRecording: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return session?.isRunning == true
+        return isStarting || session?.isRunning == true
     }
 
     public func startRecording(_ request: AudioRecordingRequest) throws {
@@ -94,26 +96,32 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
             throw AudioCaptureError.permissionDenied
         }
 
-        lock.lock()
-        defer { lock.unlock() }
-        guard session == nil else {
-            throw AudioCaptureError.recorderAlreadyRunning
-        }
-
-        try FileManager.default.createDirectory(
-            at: request.outputURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        if FileManager.default.fileExists(atPath: request.outputURL.path) {
-            try FileManager.default.removeItem(at: request.outputURL)
-        }
-
         guard case .microphone(let deviceID) = request.source,
               let device = Self.selectDevice(id: deviceID) else {
             throw AudioCaptureError.inputUnavailable
         }
 
-        let writer = try AVAssetWriter(outputURL: request.outputURL, fileType: Self.avFileType(for: request.options.fileFormat))
+        try reserveStart()
+        var outputFile: RecordingOutputFile?
+        do {
+            outputFile = try RecordingOutputFile.prepare(destinationURL: request.outputURL)
+            try startRecording(request, device: device, outputFile: outputFile!)
+        } catch {
+            outputFile?.discard()
+            clearStartReservation()
+            throw error
+        }
+    }
+
+    private func startRecording(
+        _ request: AudioRecordingRequest,
+        device: AVCaptureDevice,
+        outputFile: RecordingOutputFile
+    ) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let writer = try AVAssetWriter(outputURL: outputFile.temporaryURL, fileType: Self.avFileType(for: request.options.fileFormat))
         let audioInput = AVAssetWriterInput(
             mediaType: .audio,
             outputSettings: Self.fileSettings(for: request.options)
@@ -145,6 +153,8 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
         self.session = session
         self.writer = writer
         self.audioInput = audioInput
+        self.outputFile = outputFile
+        isStarting = false
         firstPresentationTime = nil
         writerError = nil
         writtenSamples = 0
@@ -194,25 +204,42 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
         totalPausedDuration = 0
         let writerError = self.writerError
         let writtenSamples = self.writtenSamples
+        let outputFile = self.outputFile
         self.writerError = nil
         self.writtenSamples = 0
+        self.outputFile = nil
         lock.unlock()
 
         if let writerError {
+            writer.cancelWriting()
+            outputFile?.discard()
             throw AudioCaptureError.recordingFailed(writerError.localizedDescription)
         }
         guard writtenSamples > 0 else {
             writer.cancelWriting()
+            outputFile?.discard()
             throw AudioCaptureError.inputUnavailable
         }
 
         audioInput.markAsFinished()
-        try Self.finishWriting(writer)
+        do {
+            try Self.finishWriting(writer)
+        } catch {
+            outputFile?.discard()
+            throw error
+        }
+        let outputURL: URL
+        do {
+            outputURL = try outputFile?.commit() ?? request.outputURL
+        } catch {
+            outputFile?.discard()
+            throw AudioCaptureError.recordingFailed(error.localizedDescription)
+        }
 
         let endedAt = Date()
         return AudioRecordingResult(
             source: request.source,
-            outputURL: request.outputURL,
+            outputURL: outputURL,
             options: request.options,
             durationSeconds: max(0, endedAt.timeIntervalSince(startedAt) - pausedDuration),
             startedAt: startedAt,
@@ -258,6 +285,21 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
             writerError = error
             lock.unlock()
         }
+    }
+
+    func reserveStart() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard session == nil, writer == nil, !isStarting else {
+            throw AudioCaptureError.recorderAlreadyRunning
+        }
+        isStarting = true
+    }
+
+    private func clearStartReservation() {
+        lock.lock()
+        isStarting = false
+        lock.unlock()
     }
 
     private func validate(_ request: AudioRecordingRequest) throws {

@@ -1,4 +1,4 @@
-import DMLessonMeldCore
+@testable import DMLessonMeldCore
 import Foundation
 import Testing
 
@@ -98,6 +98,50 @@ struct RecordingOptionsTests {
         }
     }
 
+    @Test("Recording output files replace destinations only after commit")
+    func recordingOutputFilesReplaceDestinationsOnlyAfterCommit() throws {
+        let temp = try TemporaryDirectory()
+        let outputURL = temp.url.appendingPathComponent("recording.mov")
+        try Data("original".utf8).write(to: outputURL)
+
+        let outputFile = try RecordingOutputFile.prepare(destinationURL: outputURL)
+        try Data("replacement".utf8).write(to: outputFile.temporaryURL)
+
+        #expect(try String(contentsOf: outputURL, encoding: .utf8) == "original")
+        #expect(FileManager.default.fileExists(atPath: outputFile.temporaryURL.path))
+
+        let committedURL = try outputFile.commit()
+
+        #expect(committedURL == outputURL)
+        #expect(try String(contentsOf: outputURL, encoding: .utf8) == "replacement")
+        #expect(!FileManager.default.fileExists(atPath: outputFile.temporaryURL.path))
+    }
+
+    @Test("Discarding recording output files keeps existing destinations")
+    func discardingRecordingOutputFilesKeepsExistingDestinations() throws {
+        let temp = try TemporaryDirectory()
+        let outputURL = temp.url.appendingPathComponent("recording.m4a")
+        try Data("original".utf8).write(to: outputURL)
+
+        let outputFile = try RecordingOutputFile.prepare(destinationURL: outputURL)
+        try Data("partial".utf8).write(to: outputFile.temporaryURL)
+        outputFile.discard()
+
+        #expect(try String(contentsOf: outputURL, encoding: .utf8) == "original")
+        #expect(!FileManager.default.fileExists(atPath: outputFile.temporaryURL.path))
+    }
+
+    @Test("Camera recorder reserves active starts")
+    func cameraRecorderReservesActiveStarts() throws {
+        let recorder = CameraRecorder()
+        try recorder.reserveActiveCapture()
+        defer { recorder.clearActiveCapture() }
+
+        #expect(throws: CameraRecordingError.recorderAlreadyRunning) {
+            try recorder.reserveActiveCapture()
+        }
+    }
+
     @Test("Window capture source keeps stable JSON fields")
     func windowCaptureSourceJSONFields() throws {
         let source = WindowCaptureSource(
@@ -149,5 +193,19 @@ struct RecordingOptionsTests {
         }
         let granted = await CameraPermission.requestAccess()
         #expect(granted == false)
+    }
+}
+
+private final class TemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dm-lessonmeld-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }

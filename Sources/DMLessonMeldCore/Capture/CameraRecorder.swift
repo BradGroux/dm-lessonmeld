@@ -119,6 +119,7 @@ public enum CameraRecordingError: Error, Equatable, LocalizedError, Sendable {
     case requestedCameraNotFound(String)
     case invalidDuration
     case invalidFrameRate(String)
+    case recorderAlreadyRunning
     case cannotAddCameraInput
     case cannotAddMovieOutput
     case recordingFailed(String)
@@ -135,6 +136,8 @@ public enum CameraRecordingError: Error, Equatable, LocalizedError, Sendable {
             "Camera recording duration must be finite, greater than zero, and no more than \(Int(NumericInputValidation.maxRecordingDurationSeconds)) seconds."
         case .invalidFrameRate(let reason):
             reason
+        case .recorderAlreadyRunning:
+            "A camera recording is already in progress."
         case .cannotAddCameraInput:
             "Could not add camera input to the capture session."
         case .cannotAddMovieOutput:
@@ -149,6 +152,7 @@ public final class CameraRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var activeSession: AVCaptureSession?
     private var activeOutput: AVCaptureMovieFileOutput?
+    private var isStarting = false
     public var previewSessionHandler: (@Sendable (CameraPreviewSessionBox?) -> Void)?
 
     public init() {}
@@ -189,68 +193,90 @@ public final class CameraRecorder: @unchecked Sendable {
         } catch {
             throw CameraRecordingError.invalidFrameRate(error.localizedDescription)
         }
-        guard CameraPermission.isGranted else {
-            throw CameraRecordingError.permissionDenied
-        }
 
-        try FileManager.default.createDirectory(
-            at: request.outputURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        if FileManager.default.fileExists(atPath: request.outputURL.path) {
-            try FileManager.default.removeItem(at: request.outputURL)
-        }
-
-        let device = try Self.selectDevice(id: request.deviceID)
-        try Self.configureFrameRate(fps, on: device)
-        let session = AVCaptureSession()
-        session.beginConfiguration()
-        session.sessionPreset = Self.sessionPreset(for: request.resolution)
-
-        let input = try AVCaptureDeviceInput(device: device)
-        guard session.canAddInput(input) else {
-            session.commitConfiguration()
-            throw CameraRecordingError.cannotAddCameraInput
-        }
-        session.addInput(input)
-
-        let output = AVCaptureMovieFileOutput()
-        guard session.canAddOutput(output) else {
-            session.commitConfiguration()
-            throw CameraRecordingError.cannotAddMovieOutput
-        }
-        session.addOutput(output)
-        session.commitConfiguration()
-
-        let dimensions = CaptureMode.cameraMaxDimensions(for: request.resolution)
-        let delegate = CameraMovieFileDelegate(
-            outputURL: request.outputURL,
-            deviceID: device.uniqueID,
-            resolution: request.resolution,
-            videoSize: CGSize(width: dimensions.width, height: dimensions.height)
-        )
-
-        session.startRunning()
-        output.startRecording(to: request.outputURL, recordingDelegate: delegate)
-        setActiveCapture(session: session, output: output)
+        try reserveActiveCapture()
+        var outputFile: RecordingOutputFile?
+        var session: AVCaptureSession?
+        var output: AVCaptureMovieFileOutput?
+        var delegate: CameraMovieFileDelegate?
 
         do {
+            guard CameraPermission.isGranted else {
+                throw CameraRecordingError.permissionDenied
+            }
+
+            let device = try Self.selectDevice(id: request.deviceID)
+            try Self.configureFrameRate(fps, on: device)
+            outputFile = try RecordingOutputFile.prepare(destinationURL: request.outputURL)
+
+            let captureSession = AVCaptureSession()
+            session = captureSession
+            captureSession.beginConfiguration()
+            captureSession.sessionPreset = Self.sessionPreset(for: request.resolution)
+
+            let input = try AVCaptureDeviceInput(device: device)
+            guard captureSession.canAddInput(input) else {
+                captureSession.commitConfiguration()
+                throw CameraRecordingError.cannotAddCameraInput
+            }
+            captureSession.addInput(input)
+
+            let movieOutput = AVCaptureMovieFileOutput()
+            output = movieOutput
+            guard captureSession.canAddOutput(movieOutput) else {
+                captureSession.commitConfiguration()
+                throw CameraRecordingError.cannotAddMovieOutput
+            }
+            captureSession.addOutput(movieOutput)
+            captureSession.commitConfiguration()
+
+            let dimensions = CaptureMode.cameraMaxDimensions(for: request.resolution)
+            let movieDelegate = CameraMovieFileDelegate(
+                outputFile: outputFile!,
+                deviceID: device.uniqueID,
+                resolution: request.resolution,
+                videoSize: CGSize(width: dimensions.width, height: dimensions.height)
+            )
+            delegate = movieDelegate
+
+            captureSession.startRunning()
+            movieOutput.startRecording(to: outputFile!.temporaryURL, recordingDelegate: movieDelegate)
+            setActiveCapture(session: captureSession, output: movieOutput)
+
             try await Task.sleep(nanoseconds: try NumericInputValidation.sleepNanoseconds(forRecordingDuration: durationSeconds, label: "Camera recording duration"))
-            Self.stopOutputIfRecording(output)
-            let result = try await delegate.waitForFinish()
-            session.stopRunning()
+            Self.stopOutputIfRecording(movieOutput)
+            let result = try await movieDelegate.waitForFinish()
+            captureSession.stopRunning()
             clearActiveCapture()
             return result
         } catch is CancellationError {
-            Self.stopOutputIfRecording(output)
-            let result = try await delegate.waitForFinish()
-            session.stopRunning()
+            if let output {
+                Self.stopOutputIfRecording(output)
+            }
+            if let delegate {
+                do {
+                    let result = try await delegate.waitForFinish()
+                    session?.stopRunning()
+                    clearActiveCapture()
+                    return result
+                } catch {
+                    outputFile?.discard()
+                    session?.stopRunning()
+                    clearActiveCapture()
+                    throw error
+                }
+            }
+            outputFile?.discard()
+            session?.stopRunning()
             clearActiveCapture()
-            return result
+            throw CancellationError()
         } catch {
-            Self.stopOutputIfRecording(output)
-            session.stopRunning()
+            if let output {
+                Self.stopOutputIfRecording(output)
+            }
+            session?.stopRunning()
             clearActiveCapture()
+            outputFile?.discard()
             throw error
         }
     }
@@ -260,10 +286,11 @@ public final class CameraRecorder: @unchecked Sendable {
         output.stopRecording()
     }
 
-    private func clearActiveCapture() {
+    func clearActiveCapture() {
         lock.lock()
         activeOutput = nil
         activeSession = nil
+        isStarting = false
         lock.unlock()
         previewSessionHandler?(nil)
     }
@@ -272,8 +299,18 @@ public final class CameraRecorder: @unchecked Sendable {
         lock.lock()
         activeSession = session
         activeOutput = output
+        isStarting = false
         lock.unlock()
         previewSessionHandler?(CameraPreviewSessionBox(session: session))
+    }
+
+    func reserveActiveCapture() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard activeSession == nil, activeOutput == nil, !isStarting else {
+            throw CameraRecordingError.recorderAlreadyRunning
+        }
+        isStarting = true
     }
 
     private static func configureFrameRate(_ fps: Int?, on device: AVCaptureDevice) throws {
@@ -331,7 +368,7 @@ private extension CameraCaptureDevices {
 
 private final class CameraMovieFileDelegate: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
     private let lock = NSLock()
-    private let outputURL: URL
+    private let outputFile: RecordingOutputFile
     private let deviceID: String
     private let resolution: String
     private let videoSize: CGSize
@@ -340,8 +377,8 @@ private final class CameraMovieFileDelegate: NSObject, AVCaptureFileOutputRecord
     private var result: Result<CameraRecordingResult, Error>?
     private var continuation: CheckedContinuation<CameraRecordingResult, Error>?
 
-    init(outputURL: URL, deviceID: String, resolution: String, videoSize: CGSize) {
-        self.outputURL = outputURL
+    init(outputFile: RecordingOutputFile, deviceID: String, resolution: String, videoSize: CGSize) {
+        self.outputFile = outputFile
         self.deviceID = deviceID
         self.resolution = resolution
         self.videoSize = videoSize
@@ -377,6 +414,7 @@ private final class CameraMovieFileDelegate: NSObject, AVCaptureFileOutputRecord
         error: (any Error)?
     ) {
         if let error {
+            outputFile.discard()
             complete(.failure(CameraRecordingError.recordingFailed(error.localizedDescription)))
             return
         }
@@ -386,15 +424,21 @@ private final class CameraMovieFileDelegate: NSObject, AVCaptureFileOutputRecord
         let startedAt = self.startedAt ?? endedAt
         lock.unlock()
 
-        complete(.success(CameraRecordingResult(
-            outputURL: outputURL,
-            deviceID: deviceID,
-            durationSeconds: endedAt.timeIntervalSince(startedAt),
-            resolution: resolution,
-            videoSize: videoSize,
-            startedAt: startedAt,
-            endedAt: endedAt
-        )))
+        do {
+            let outputURL = try outputFile.commit()
+            complete(.success(CameraRecordingResult(
+                outputURL: outputURL,
+                deviceID: deviceID,
+                durationSeconds: endedAt.timeIntervalSince(startedAt),
+                resolution: resolution,
+                videoSize: videoSize,
+                startedAt: startedAt,
+                endedAt: endedAt
+            )))
+        } catch {
+            outputFile.discard()
+            complete(.failure(CameraRecordingError.recordingFailed(error.localizedDescription)))
+        }
     }
 
     private func complete(_ result: Result<CameraRecordingResult, Error>) {
