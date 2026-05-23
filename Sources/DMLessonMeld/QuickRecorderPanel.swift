@@ -79,6 +79,14 @@ struct QuickRecorderPanel: View {
                 } label: {
                     Label("Reveal Bundle", systemImage: "arrow.up.forward.app")
                 }
+
+                if model.pendingDeletionProjectPath != nil {
+                    Button {
+                        model.retryFailedRecordingDelete()
+                    } label: {
+                        Label("Retry Delete", systemImage: "trash")
+                    }
+                }
             }
         }
     }
@@ -179,6 +187,12 @@ private struct QuickRecordingControlBar: View {
                 model.exportCompletionCaptionSidecars()
             }
             .disabled(model.isExportingCompletionCaptions)
+
+            if model.pendingDeletionProjectPath == completion.projectURL.path {
+                ControlBarButton(icon: "trash", title: "Retry Delete") {
+                    model.retryFailedRecordingDelete()
+                }
+            }
 
             ControlBarDivider()
 
@@ -683,6 +697,7 @@ final class QuickRecorderModel: ObservableObject {
     @Published var cameraGranted = CameraPermission.isGranted
     @Published var message = readyMessage
     @Published var lastProjectPath: String?
+    @Published var pendingDeletionProjectPath: String?
 
     @Published var recordTarget: QuickRecordTarget = .screen
     @Published var autoStopEnabled = false
@@ -1337,6 +1352,17 @@ final class QuickRecorderModel: ObservableObject {
         message = "Copied recording path."
     }
 
+    func retryFailedRecordingDelete() {
+        guard let projectPath = pendingDeletionProjectPath ?? lastProjectPath else { return }
+        let projectURL = URL(fileURLWithPath: projectPath)
+        handleRecordingDeleteResult(
+            RecordingProjectDeletion.live.deleteProject(at: projectURL),
+            projectURL: projectURL,
+            successMessage: "Recording deleted."
+        )
+        publishStatus()
+    }
+
     func packageCompletionForLearnHouse(_ preferences: LessonMeldPreferences) {
         guard let completion, !isPackagingCompletion else { return }
         isPackagingCompletion = true
@@ -1434,13 +1460,18 @@ final class QuickRecorderModel: ObservableObject {
         let restartPreferences = lastStartPreferences
         cleanupRecordingState()
 
+        var canRestart = shouldRestart
         if shouldDelete {
-            try? FileManager.default.removeItem(at: projectURL)
-            lastProjectPath = nil
-            message = shouldRestart ? "Restarting recording..." : "Recording deleted."
+            let result = RecordingProjectDeletion.live.deleteProject(at: projectURL)
+            canRestart = handleRecordingDeleteResult(
+                result,
+                projectURL: projectURL,
+                successMessage: shouldRestart ? "Restarting recording..." : "Recording deleted."
+            )
         } else {
             persistMarkers(markers, to: projectURL)
             lastProjectPath = projectURL.path
+            pendingDeletionProjectPath = nil
             let savedCompletion = QuickRecordingCompletion(projectURL: projectURL)
             completion = savedCompletion
             openProjectInEditor(savedCompletion.projectURL, projectName: savedCompletion.projectName, updateMessage: false)
@@ -1451,12 +1482,40 @@ final class QuickRecorderModel: ObservableObject {
             }
         }
 
-        if shouldRestart, let restartPreferences {
+        if canRestart, let restartPreferences {
             Task { @MainActor in
                 self.startRecording(restartPreferences)
             }
         }
         publishStatus()
+    }
+
+    @discardableResult
+    private func handleRecordingDeleteResult(
+        _ result: RecordingProjectDeletionResult,
+        projectURL: URL,
+        successMessage: String
+    ) -> Bool {
+        switch result {
+        case .deleted:
+            if lastProjectPath == projectURL.path {
+                lastProjectPath = nil
+            }
+            if completion?.projectURL == projectURL {
+                completion = nil
+            }
+            if pendingDeletionProjectPath == projectURL.path {
+                pendingDeletionProjectPath = nil
+            }
+            message = successMessage
+            return true
+        case .failed(_, let deleteMessage):
+            lastProjectPath = projectURL.path
+            pendingDeletionProjectPath = projectURL.path
+            completion = QuickRecordingCompletion(projectURL: projectURL)
+            message = "Could not delete recording: \(deleteMessage). Reveal the bundle, fix the file permissions, then retry delete."
+            return false
+        }
     }
 
     private func failRecording(_ error: Error, recordingID: UUID? = nil) {
@@ -1469,6 +1528,9 @@ final class QuickRecorderModel: ObservableObject {
            let preservedPath = quickRecorderError.preservedProjectPath {
             lastProjectPath = preservedPath
             completion = QuickRecordingCompletion(projectURL: URL(fileURLWithPath: preservedPath))
+            if quickRecorderError.shouldRetryDeletion {
+                pendingDeletionProjectPath = preservedPath
+            }
         }
         message = error.localizedDescription
         publishStatus()
@@ -1824,7 +1886,15 @@ final class QuickRecorderModel: ObservableObject {
                     projectPath: projectURL.path
                 )
             }
-            try? FileManager.default.removeItem(at: projectURL)
+            switch RecordingProjectDeletion.live.deleteProject(at: projectURL) {
+            case .deleted:
+                break
+            case .failed(_, let deleteMessage):
+                throw QuickRecorderError.recordingCleanupDeleteFailed(
+                    message: "\(error.localizedDescription) Cleanup failed: \(deleteMessage)",
+                    projectPath: projectURL.path
+                )
+            }
             throw error
         }
     }
@@ -2512,6 +2582,7 @@ private enum QuickRecorderError: Error, LocalizedError {
     case invalidNumber(String)
     case stopTimedOut
     case recordingFailedButProjectPreserved(message: String, projectPath: String)
+    case recordingCleanupDeleteFailed(message: String, projectPath: String)
 
     var errorDescription: String? {
         switch self {
@@ -2521,15 +2592,27 @@ private enum QuickRecorderError: Error, LocalizedError {
             "Stopping timed out. Recording controls were reset; check the project folder for partial files before recording again."
         case .recordingFailedButProjectPreserved(let message, let projectPath):
             "Recording stopped before completion, but recoverable files were preserved at \(projectPath). \(message)"
+        case .recordingCleanupDeleteFailed(let message, let projectPath):
+            "Recording stopped before completion, and the partial project could not be deleted at \(projectPath). \(message)"
         }
     }
 
     var preservedProjectPath: String? {
         switch self {
-        case .recordingFailedButProjectPreserved(_, let projectPath):
+        case .recordingFailedButProjectPreserved(_, let projectPath),
+             .recordingCleanupDeleteFailed(_, let projectPath):
             projectPath
         case .invalidNumber, .stopTimedOut:
             nil
+        }
+    }
+
+    var shouldRetryDeletion: Bool {
+        switch self {
+        case .recordingCleanupDeleteFailed:
+            true
+        case .invalidNumber, .stopTimedOut, .recordingFailedButProjectPreserved:
+            false
         }
     }
 }

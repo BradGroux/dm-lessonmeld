@@ -123,6 +123,33 @@ struct QuickRecordingCompletionServiceTests {
     }
 }
 
+@Suite("Recording project deletion")
+struct RecordingProjectDeletionTests {
+    @Test("Reports successful project deletion")
+    func reportsSuccessfulDeletion() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Delete.dmlm", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+
+        let result = RecordingProjectDeletion.live.deleteProject(at: projectURL)
+
+        #expect(result == .deleted)
+        #expect(!FileManager.default.fileExists(atPath: projectURL.path))
+    }
+
+    @Test("Reports failed project deletion without claiming success")
+    func reportsFailedDeletion() {
+        let projectURL = URL(fileURLWithPath: "/tmp/delete-failed.dmlm")
+        let deletion = RecordingProjectDeletion { _ in
+            throw CocoaError(.fileWriteNoPermission)
+        }
+
+        let result = deletion.deleteProject(at: projectURL)
+
+        #expect(result == .failed(projectPath: projectURL.path, message: CocoaError(.fileWriteNoPermission).localizedDescription))
+    }
+}
+
 private final class TemporaryDirectory {
     let url: URL
 
