@@ -168,6 +168,8 @@ swift run dmlesson config plan ~/.dm-lessonmeld --json
 swift run dmlesson app status --json
 ```
 
+`record windows --json` redacts window titles by default for automation logs. Add `--include-window-titles` only when you are intentionally choosing a window interactively.
+
 ## Privacy
 
 `dm-lessonmeld` is designed to be local-only during normal operation:

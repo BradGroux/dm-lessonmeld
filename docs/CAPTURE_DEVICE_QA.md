@@ -46,7 +46,7 @@ Use `--video` for raw MP4/MOV files and `--project` for existing `.dmlm` bundles
 | --- | --- | --- | --- |
 | CLI build | Always | `.build/debug/dmlesson` | Proves the current checkout can run smoke commands. |
 | Permission status | Always | JSON log | Does not request permissions or change OS state. |
-| Window listing | Always | JSON log | Runs `record windows --json` without starting capture. |
+| Window listing | Always | JSON log | Runs `record windows --json` without starting capture. Titles are redacted unless `--include-window-titles` is used intentionally. |
 | Display capture | `--record` or `--all` | `display.mp4` | Requires Screen Recording permission. |
 | Area capture | `--record` or `--all` | `region.mp4` | Captures a 640x360 region at display origin. |
 | Screen project capture | `--record` or `--all` | `project-screen.dmlm/screen.mp4` | Also runs `project inspect --json`. |
@@ -54,7 +54,7 @@ Use `--video` for raw MP4/MOV files and `--project` for existing `.dmlm` bundles
 | Microphone capture | `--all` or `--record --with-microphone` | `microphone.m4a` | Requires Microphone permission and an input device. |
 | Webcam capture | `--all` or `--record --with-webcam` | `webcam.mov` | Requires Camera permission and a camera. |
 | Combined capture | `--all` or `--record --with-combined` | `project-combined.dmlm` with screen, mic, and webcam files | Exercises mixed capture orchestration. |
-| Window capture | Manual | `window.mp4` or `.dmlm/screen.mp4` | Run `record windows --json`, choose an ID, then run `record window --window-id <id> ...` or use the app recorder Window mode. |
+| Window capture | Manual | `window.mp4` or `.dmlm/screen.mp4` | Run `record windows --include-window-titles --json` when choosing interactively, choose an ID, then run `record window --window-id <id> ...` or use the app recorder Window mode. |
 | Permission denied or revoked | Manual | Explicit error in app or CLI | Revoke Screen Recording, Microphone, or Camera in System Settings and rerun the relevant capture. |
 | Missing camera or microphone | Manual | Clear device failure or skipped check | Run on hardware without that device, or disable it at the OS/device layer. |
 | Stop timeout and cancel timing | Manual | App status leaves `Stopping` | Start from the app control bar, stop immediately, and verify the status transitions. |
