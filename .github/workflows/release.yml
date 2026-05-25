@@ -175,10 +175,21 @@ jobs:
             exit 1
           fi
 
-          shasum -a 256 "${zip_path}" > "${zip_path}.sha256"
-          shasum -a 256 "${dmg_path}" > "${dmg_path}.sha256"
-          shasum -a 256 -c "${zip_path}.sha256"
-          shasum -a 256 -c "${dmg_path}.sha256"
+          zip_dir="$(dirname "${zip_path}")"
+          zip_name="$(basename "${zip_path}")"
+          dmg_dir="$(dirname "${dmg_path}")"
+          dmg_name="$(basename "${dmg_path}")"
+
+          (
+            cd "${zip_dir}"
+            shasum -a 256 "${zip_name}" > "${zip_name}.sha256"
+            shasum -a 256 -c "${zip_name}.sha256"
+          )
+          (
+            cd "${dmg_dir}"
+            shasum -a 256 "${dmg_name}" > "${dmg_name}.sha256"
+            shasum -a 256 -c "${dmg_name}.sha256"
+          )
 
           codesign --verify --strict --deep --verbose=2 "Packaging/Digital Meld LessonMeld.app"
           scripts/verify-dmg.sh "${dmg_path}"

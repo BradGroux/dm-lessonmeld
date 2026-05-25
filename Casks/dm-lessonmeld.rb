@@ -1,6 +1,6 @@
 cask "dm-lessonmeld" do
   version "0.0.5"
-  sha256 "10ac1a4f1cd11adf4b3c918d0f3ce1bf6676665f4b2dec78440eb02d3f2f4ef5"
+  sha256 "aac7c05ca84fd8c7b1e0344cdcc9e629fe4ace24cdaddfe80307dfab3741dbf2"
 
   url "https://github.com/BradGroux/dm-lessonmeld/releases/download/v#{version}/dm-lessonmeld-#{version}-macos.zip"
   name "Digital Meld LessonMeld"
