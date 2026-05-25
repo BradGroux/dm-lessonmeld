@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.5 - 2026-05-25
+
+- Registered the `io.digitalmeld.dm-lessonmeld` Apple App ID for Digital Meld release signing.
+- Configured the GitHub release workflow secrets for Developer ID signed and Apple-notarized DMG and zip artifacts.
+- Bumped the app bundle version to `0.0.5` and build number to `5`.
+
 ## 0.0.4 - 2026-05-17
 
 - Added a testable support target for app-adjacent render planning and quick-recording completion workflows.

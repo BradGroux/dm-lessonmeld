@@ -33,7 +33,7 @@
 - Expand annotation overlay polish: horizontal/vertical toolbar, pen, highlighter, eraser, line, arrow, box, ellipse, text, spotlight, whiteboard, blackboard, swatches, line weights, text sizes, undo/redo, clear, and frame capture.
 - Expand presets/templates to cover capture sources, webcam layout, annotations, zoom behavior, captions, canvas/background, export, and LearnHouse packaging. Project/app preset files are wired; additional bundled preset templates remain.
 - Add local transcription model handling. Settings and CLI model-readiness status are wired; runtime execution remains.
-- Add Homebrew distribution and signed/notarized DMG. Homebrew cask mirror plus DMG and zip release automation are in place; unsigned developer previews can be published, and Apple Developer credentials are required before publishing notarized public binaries.
+- Add Homebrew distribution and signed/notarized DMG. Homebrew cask mirror plus DMG and zip release automation are in place; Apple App ID registration and GitHub release signing secrets are configured for Developer ID signed and Apple-notarized public binaries by default.
 - Expand CLI recording control and JSON automation output.
 - Add optional GitHub remote setup/restore UX for settings and templates after the local Git workflow has more field use.
 - Expand agent workflows for OpenClaw, Codex, and Veritas Kanban. Target-specific workflow JSON is wired; deeper app-control actions remain.

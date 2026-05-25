@@ -1,6 +1,6 @@
 # Release Guide
 
-This project builds a local macOS app bundle plus versioned DMG and zip artifacts. Tagged developer-preview releases can be unsigned and non-notarized only when the release workflow is explicitly placed in unsigned-preview mode. Broad public distribution should use Developer ID signing and Apple notarization.
+This project builds a local macOS app bundle plus versioned DMG and zip artifacts. Tagged public releases use Developer ID signing and Apple notarization by default. Tagged developer-preview releases can be unsigned and non-notarized only when the release workflow is explicitly placed in unsigned-preview mode.
 
 ## macOS requirements
 
@@ -72,7 +72,7 @@ Output:
 .build/dist/dm-lessonmeld-VERSION-macos.zip
 ```
 
-Ad-hoc signed preview builds are suitable for developer preview testing. General users should receive the Developer ID signed and notarized DMG when a release includes one.
+Ad-hoc signed preview builds are suitable for local and intentional developer-preview testing. General users should receive the Developer ID signed and notarized DMG.
 
 ## Sign
 
@@ -132,7 +132,7 @@ Set the release mode before pushing the tag:
 - Signed public release: leave `DM_LESSONMELD_RELEASE_MODE` unset, or set the repository variable to `signed`.
 - Unsigned developer preview: set repository variable `DM_LESSONMELD_RELEASE_MODE=unsigned-preview` before pushing the tag, then restore it when preview releases are no longer intended.
 
-Signed mode fails closed unless every required Apple signing and notarization secret is present. Unsigned-preview mode is allowed only as an explicit repository decision; partial Apple secret sets fail in either mode.
+Signed mode fails closed unless every required Apple signing and notarization secret is present. Unsigned-preview mode is allowed only as an explicit repository decision; partial Apple secret sets fail in either mode. The `BradGroux/dm-lessonmeld` repository is configured with the complete signed-release secret set.
 
 The workflow runs:
 
@@ -157,7 +157,7 @@ It then creates a GitHub Release and attaches:
 
 ## Signing secrets
 
-Set these repository secrets before publishing a signed and notarized release. If any are missing while release mode is `signed`, the tag workflow fails. If only some are configured, the tag workflow fails in every release mode to avoid accidental partial signing state.
+Set these repository secrets before publishing a signed and notarized release. The `BradGroux/dm-lessonmeld` repository already has them configured. If any are missing while release mode is `signed`, the tag workflow fails. If only some are configured, the tag workflow fails in every release mode to avoid accidental partial signing state.
 
 - `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`: base64-encoded `.p12` export containing the Developer ID Application certificate and private key.
 - `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`: password for the `.p12` export.
@@ -171,6 +171,12 @@ Create the certificate and notarization key payloads locally:
 ```sh
 base64 -i DeveloperIDApplication.p12 | pbcopy
 base64 -i AuthKey_ABC123.p8 | pbcopy
+```
+
+The Apple App ID is registered as:
+
+```text
+io.digitalmeld.dm-lessonmeld
 ```
 
 ## Homebrew Cask
