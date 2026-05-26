@@ -32,6 +32,7 @@ jobs:
       - name: Validate packaging
         run: |
           plutil -lint Packaging/Info.plist
+          plutil -lint Packaging/Entitlements.plist
           bash -n scripts/cli-smoke-tests.sh
           bash -n scripts/capture-device-matrix-smoke.sh
           bash -n scripts/real-media-fixture-smoke.sh
@@ -48,6 +49,9 @@ jobs:
           scripts/verify-cask-release.sh
           scripts/build-app.sh release >/dev/null
           codesign --verify --strict --deep "Packaging/Digital Meld LessonMeld.app"
+          app_entitlements="$(codesign -d --entitlements :- "Packaging/Digital Meld LessonMeld.app" 2>/dev/null)"
+          printf '%s' "${app_entitlements}" | grep -q '<key>com.apple.security.device.audio-input</key>'
+          printf '%s' "${app_entitlements}" | grep -q '<key>com.apple.security.device.camera</key>'
           package_output="$(scripts/package-release.sh)"
           zip_path="$(printf '%s\n' "${package_output}" | awk -F= '/^zip_path=/{print $2}')"
           dmg_path="$(printf '%s\n' "${package_output}" | awk -F= '/^dmg_path=/{print $2}')"

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.10 - 2026-05-26
+
+- Added hardened runtime microphone and camera entitlements to local and Developer ID signed app bundles so granted macOS Privacy access is usable by the shipped app.
+- Kept the mirrored cask version aligned with the new signed release target.
+
 ## 0.0.9 - 2026-05-26
 
 - Kept the dashboard permission rows in sync while macOS Privacy settings are changed in another window.

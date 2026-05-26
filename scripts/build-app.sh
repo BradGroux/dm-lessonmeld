@@ -6,6 +6,7 @@ CONFIGURATION="${1:-release}"
 PRODUCT_NAME="DMLessonMeld"
 APP_NAME="Digital Meld LessonMeld"
 APP_DIR="${ROOT_DIR}/Packaging/${APP_NAME}.app"
+ENTITLEMENTS_PATH="${ROOT_DIR}/Packaging/Entitlements.plist"
 
 cd "${ROOT_DIR}"
 
@@ -20,6 +21,7 @@ if [[ ! -x "${EXECUTABLE_PATH}" ]]; then
 fi
 
 plutil -lint Packaging/Info.plist >/dev/null
+plutil -lint Packaging/Entitlements.plist >/dev/null
 
 rm -rf "${APP_DIR}"
 mkdir -p "${APP_DIR}/Contents/MacOS" "${APP_DIR}/Contents/Resources"
@@ -33,7 +35,7 @@ if [[ -f "Packaging/AppIcon.icns" ]]; then
 fi
 
 if [[ "${DM_LESSONMELD_SKIP_ADHOC_SIGN:-0}" != "1" ]]; then
-  codesign --force --deep --sign - "${APP_DIR}" >/dev/null
+  codesign --force --deep --entitlements "${ENTITLEMENTS_PATH}" --sign - "${APP_DIR}" >/dev/null
 fi
 
 echo "${APP_DIR}"

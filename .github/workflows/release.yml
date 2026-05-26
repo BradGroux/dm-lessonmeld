@@ -53,6 +53,7 @@ jobs:
       - name: Validate packaging scripts
         run: |
           plutil -lint Packaging/Info.plist
+          plutil -lint Packaging/Entitlements.plist
           bash -n scripts/build-app.sh
           bash -n scripts/capture-device-matrix-smoke.sh
           bash -n scripts/package-app.sh
@@ -192,6 +193,9 @@ jobs:
           )
 
           codesign --verify --strict --deep --verbose=2 "Packaging/Digital Meld LessonMeld.app"
+          app_entitlements="$(codesign -d --entitlements :- "Packaging/Digital Meld LessonMeld.app" 2>/dev/null)"
+          printf '%s' "${app_entitlements}" | grep -q '<key>com.apple.security.device.audio-input</key>'
+          printf '%s' "${app_entitlements}" | grep -q '<key>com.apple.security.device.camera</key>'
           scripts/verify-dmg.sh "${dmg_path}"
 
           if [[ "${SIGNING_CONFIGURED}" == "1" ]]; then
