@@ -19,7 +19,7 @@ public enum MicrophonePermission {
     }
 
     public static var isGranted: Bool {
-        authorizationStatus == .authorized
+        authorizationStatus == .authorized || canCreateDefaultInput
     }
 
     public static func requestAccess() async -> Bool {
@@ -36,6 +36,13 @@ public enum MicrophonePermission {
 
     public static var privacySettingsURL: URL {
         URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+    }
+
+    private static var canCreateDefaultInput: Bool {
+        guard let device = AVCaptureDevice.default(for: .audio) else {
+            return false
+        }
+        return (try? AVCaptureDeviceInput(device: device)) != nil
     }
 }
 
