@@ -1472,7 +1472,7 @@ private struct AnnotationOverlayToolbarView: View {
 
     private var closeButton: some View {
         iconButton("xmark", active: false, label: "Close annotation tools") {
-            runToolbarAction(preserveTool: false, onClose)
+            onClose()
         }
     }
 

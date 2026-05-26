@@ -48,7 +48,12 @@ struct ProjectEditorView: View {
                     model.loadProject(projectURL)
                 }
             }
-            quickRecorder.annotationOverlayHandler = { [annotationOverlay, weak model] preferences in
+            quickRecorder.annotationOverlayToggleHandler = { [annotationOverlay, weak model] preferences in
+                if annotationOverlay.isPresented {
+                    annotationOverlay.close()
+                    return
+                }
+
                 let storeURL = model?.projectURL == nil ? nil : model?.prepareAnnotationSidecarForOverlay()
                 annotationOverlay.open(preferences: preferences, annotationStoreURL: storeURL, forceToolbarVisible: true)
             }
@@ -67,7 +72,7 @@ struct ProjectEditorView: View {
         }
         .onDisappear {
             quickRecorder.openProjectHandler = nil
-            quickRecorder.annotationOverlayHandler = fallbackAnnotationOverlayHandler
+            quickRecorder.annotationOverlayToggleHandler = fallbackAnnotationOverlayHandler
             ProjectOpenRouter.shared.unregisterConsumer()
             model.closeProject()
             appRouter.updateProjectCommandState(.empty)

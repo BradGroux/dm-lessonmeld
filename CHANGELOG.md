@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.12 - 2026-05-26
+
+- Made the floating recorder palette button toggle annotation tools open and closed.
+- Made the annotation toolbar close button dismiss the overlay directly.
+
 ## 0.0.11 - 2026-05-26
 
 - Treated microphone and camera permissions as ready when AVFoundation can create the default input, matching macOS Privacy settings after signed-app updates.

@@ -22,7 +22,7 @@ struct DMLessonMeldApp: App {
                 annotationOverlay: annotationOverlay,
                 quickRecorder: quickRecorder,
                 fallbackAnnotationOverlayHandler: { preferences in
-                    annotationOverlay.open(preferences: preferences, forceToolbarVisible: true)
+                    annotationOverlay.toggle(preferences: preferences, forceToolbarVisible: true)
                 }
             )
                 .frame(
@@ -38,8 +38,8 @@ struct DMLessonMeldApp: App {
                     annotationOverlay.openSettingsHandler = { section in
                         appRouter.openSettings(section)
                     }
-                    quickRecorder.annotationOverlayHandler = { preferences in
-                        annotationOverlay.open(preferences: preferences, forceToolbarVisible: true)
+                    quickRecorder.annotationOverlayToggleHandler = { preferences in
+                        annotationOverlay.toggle(preferences: preferences, forceToolbarVisible: true)
                     }
                 }
         }
