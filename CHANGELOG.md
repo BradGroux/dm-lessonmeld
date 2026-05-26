@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.11 - 2026-05-26
+
+- Treated microphone and camera permissions as ready when AVFoundation can create the default input, matching macOS Privacy settings after signed-app updates.
+
 ## 0.0.10 - 2026-05-26
 
 - Added hardened runtime microphone and camera entitlements to local and Developer ID signed app bundles so granted macOS Privacy access is usable by the shipped app.
