@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.9 - 2026-05-26
+
+- Kept the dashboard permission rows in sync while macOS Privacy settings are changed in another window.
+- Rendered recorder permission readiness from the app model's published permission state so granted Microphone and Camera access shows as Ready.
+
 ## 0.0.8 - 2026-05-26
 
 - Reworked Settings around a native macOS sidebar/detail layout with standard search and toolbar actions.

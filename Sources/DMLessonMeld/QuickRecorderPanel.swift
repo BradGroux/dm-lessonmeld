@@ -845,10 +845,16 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     var permissionPreflight: PermissionPreflightSnapshot {
-        PermissionPreflight.recorder(
+        PermissionPreflight.snapshot(
+            screenGranted: screenGranted,
+            microphoneGranted: microphoneGranted,
+            cameraGranted: cameraGranted,
+            accessibilityGranted: AccessibilityPermission.isGranted,
+            inputMonitoringGranted: InputMonitoringPermission.isGranted,
             captureMicrophone: captureMicrophone,
             captureWebcam: captureWebcam,
-            captureInteractionMetadata: captureInteractionMetadata
+            captureInteractionMetadata: captureInteractionMetadata,
+            includeAutomationPermissions: false
         )
     }
 
@@ -1063,9 +1069,10 @@ final class QuickRecorderModel: ObservableObject {
 
     func requestMicrophonePermission(openSettingsAfterRequest: Bool = false) {
         Task {
-            _ = await MicrophonePermission.requestAccess()
+            let granted = await MicrophonePermission.requestAccess()
             await MainActor.run {
                 self.refreshPermissions()
+                self.microphoneGranted = granted || self.microphoneGranted
                 if openSettingsAfterRequest {
                     NSWorkspace.shared.open(AppPermissionID.microphone.settingsURL)
                 }
@@ -1078,9 +1085,10 @@ final class QuickRecorderModel: ObservableObject {
 
     func requestCameraPermission(openSettingsAfterRequest: Bool = false) {
         Task {
-            _ = await CameraPermission.requestAccess()
+            let granted = await CameraPermission.requestAccess()
             await MainActor.run {
                 self.refreshPermissions()
+                self.cameraGranted = granted || self.cameraGranted
                 if openSettingsAfterRequest {
                     NSWorkspace.shared.open(AppPermissionID.camera.settingsURL)
                 }
