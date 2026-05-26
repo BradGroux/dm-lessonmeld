@@ -26,6 +26,7 @@ struct ProjectEditorView: View {
     @AppStorage("LessonMeld.mediaEditor.inspectorVisible") var mediaEditorInspectorVisible = true
     @AppStorage("LessonMeld.mediaEditor.timelineVisible") var mediaEditorTimelineVisible = true
     @AppStorage("LessonMeld.mediaEditor.inspectorWidth") var mediaEditorInspectorWidth = 420.0
+    private let permissionRefreshTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -72,6 +73,10 @@ struct ProjectEditorView: View {
             appRouter.updateProjectCommandState(.empty)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            quickRecorder.refreshPermissions(updateMessage: false)
+        }
+        .onReceive(permissionRefreshTimer) { _ in
+            guard quickRecorder.permissionPreflight.items.contains(where: \.isMissing) else { return }
             quickRecorder.refreshPermissions(updateMessage: false)
         }
         .onReceive(appRouter.$importVideoRequest.compactMap(\.self)) { _ in
