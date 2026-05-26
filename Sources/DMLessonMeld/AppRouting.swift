@@ -35,7 +35,7 @@ struct LessonMeldProjectCommandRequest: Identifiable, Equatable {
     var command: LessonMeldProjectCommand
 }
 
-enum LessonMeldSettingsSection: String, CaseIterable, Identifiable {
+enum LessonMeldSettingsSection: String, CaseIterable, Hashable, Identifiable {
     case general
     case capture
     case camera

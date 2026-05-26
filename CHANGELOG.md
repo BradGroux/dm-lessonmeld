@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.8 - 2026-05-26
+
+- Reworked Settings around a native macOS sidebar/detail layout with standard search and toolbar actions.
+- Opened the correct macOS Privacy pane when Microphone or Camera access is missing from the dashboard permission rows.
+
 ## 0.0.7 - 2026-05-26
 
 - Made main-dashboard permission warnings actionable so clicking a missing permission opens the native macOS permission flow or System Settings pane.

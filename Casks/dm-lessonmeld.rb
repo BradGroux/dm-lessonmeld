@@ -1,5 +1,5 @@
 cask "dm-lessonmeld" do
-  version "0.0.7"
+  version "0.0.8"
   sha256 "48e5b65a88cf41cf17ad6e5abb0c6ce35745058a630a4cafebaa1624dd7bf708"
 
   url "https://github.com/BradGroux/dm-lessonmeld/releases/download/v#{version}/dm-lessonmeld-#{version}-macos.zip"
