@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.7 - 2026-05-26
+
+- Made main-dashboard permission warnings actionable so clicking a missing permission opens the native macOS permission flow or System Settings pane.
+- Made Settings sections scroll independently so sidebar and detail content remain reachable in shorter windows.
+
 ## 0.0.6 - 2026-05-26
 
 - Stopped preparing the local app-control Keychain token during normal app startup so recorder users are not prompted for Keychain access on launch.
