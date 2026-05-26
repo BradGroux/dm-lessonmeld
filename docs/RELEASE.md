@@ -33,6 +33,7 @@ Run:
 swift build
 swift test
 plutil -lint Packaging/Info.plist
+plutil -lint Packaging/Entitlements.plist
 bash -n scripts/build-app.sh
 bash -n scripts/package-app.sh
 bash -n scripts/package-dmg.sh
@@ -73,6 +74,8 @@ Output:
 ```
 
 Ad-hoc signed preview builds are suitable for local and intentional developer-preview testing. General users should receive the Developer ID signed and notarized DMG.
+
+Both local app bundles and Developer ID signed release bundles embed `Packaging/Entitlements.plist`. Keep the audio input and camera entitlements in that file aligned with the app's Microphone and Camera privacy usage descriptions; otherwise macOS can show the app enabled in Privacy settings while AVFoundation still reports access as unavailable.
 
 ## Sign
 

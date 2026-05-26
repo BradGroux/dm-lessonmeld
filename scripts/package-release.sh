@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="Digital Meld LessonMeld"
 APP_DIR="${ROOT_DIR}/Packaging/${APP_NAME}.app"
+ENTITLEMENTS_PATH="${ROOT_DIR}/Packaging/Entitlements.plist"
 DIST_DIR="${ROOT_DIR}/.build/dist"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${ROOT_DIR}/Packaging/Info.plist")"
 ZIP_PATH="${DIST_DIR}/dm-lessonmeld-${VERSION}-macos.zip"
@@ -14,6 +15,7 @@ cd "${ROOT_DIR}"
 
 scripts/build-app.sh release >/dev/null
 plutil -lint Packaging/Info.plist >/dev/null
+plutil -lint Packaging/Entitlements.plist >/dev/null
 
 NOTARIZE_ARGS=()
 if [[ -n "${NOTARIZE_PROFILE:-}" ]]; then
@@ -51,7 +53,7 @@ if [[ "${REQUIRE_NOTARIZATION}" == "1" ]]; then
 fi
 
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
-  codesign --force --deep --options runtime --timestamp --sign "${CODESIGN_IDENTITY}" "${APP_DIR}"
+  codesign --force --deep --options runtime --entitlements "${ENTITLEMENTS_PATH}" --timestamp --sign "${CODESIGN_IDENTITY}" "${APP_DIR}"
   codesign --verify --strict --deep --verbose=2 "${APP_DIR}"
 else
   codesign --verify --strict --deep --verbose=2 "${APP_DIR}"
