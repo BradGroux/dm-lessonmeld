@@ -754,7 +754,7 @@ final class QuickRecorderModel: ObservableObject {
     private var activeRecordingID: UUID?
     private var stopTimeoutTask: Task<Void, Never>?
     var openProjectHandler: ((URL) -> Void)?
-    var annotationOverlayHandler: ((LessonMeldPreferences) -> Void)?
+    var annotationOverlayToggleHandler: ((LessonMeldPreferences) -> Void)?
 
     var formattedElapsed: String {
         Self.formatClock(elapsedSeconds)
@@ -950,11 +950,11 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     func toggleAnnotationOverlay(_ preferences: LessonMeldPreferences) {
-        guard let annotationOverlayHandler else {
+        guard let annotationOverlayToggleHandler else {
             message = "Open the main window to use the annotation overlay."
             return
         }
-        annotationOverlayHandler(preferences)
+        annotationOverlayToggleHandler(preferences)
         message = "Toggled annotation overlay."
     }
 
