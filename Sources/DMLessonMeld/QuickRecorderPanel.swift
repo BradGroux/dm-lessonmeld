@@ -1045,9 +1045,9 @@ final class QuickRecorderModel: ObservableObject {
                 ? "Screen Recording permission is granted."
                 : "macOS may require reopening the app after granting Screen Recording permission."
         case .microphone:
-            requestMicrophonePermission()
+            requestMicrophonePermission(openSettingsAfterRequest: true)
         case .camera:
-            requestCameraPermission()
+            requestCameraPermission(openSettingsAfterRequest: true)
         case .accessibility:
             AccessibilityPermission.requestAccess()
             NSWorkspace.shared.open(permission.settingsURL)
@@ -1061,26 +1061,32 @@ final class QuickRecorderModel: ObservableObject {
         }
     }
 
-    func requestMicrophonePermission() {
+    func requestMicrophonePermission(openSettingsAfterRequest: Bool = false) {
         Task {
             _ = await MicrophonePermission.requestAccess()
             await MainActor.run {
                 self.refreshPermissions()
+                if openSettingsAfterRequest {
+                    NSWorkspace.shared.open(AppPermissionID.microphone.settingsURL)
+                }
                 self.message = self.microphoneGranted
                     ? "Microphone permission is granted."
-                    : "Microphone permission is still missing."
+                    : "Open Microphone Settings to grant access."
             }
         }
     }
 
-    func requestCameraPermission() {
+    func requestCameraPermission(openSettingsAfterRequest: Bool = false) {
         Task {
             _ = await CameraPermission.requestAccess()
             await MainActor.run {
                 self.refreshPermissions()
+                if openSettingsAfterRequest {
+                    NSWorkspace.shared.open(AppPermissionID.camera.settingsURL)
+                }
                 self.message = self.cameraGranted
                     ? "Camera permission is granted."
-                    : "Camera permission is still missing."
+                    : "Open Camera Settings to grant access."
             }
         }
     }

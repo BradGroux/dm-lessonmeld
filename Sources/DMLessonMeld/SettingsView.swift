@@ -6,7 +6,6 @@ import UniformTypeIdentifiers
 struct LessonMeldSettingsView: View {
     @ObservedObject var appRouter: LessonMeldAppRouter
     @ObservedObject var preferences: AppPreferencesController
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @State private var selectedSection: LessonMeldSettingsSection = .capture
     @State private var settingsSearchText = ""
@@ -21,17 +20,12 @@ struct LessonMeldSettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            settingsToolbar
-            Divider()
-
-            HStack(spacing: 0) {
-                sidebar
-                    .frame(width: 190)
-                Divider()
-                contentPane
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        NavigationSplitView {
+            settingsSidebar
+                .navigationTitle("Settings")
+                .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 300)
+        } detail: {
+            contentPane
         }
         .frame(
             minWidth: AppUILayoutSurface.settings.minimumSize.width,
@@ -40,6 +34,9 @@ struct LessonMeldSettingsView: View {
             idealHeight: 640
         )
         .background(Color(nsColor: .windowBackgroundColor))
+        .toolbar {
+            settingsToolbarItems
+        }
         .onAppear {
             refreshDraft()
             applySettingsRequest(appRouter.settingsRequest)
@@ -75,25 +72,20 @@ struct LessonMeldSettingsView: View {
         settingsSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
-    private var settingsToolbar: some View {
-        HStack(spacing: 12) {
-            Button {
-                dismiss()
-            } label: {
-                Label("Back", systemImage: "chevron.left")
+    private var selectedSectionBinding: Binding<LessonMeldSettingsSection?> {
+        Binding(
+            get: { activeSection },
+            set: { newValue in
+                if let newValue {
+                    selectedSection = newValue
+                }
             }
+        )
+    }
 
-            Label("Search", systemImage: "magnifyingglass")
-                .labelStyle(.iconOnly)
-                .foregroundStyle(.secondary)
-            TextField("Search settings", text: $settingsSearchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 220)
-                .accessibilityLabel("Search settings")
-                .accessibilityHint("Filter settings by workflow, feature, or section name.")
-
-            Spacer()
-
+    @ToolbarContentBuilder
+    private var settingsToolbarItems: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
             Text(hasUnsavedChanges ? "Unsaved changes" : saveMessage)
                 .font(.caption)
                 .foregroundStyle(hasUnsavedChanges ? .orange : .secondary)
@@ -108,6 +100,10 @@ struct LessonMeldSettingsView: View {
             }
             .disabled(!hasUnsavedChanges)
 
+            Button("Reset Defaults...") {
+                confirmResetDefaults()
+            }
+
             Button("Save All") {
                 preferences.replace(with: draft)
                 refreshDraft()
@@ -116,9 +112,6 @@ struct LessonMeldSettingsView: View {
             .keyboardShortcut("s", modifiers: .command)
             .disabled(!hasUnsavedChanges)
         }
-        .padding(.top, 54)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
     }
 
     private var contentPane: some View {
@@ -138,62 +131,34 @@ struct LessonMeldSettingsView: View {
         .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Settings")
-                .font(.title2.weight(.semibold))
-                .padding(.bottom, 12)
-
-            ScrollView {
-                settingsSectionList
-            }
-            .frame(maxHeight: .infinity, alignment: .top)
-
-            Button("Reset Defaults") {
-                confirmResetDefaults()
-            }
-            .foregroundStyle(.secondary)
-        }
-        .padding(.top, 16)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-        .background(LessonMeldDesign.panelFill)
-    }
-
-    @ViewBuilder
-    private var settingsSectionList: some View {
-        if visibleGroups.isEmpty {
-            Text("No settings match.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
+    private var settingsSidebar: some View {
+        List(selection: selectedSectionBinding) {
+            if visibleGroups.isEmpty {
+                Text("No settings match.")
+                    .foregroundStyle(.secondary)
+            } else {
                 ForEach(visibleGroups, id: \.title) { group in
-                    Text(group.title.uppercased())
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8)
-                        .padding(.horizontal, 8)
-
-                    ForEach(group.sections) { section in
-                        Button {
-                            selectedSection = section
-                        } label: {
-                            LessonMeldSidebarItem(
-                                title: section.title,
-                                systemImage: section.symbolName,
-                                isSelected: activeSection == section,
-                                isDirty: sectionHasUnsavedChanges(section)
-                            )
+                    Section(group.title) {
+                        ForEach(group.sections) { section in
+                            HStack(spacing: 8) {
+                                Label(section.title, systemImage: section.symbolName)
+                                Spacer(minLength: 8)
+                                if sectionHasUnsavedChanges(section) {
+                                    Circle()
+                                        .fill(Color.orange)
+                                        .frame(width: 6, height: 6)
+                                        .accessibilityLabel("Unsaved changes")
+                                }
+                            }
+                            .tag(section)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .listStyle(.sidebar)
+        .searchable(text: $settingsSearchText, prompt: "Search settings")
+        .accessibilityLabel("Settings sections")
     }
 
     @ViewBuilder private var sectionView: some View {
@@ -1190,23 +1155,19 @@ private struct SettingsSectionView<Content: View>: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.largeTitle.weight(.semibold))
+                    .font(.title.weight(.semibold))
                 Text(subtitle)
                     .foregroundStyle(.secondary)
                 Label(scope.title, systemImage: scope.systemImage)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(scope.tint)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(scope.tint.opacity(0.12), in: Capsule())
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
 
-            SettingsCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    content
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Form {
+                content
             }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
         }
     }
 }
