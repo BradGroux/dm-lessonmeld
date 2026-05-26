@@ -611,8 +611,9 @@ extension ProjectEditorView {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
     func permissionRow(_ item: PermissionPreflightItem) -> some View {
-        HStack(spacing: 8) {
+        let row = HStack(spacing: 8) {
             Image(systemName: item.isGranted ? "checkmark.circle.fill" : item.id.systemImage)
                 .foregroundStyle(item.isGranted ? Color.green : (item.isBlocking ? Color.orange : Color.secondary))
             Text(item.id.shortTitle)
@@ -624,6 +625,23 @@ extension ProjectEditorView {
             Text(item.statusTitle)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(item.isGranted ? Color.green : (item.isBlocking ? Color.orange : Color.secondary))
+        }
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+
+        if item.isMissing {
+            Button {
+                quickRecorder.requestPermission(item.id)
+            } label: {
+                row
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(item.id.title), \(item.need.title), \(item.statusTitle)")
+            .accessibilityHint("Opens the macOS permission prompt or System Settings pane.")
+        } else {
+            row
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(item.id.title), \(item.need.title), \(item.statusTitle)")
         }
     }
 

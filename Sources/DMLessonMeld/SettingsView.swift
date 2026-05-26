@@ -31,6 +31,7 @@ struct LessonMeldSettingsView: View {
                 Divider()
                 contentPane
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(
             minWidth: AppUILayoutSurface.settings.minimumSize.width,
@@ -132,8 +133,9 @@ struct LessonMeldSettingsView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 24)
             .frame(maxWidth: 760, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(minWidth: 540)
+        .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var sidebar: some View {
@@ -142,12 +144,32 @@ struct LessonMeldSettingsView: View {
                 .font(.title2.weight(.semibold))
                 .padding(.bottom, 12)
 
-            if visibleGroups.isEmpty {
-                Text("No settings match.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
-            } else {
+            ScrollView {
+                settingsSectionList
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+
+            Button("Reset Defaults") {
+                confirmResetDefaults()
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(.top, 16)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+        .background(LessonMeldDesign.panelFill)
+    }
+
+    @ViewBuilder
+    private var settingsSectionList: some View {
+        if visibleGroups.isEmpty {
+            Text("No settings match.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(visibleGroups, id: \.title) { group in
                     Text(group.title.uppercased())
                         .font(.caption2.weight(.semibold))
@@ -170,18 +192,8 @@ struct LessonMeldSettingsView: View {
                     }
                 }
             }
-
-            Spacer()
-
-            Button("Reset Defaults") {
-                confirmResetDefaults()
-            }
-            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(.top, 16)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-        .background(LessonMeldDesign.panelFill)
     }
 
     @ViewBuilder private var sectionView: some View {
