@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.6 - 2026-05-26
+
+- Stopped preparing the local app-control Keychain token during normal app startup so recorder users are not prompted for Keychain access on launch.
+- Kept Keychain-backed app-control authentication lazy for explicit CLI/automation commands.
+
 ## 0.0.5 - 2026-05-25
 
 - Registered the `io.digitalmeld.dm-lessonmeld` Apple App ID for Digital Meld release signing.

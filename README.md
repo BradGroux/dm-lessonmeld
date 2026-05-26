@@ -21,7 +21,7 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - Raw asset extraction and local `.lessonshare` packages with final video, project sidecars, raw media, transcripts/captions, and checksums
 - Local package export for course publishing workflows
 - Git-safe settings/template backup planning for non-sensitive config
-- Agent-readable project manifests, target-specific workflow JSON, a stdio MCP wrapper for safe CLI tools, and Keychain-backed signed local app-control messages for automation
+- Agent-readable project manifests, target-specific workflow JSON, a stdio MCP wrapper for safe CLI tools, and lazy Keychain-backed signed local app-control messages for automation
 - `dmlesson` CLI for capture, project, edit, render, export, package, settings, config backup, annotations, transcription status, and app-control workflows
 
 ## Documentation
@@ -169,6 +169,8 @@ swift run dmlesson app status --json
 ```
 
 `record windows --json` redacts window titles by default for automation logs. Add `--include-window-titles` only when you are intentionally choosing a window interactively.
+
+App-control commands use a Keychain-backed local token for authentication. Normal app launch and recording do not require Keychain access; the token is touched only when app-control automation is used.
 
 ## Privacy
 

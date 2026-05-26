@@ -17,11 +17,6 @@ final class LocalAppControlBridge {
     func configure(quickRecorder: QuickRecorderModel, preferences: AppPreferencesController) {
         self.quickRecorder = quickRecorder
         self.preferences = preferences
-        do {
-            _ = try LocalAppControl.ensureControlToken()
-        } catch {
-            localAppControlLogger.error("Failed to prepare local app-control token: \(error.localizedDescription, privacy: .public)")
-        }
         quickRecorder.publishStatus()
 
         guard observer == nil else { return }

@@ -37,7 +37,7 @@ Tests/
 
 - Normal operation has no backend.
 - Secrets belong in macOS Keychain, not project/config files.
-- Local app-control tokens are stored in Keychain, with a short-lived persisted nonce cache to reject replayed local commands.
+- Local app-control tokens are stored in Keychain only when explicit app-control automation is used, with a short-lived persisted nonce cache to reject replayed local commands.
 - Git sync is local-first, opt-in, and only for non-sensitive config/templates/presets. Adding a GitHub remote is left to the user or a future explicit integration.
 - The app owns the interactive permission/recording path. The CLI also supports direct local capture for automation, smoke tests, and agent workflows.
 - Settings are persisted locally through `UserDefaults` as a versioned `LessonMeldPreferences` snapshot.
