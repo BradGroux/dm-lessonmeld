@@ -578,6 +578,51 @@ struct RenderPlanTests {
         })
     }
 
+    @Test("Validation rejects excessive final canvas dimensions")
+    func validationRejectsExcessiveFinalCanvasDimensions() {
+        let projectURL = URL(fileURLWithPath: "/tmp/Lesson.dmlm")
+        let plan = RenderPlan(
+            projectURL: projectURL,
+            destinationURL: URL(fileURLWithPath: "/tmp/lesson.mp4"),
+            preset: RenderPreset(resolution: .p2160),
+            screenVideo: RenderMediaSource(
+                role: .screenVideo,
+                relativePath: "screen.mp4",
+                url: projectURL.appendingPathComponent("screen.mp4"),
+                mimeType: "video/mp4"
+            ),
+            canvas: EditorCanvasSettings(
+                aspectRatio: .custom,
+                customSize: EditorCanvasCustomSize(width: 7_680, height: 16)
+            )
+        )
+
+        let issues = plan.validate()
+
+        #expect(issues.contains {
+            $0.severity == .error &&
+                $0.path == "canvas" &&
+                $0.message.contains("Canvas render dimensions")
+        })
+    }
+
+    @Test("Final canvas dimension guard enforces finite sane even bounds")
+    func finalCanvasDimensionGuardEnforcesBounds() {
+        let invalidSizes = [
+            CGSize(width: CGFloat.nan, height: 1_080),
+            CGSize(width: 14, height: 1_080),
+            CGSize(width: 1_919, height: 1_080),
+            CGSize(width: 7_682, height: 1_080)
+        ]
+
+        for size in invalidSizes {
+            #expect(!RenderPlanValidator.canvasRenderDimensionIssues(size).isEmpty)
+        }
+        #expect(RenderPlanValidator.canvasRenderDimensionIssues(
+            CGSize(width: 1_920, height: 1_080)
+        ).isEmpty)
+    }
+
     @Test("Validation rejects negative normalized origins in direct render plans")
     func validationRejectsNegativeNormalizedOrigins() throws {
         let temp = try TemporaryDirectory()
