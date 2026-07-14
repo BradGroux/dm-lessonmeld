@@ -1,5 +1,6 @@
-import DMLessonMeldCore
+import AppKit
 import CoreGraphics
+import DMLessonMeldCore
 import Foundation
 
 @main
@@ -201,6 +202,12 @@ struct DMLessonMeldCLI {
     }
 
     static func awaitCompatibleRecord(_ arguments: [String]) throws {
+        if arguments.contains("--window-id") {
+            MainActor.assumeIsolated {
+                _ = NSApplication.shared
+            }
+        }
+
         let semaphore = DispatchSemaphore(value: 0)
         final class Box: @unchecked Sendable {
             var result: Result<Void, Error>?
