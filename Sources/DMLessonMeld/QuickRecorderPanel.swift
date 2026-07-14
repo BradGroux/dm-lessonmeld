@@ -1198,6 +1198,7 @@ final class QuickRecorderModel: ObservableObject {
                         sourceRect: sourceRect,
                         windowID: windowID,
                         recordTarget: recordTarget,
+                        captureInteractionMetadata: captureInteractionMetadata,
                         captureMicrophone: captureMicrophone,
                         captureWebcam: captureWebcam,
                         captureSystemAudio: captureSystemAudio,
@@ -1720,6 +1721,7 @@ final class QuickRecorderModel: ObservableObject {
         sourceRect: CGRect?,
         windowID: UInt32?,
         recordTarget: QuickRecordTarget,
+        captureInteractionMetadata: Bool,
         captureMicrophone: Bool,
         captureWebcam: Bool,
         captureSystemAudio: Bool,
@@ -1743,12 +1745,13 @@ final class QuickRecorderModel: ObservableObject {
             try ProjectBundle.writeManifest(
                 ProjectManifest(
                     metadata: LessonMetadata(lessonTitle: projectURL.deletingPathExtension().lastPathComponent),
-                    capture: projectCaptureSettings(
+                    capture: QuickRecordingCaptureSettingsFactory.make(
                         preferences: preferences,
+                        target: ProjectCaptureTarget(quickRecordTarget: recordTarget),
                         displayID: displayID,
                         sourceRect: sourceRect,
                         windowID: windowID,
-                        recordTarget: recordTarget,
+                        captureInteractionMetadata: captureInteractionMetadata,
                         captureMicrophone: captureMicrophone,
                         captureWebcam: captureWebcam,
                         captureSystemAudio: captureSystemAudio,
@@ -1858,12 +1861,13 @@ final class QuickRecorderModel: ObservableObject {
                     },
                     embeddedAudio: screenResult.systemAudioURL == nil ? nil : ProjectEmbeddedAudio(screenVideo: [.systemAudio])
                 ),
-                capture: projectCaptureSettings(
+                capture: QuickRecordingCaptureSettingsFactory.make(
                     preferences: preferences,
+                    target: ProjectCaptureTarget(quickRecordTarget: recordTarget),
                     displayID: displayID,
                     sourceRect: sourceRect,
                     windowID: windowID,
-                    recordTarget: recordTarget,
+                    captureInteractionMetadata: captureInteractionMetadata,
                     captureMicrophone: captureMicrophone,
                     captureWebcam: captureWebcam,
                     captureSystemAudio: captureSystemAudio,
@@ -1911,45 +1915,6 @@ final class QuickRecorderModel: ObservableObject {
             }
             throw error
         }
-    }
-
-    private static func projectCaptureSettings(
-        preferences: LessonMeldPreferences,
-        displayID: CGDirectDisplayID?,
-        sourceRect: CGRect?,
-        windowID: UInt32?,
-        recordTarget: QuickRecordTarget,
-        captureMicrophone: Bool,
-        captureWebcam: Bool,
-        captureSystemAudio: Bool,
-        microphoneDeviceID: String?,
-        cameraDeviceID: String?
-    ) -> ProjectCaptureSettings {
-        ProjectCaptureSettings(
-            target: ProjectCaptureTarget(quickRecordTarget: recordTarget),
-            displayID: displayID,
-            windowID: windowID,
-            region: sourceRect.map(ProjectCaptureRegion.init),
-            screenFPS: preferences.capture.fps,
-            includeCursor: preferences.capture.includeCursor,
-            captureInteractionMetadata: preferences.capture.captureInteractionMetadata,
-            captureMicrophone: captureMicrophone,
-            microphoneDeviceID: microphoneDeviceID,
-            captureWebcam: captureWebcam,
-            captureSystemAudio: captureSystemAudio,
-            webcam: ProjectWebcamCaptureSettings(
-                cameraID: cameraDeviceID,
-                resolution: preferences.capture.cameraResolution,
-                fps: preferences.capture.webcamFPS,
-                aspectRatio: preferences.capture.webcamAspectRatio,
-                frameShape: preferences.capture.webcamFrameShape,
-                cornerRadius: preferences.capture.webcamCornerRadius,
-                relativeSize: preferences.capture.webcamRelativeSize,
-                isMirrored: preferences.capture.webcamMirror,
-                borderEnabled: preferences.capture.webcamBorderEnabled,
-                shadowEnabled: preferences.capture.webcamShadowEnabled
-            )
-        )
     }
 
     private static func hasRecoverableRecordingFiles(in projectURL: URL) -> Bool {
