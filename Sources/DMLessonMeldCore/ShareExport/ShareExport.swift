@@ -215,9 +215,6 @@ public struct LocalSharePackageBuilder {
             guard FileManager.default.fileExists(atPath: finalVideoURL.path) else {
                 throw ShareExportError.finalVideoMissing(finalVideoURL.path)
             }
-            guard !ShareExportUtilities.isSymbolicLink(finalVideoURL) else {
-                throw ShareExportError.unsafeSource(finalVideoURL.path)
-            }
             guard ShareExportUtilities.isSupportedFinalVideo(finalVideoURL) else {
                 throw ShareExportError.unsupportedFinalVideo(finalVideoURL.path)
             }
@@ -433,9 +430,6 @@ private enum ShareExportUtilities {
             try validatePackageRelativePath(sourceRelativePath, error: ShareExportError.unsafeSource)
         }
         try Task.checkCancellation()
-        guard !isSymbolicLink(sourceURL) else {
-            throw ShareExportError.unsafeSource(sourceURL.path)
-        }
         try ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: destinationRoot, error: ShareExportError.unsafeDestination)
         if FileManager.default.fileExists(atPath: destinationURL.path) {
             guard !isSymbolicLink(destinationURL) else {
@@ -444,14 +438,19 @@ private enum ShareExportUtilities {
             try FileManager.default.removeItem(at: destinationURL)
         }
         try Task.checkCancellation()
-        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        let copyResult: TrustedFileAccess.CopyResult
+        do {
+            copyResult = try TrustedFileAccess.copyAndHash(from: sourceURL, to: destinationURL)
+        } catch TrustedFileAccessError.notRegularFile {
+            throw ShareExportError.unsafeSource(sourceURL.path)
+        }
         try Task.checkCancellation()
         return SharePackageFile(
             role: role,
             relativePath: relativePath,
             sourceRelativePath: sourceRelativePath,
-            sha256: try sha256Hex(for: destinationURL),
-            byteCount: try byteCount(for: destinationURL)
+            sha256: copyResult.sha256,
+            byteCount: copyResult.byteCount
         )
     }
 

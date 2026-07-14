@@ -476,7 +476,7 @@ public enum RenderPlanValidator {
     ) {
         guard fileManager.fileExists(atPath: source.url.path) else { return }
         do {
-            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath, fileManager: fileManager)
+            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
             let store = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
             if appendCountLimitIssue(
                 count: store.annotations.count,
@@ -574,7 +574,7 @@ public enum RenderPlanValidator {
     ) {
         guard fileManager.fileExists(atPath: source.url.path) else { return }
         do {
-            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath, fileManager: fileManager)
+            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
             let transcript = try DMLessonJSON.decoder().decode(TranscriptDocument.self, from: data)
             if appendCountLimitIssue(
                 count: transcript.segments.count,
@@ -624,7 +624,7 @@ public enum RenderPlanValidator {
     ) {
         guard fileManager.fileExists(atPath: source.url.path) else { return }
         do {
-            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath, fileManager: fileManager)
+            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
             let store = try DMLessonJSON.decoder().decode(OverlayStore.self, from: data)
             if appendCountLimitIssue(
                 count: store.overlays.count,
@@ -717,7 +717,7 @@ public enum RenderPlanValidator {
     ) {
         guard fileManager.fileExists(atPath: source.url.path) else { return }
         do {
-            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath, fileManager: fileManager)
+            let data = try RenderSidecarLimits.data(contentsOf: source.url, displayPath: source.relativePath)
             let metadata = try DMLessonJSON.decoder().decode(InteractionMetadataDocument.self, from: data)
             _ = appendCountLimitIssue(
                 count: metadata.cursorSamples.count,

@@ -535,9 +535,6 @@ public struct LearnHousePackageBuilder {
 
             let destinationRelativePath = "assets/\(file.relativePath)"
             let destinationURL = assetsURL.appendingPathComponent(file.relativePath)
-            guard !isSymbolicLink(sourceURL) else {
-                throw LearnHousePackageError.unsafeSource(sourceURL.path)
-            }
             try validatePackageRelativePath(destinationRelativePath)
             try ensureSafeDirectory(destinationURL.deletingLastPathComponent(), within: assetsURL)
             if FileManager.default.fileExists(atPath: destinationURL.path) {
@@ -547,14 +544,19 @@ public struct LearnHousePackageBuilder {
                 try FileManager.default.removeItem(at: destinationURL)
             }
             try Task.checkCancellation()
-            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            let copyResult: TrustedFileAccess.CopyResult
+            do {
+                copyResult = try TrustedFileAccess.copyAndHash(from: sourceURL, to: destinationURL)
+            } catch TrustedFileAccessError.notRegularFile {
+                throw LearnHousePackageError.unsafeSource(sourceURL.path)
+            }
             try Task.checkCancellation()
 
             return LearnHousePackageFile(
                 role: file.role,
                 relativePath: destinationRelativePath,
-                sha256: try sha256Hex(for: destinationURL),
-                byteCount: try byteCount(for: destinationURL)
+                sha256: copyResult.sha256,
+                byteCount: copyResult.byteCount
             )
         }
     }
@@ -567,15 +569,6 @@ public struct LearnHousePackageBuilder {
             .map { allowed.contains($0) ? Character($0) : "-" }
         let collapsed = String(lowered).split(separator: "-").joined(separator: "-")
         return collapsed.isEmpty ? "lesson-package" : collapsed
-    }
-
-    private func sha256Hex(for url: URL) throws -> String {
-        try FileChecksum.sha256Hex(for: url)
-    }
-
-    private func byteCount(for url: URL) throws -> Int64 {
-        let values = try url.resourceValues(forKeys: [.fileSizeKey])
-        return Int64(values.fileSize ?? 0)
     }
 
     private func artifacts(from files: [LearnHousePackageFile]) -> LearnHouseArtifacts {
@@ -681,7 +674,11 @@ public struct LearnHousePackageBuilder {
                 try FileManager.default.removeItem(at: destination)
             }
             try Task.checkCancellation()
-            try FileManager.default.copyItem(at: source, to: destination)
+            do {
+                _ = try TrustedFileAccess.copyAndHash(from: source, to: destination)
+            } catch TrustedFileAccessError.notRegularFile {
+                throw LearnHousePackageError.unsafeSource(source.path)
+            }
         }
 
         if let thumbnail = packagedFiles.first(where: { $0.role == .thumbnail }) {
@@ -695,7 +692,11 @@ public struct LearnHousePackageBuilder {
                 try FileManager.default.removeItem(at: destination)
             }
             try Task.checkCancellation()
-            try FileManager.default.copyItem(at: source, to: destination)
+            do {
+                _ = try TrustedFileAccess.copyAndHash(from: source, to: destination)
+            } catch TrustedFileAccessError.notRegularFile {
+                throw LearnHousePackageError.unsafeSource(source.path)
+            }
         }
     }
 

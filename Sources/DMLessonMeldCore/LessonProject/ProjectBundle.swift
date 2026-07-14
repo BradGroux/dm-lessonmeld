@@ -3,6 +3,7 @@ import Foundation
 public enum ProjectBundleError: Error, LocalizedError {
     case manifestNotFound(URL)
     case invalidBundle(URL)
+    case unsafeManifest(URL)
     case unsafeFileReference(String)
     case oversizedManifest(URL, byteCount: Int64, limit: Int64)
     case unreadableManifest(URL, String)
@@ -13,6 +14,8 @@ public enum ProjectBundleError: Error, LocalizedError {
             "No project.json found at \(url.path)."
         case .invalidBundle(let url):
             "Project path is not a directory: \(url.path)."
+        case .unsafeManifest(let url):
+            "Project manifest is not a trusted regular file: \(url.path)."
         case .unsafeFileReference(let path):
             "Project file reference must be a project-local relative path: \(path)"
         case .oversizedManifest(let url, let byteCount, let limit):
@@ -281,22 +284,24 @@ public enum ProjectBundle {
     }
 
     private static func boundedManifestData(from url: URL) throws -> Data {
-        if let byteCount = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init),
-           byteCount > maxManifestBytes {
+        do {
+            return try TrustedFileAccess.readData(from: url, maxBytes: maxManifestBytes)
+        } catch TrustedFileAccessError.notRegularFile {
+            throw ProjectBundleError.unsafeManifest(url)
+        } catch TrustedFileAccessError.tooLarge(let byteCount, _) {
             throw ProjectBundleError.oversizedManifest(url, byteCount: byteCount, limit: maxManifestBytes)
         }
-        let data = try Data(contentsOf: url)
-        if Int64(data.count) > maxManifestBytes {
-            throw ProjectBundleError.oversizedManifest(url, byteCount: Int64(data.count), limit: maxManifestBytes)
-        }
-        return data
     }
 
     private static func preserveUnreadableManifest(at manifestURL: URL) throws -> URL {
         let backupURL = manifestURL
             .deletingLastPathComponent()
             .appendingPathComponent("project.invalid-\(UUID().uuidString).json")
-        try FileManager.default.copyItem(at: manifestURL, to: backupURL)
+        do {
+            _ = try TrustedFileAccess.copyAndHash(from: manifestURL, to: backupURL)
+        } catch TrustedFileAccessError.notRegularFile {
+            throw ProjectBundleError.unsafeManifest(manifestURL)
+        }
         return backupURL
     }
 

@@ -529,9 +529,6 @@ private enum ConnectorPackageUtilities {
                 }
                 return nil
             }
-            guard !isSymbolicLink(sourceURL) else {
-                throw ConnectorPackageError.unsafeSource(sourceURL.path)
-            }
             let destinationURL = destinationRoot.appendingPathComponent(file.relativePath)
             let relativePath = "\(destinationPrefix)/\(file.relativePath)"
             try validatePackageRelativePath(relativePath)
@@ -542,13 +539,18 @@ private enum ConnectorPackageUtilities {
                 }
                 try FileManager.default.removeItem(at: destinationURL)
             }
-            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            let copyResult: TrustedFileAccess.CopyResult
+            do {
+                copyResult = try TrustedFileAccess.copyAndHash(from: sourceURL, to: destinationURL)
+            } catch TrustedFileAccessError.notRegularFile {
+                throw ConnectorPackageError.unsafeSource(sourceURL.path)
+            }
             return ConnectorPackageFile(
                 role: file.role,
                 relativePath: relativePath,
                 sourceRelativePath: file.relativePath,
-                sha256: try sha256Hex(for: destinationURL),
-                byteCount: try byteCount(for: destinationURL)
+                sha256: copyResult.sha256,
+                byteCount: copyResult.byteCount
             )
         }
     }
