@@ -120,7 +120,9 @@ DM_LESSONMELD_REQUIRE_NOTARIZATION=1 CODESIGN_IDENTITY="Developer ID Application
 
 Release packaging emits both `.zip` and `.dmg` paths and writes artifacts under `.build/dist`.
 
-See [docs/RELEASE.md](docs/RELEASE.md) for the full release checklist.
+GitHub releases accept only version tags whose commit is reachable from `main`. The secret-bearing release job uses the protected `release-signing` environment.
+
+See [docs/RELEASE.md](docs/RELEASE.md) for the full release checklist, required tag policy, environment approval, and rejected-release recovery path.
 
 ## Build and Test
 
