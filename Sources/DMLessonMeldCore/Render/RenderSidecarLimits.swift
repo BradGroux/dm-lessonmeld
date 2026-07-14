@@ -11,16 +11,19 @@ public enum RenderSidecarLimits {
 
     public static func data(
         contentsOf url: URL,
-        displayPath: String,
-        fileManager: FileManager = .default
+        displayPath: String
     ) throws -> Data {
-        let attributes = try fileManager.attributesOfItem(atPath: url.path)
-        if let byteCount = attributes[.size] as? NSNumber {
-            try checkByteCount(byteCount.int64Value, displayPath: displayPath)
+        do {
+            return try TrustedFileAccess.readData(from: url, maxBytes: Int64(maxSidecarBytes))
+        } catch TrustedFileAccessError.notRegularFile {
+            throw RenderSidecarLimitError.unsafeFile(path: displayPath)
+        } catch TrustedFileAccessError.tooLarge(let byteCount, _) {
+            throw RenderSidecarLimitError.sidecarTooLarge(
+                path: displayPath,
+                byteCount: byteCount,
+                limit: maxSidecarBytes
+            )
         }
-        let data = try Data(contentsOf: url)
-        try checkByteCount(Int64(data.count), displayPath: displayPath)
-        return data
     }
 
     public static func checkCount(_ count: Int, limit: Int, displayPath: String, itemName: String) throws {
@@ -94,11 +97,14 @@ public enum RenderSidecarLimits {
 }
 
 public enum RenderSidecarLimitError: Error, Equatable, LocalizedError, Sendable {
+    case unsafeFile(path: String)
     case sidecarTooLarge(path: String, byteCount: Int64, limit: Int)
     case tooManyItems(path: String, itemName: String, count: Int, limit: Int)
 
     public var errorDescription: String? {
         switch self {
+        case .unsafeFile(let path):
+            "\(path) is not a trusted regular sidecar file."
         case .sidecarTooLarge(let path, let byteCount, let limit):
             "\(path) is too large to render safely: \(byteCount) bytes exceeds the \(limit) byte limit."
         case .tooManyItems(let path, let itemName, let count, let limit):

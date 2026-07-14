@@ -172,6 +172,33 @@ struct ProjectBundleTests {
         }
     }
 
+    @Test("Load and repair reject symlinked project manifests")
+    func loadAndRepairRejectSymlinkedProjectManifests() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Symlinked.dmlm", isDirectory: true)
+        let outsideURL = temp.url.appendingPathComponent("outside-project.json")
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        try DMLessonJSON.encoder().encode(
+            ProjectManifest(metadata: LessonMetadata(lessonTitle: "Private outside manifest"))
+        ).write(to: outsideURL)
+        try FileManager.default.createSymbolicLink(
+            at: ProjectBundle.manifestURL(in: projectURL),
+            withDestinationURL: outsideURL
+        )
+
+        #expect(throws: ProjectBundleError.self) {
+            try ProjectBundle.loadManifest(at: projectURL)
+        }
+        #expect(throws: ProjectBundleError.self) {
+            try ProjectBundle.repair(at: projectURL)
+        }
+
+        let backups = try FileManager.default.contentsOfDirectory(at: projectURL, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("project.invalid-") }
+        #expect(backups.isEmpty)
+        #expect(try DMLessonJSON.decoder().decode(ProjectManifest.self, from: Data(contentsOf: outsideURL)).metadata.lessonTitle == "Private outside manifest")
+    }
+
     @Test("Repairs a bundle manifest from recoverable raw media")
     func repairsManifestFromRecoverableMedia() throws {
         let temp = try TemporaryDirectory()

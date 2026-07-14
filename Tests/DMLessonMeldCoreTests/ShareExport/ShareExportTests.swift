@@ -1,3 +1,4 @@
+import Darwin
 import DMLessonMeldCore
 import Foundation
 import Testing
@@ -110,6 +111,22 @@ struct ShareExportTests {
             try LocalSharePackageBuilder().buildPackage(
                 projectURL: projectURL,
                 outputDirectory: temp.url.appendingPathComponent("shares", isDirectory: true)
+            )
+        }
+    }
+
+    @Test("Rejects non-regular project assets without blocking")
+    func rejectsNonRegularProjectAssets() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = try makeProject(in: temp.url)
+        let screenURL = projectURL.appendingPathComponent("media/screen.mp4")
+        try FileManager.default.removeItem(at: screenURL)
+        try #require(mkfifo(screenURL.path, S_IRUSR | S_IWUSR) == 0)
+
+        #expect(throws: ShareExportError.self) {
+            try RawAssetExtractor().extract(
+                projectURL: projectURL,
+                outputDirectory: temp.url.appendingPathComponent("exports", isDirectory: true)
             )
         }
     }

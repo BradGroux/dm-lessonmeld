@@ -279,8 +279,7 @@ public enum EditorJobHistoryFile {
         guard exists(in: projectURL, fileManager: fileManager) else { return [] }
         let data = try RenderSidecarLimits.data(
             contentsOf: url(inProject: projectURL),
-            displayPath: defaultFileName,
-            fileManager: fileManager
+            displayPath: defaultFileName
         )
         let records = try DMLessonJSON.decoder().decode([EditorJobRecord].self, from: data)
         return Array(records.prefix(defaultRecordLimit))
