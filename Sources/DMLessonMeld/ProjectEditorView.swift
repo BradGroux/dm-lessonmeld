@@ -57,7 +57,6 @@ struct ProjectEditorView: View {
                 let storeURL = model?.projectURL == nil ? nil : model?.prepareAnnotationSidecarForOverlay()
                 annotationOverlay.open(preferences: preferences, annotationStoreURL: storeURL, forceToolbarVisible: true)
             }
-            LocalAppControlBridge.shared.configure(quickRecorder: quickRecorder, preferences: preferences)
             ProjectOpenRouter.shared.registerConsumer { projectURL in
                 confirmProjectTransition("open another project") {
                     model.loadProject(projectURL)
