@@ -13,7 +13,6 @@ final class AppPreferencesController: ObservableObject {
     private let defaults: UserDefaults
     private let key = "io.digitalmeld.dm-lessonmeld.preferences"
     private let launchStateKey = "io.digitalmeld.dm-lessonmeld.launchState"
-    private var terminationObserver: NSObjectProtocol?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -26,15 +25,6 @@ final class AppPreferencesController: ObservableObject {
         let diagnostics = Self.loadLaunchDiagnostics(defaults: defaults, key: launchStateKey)
         launchDiagnostics = diagnostics
         previousExitWasClean = diagnostics.lastExitWasClean
-        terminationObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.markCleanTermination()
-            }
-        }
         markLaunch()
     }
 

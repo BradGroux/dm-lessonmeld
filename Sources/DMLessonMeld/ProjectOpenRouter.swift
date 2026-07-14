@@ -38,12 +38,29 @@ final class ProjectOpenRouter {
     }
 }
 
+@MainActor
 final class LessonMeldAppDelegate: NSObject, NSApplicationDelegate {
+    private let terminationCoordinator = ApplicationTerminationCoordinator()
+
+    func configure(
+        quickRecorder: QuickRecorderModel,
+        preferences: AppPreferencesController
+    ) {
+        terminationCoordinator.configure(
+            quickRecorder: quickRecorder,
+            preferences: preferences
+        )
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         publishRuntimeStatus(
             isAppRunning: true,
             message: "Digital Meld LessonMeld is running."
         )
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        terminationCoordinator.applicationShouldTerminate(sender)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

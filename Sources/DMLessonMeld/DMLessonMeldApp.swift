@@ -35,6 +35,10 @@ struct DMLessonMeldApp: App {
                 .hidesWindowTitle()
                 .handlesLessonMeldAppEvents(appRouter: appRouter)
                 .onAppear {
+                    appDelegate.configure(
+                        quickRecorder: quickRecorder,
+                        preferences: preferences
+                    )
                     annotationOverlay.openSettingsHandler = { section in
                         appRouter.openSettings(section)
                     }
