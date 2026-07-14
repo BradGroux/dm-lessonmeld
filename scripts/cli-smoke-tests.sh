@@ -254,6 +254,52 @@ PY
   record_status "PASS" "$name" "$json_path"
 }
 
+write_agent_settings_fixture() {
+  local source_path="$1"
+  local output_path="$2"
+  local enabled="$3"
+  local include_media="$4"
+  local include_transcripts="$5"
+
+  "$python_bin" - "$source_path" "$output_path" "$enabled" "$include_media" "$include_transcripts" <<'PY'
+import json
+import sys
+
+source_path, output_path = sys.argv[1:3]
+enabled, include_media, include_transcripts = (value == "true" for value in sys.argv[3:6])
+with open(source_path, "r", encoding="utf-8") as handle:
+    settings = json.load(handle)
+settings["integrations"]["agentManifestsEnabled"] = enabled
+settings["privacy"]["includeMediaPathsInAgentManifests"] = include_media
+settings["privacy"]["includeTranscriptReferencesInAgentManifests"] = include_transcripts
+with open(output_path, "w", encoding="utf-8") as handle:
+    json.dump(settings, handle)
+PY
+}
+
+validate_agent_manifest_path_policy() {
+  local name="$1"
+  local json_path="$2"
+  local expected_screen_path="$3"
+
+  "$python_bin" - "$json_path" "$expected_screen_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    manifest = json.load(handle)
+expected_path = None if sys.argv[2] == "null" else sys.argv[2]
+screen_files = [item for item in manifest["files"] if item.get("role") == "screenVideo"]
+if len(screen_files) != 1:
+    raise AssertionError(f"expected one screenVideo entry, got {screen_files!r}")
+if screen_files[0].get("path") != expected_path:
+    raise AssertionError(
+        f"screenVideo path expected {expected_path!r}, got {screen_files[0].get('path')!r}"
+    )
+PY
+  record_status "PASS" "$name" "$json_path"
+}
+
 run_expected_failure() {
   local name="$1"
   local expected_stderr="$2"
@@ -300,6 +346,7 @@ PY
 
   cat >"$expected" <<'EXPECTED'
 swift run dmlesson --help
+swift run dmlesson agent manifest /tmp/Intro.dmlm --settings /tmp/settings.json --json
 swift run dmlesson app status --json
 swift run dmlesson config plan ~/.dm-lessonmeld --json
 swift run dmlesson edit validate /tmp/Intro.dmlm --json
@@ -363,6 +410,8 @@ project_url="$work_dir/Intro.dmlm"
 other_project_url="$work_dir/Other.dmlm"
 corrupt_project_url="$work_dir/Corrupt.dmlm"
 settings_url="$work_dir/settings.json"
+agent_settings_url="$work_dir/agent-settings.json"
+agent_disabled_settings_url="$work_dir/agent-disabled-settings.json"
 screen_url="$project_url/screen.mp4"
 render_url="$work_dir/lesson.mp4"
 preset_url="$work_dir/workshop.dmlpreset"
@@ -408,6 +457,9 @@ run_json "settings defaults" "settings-defaults" \
 run_json "settings write defaults" "settings-write-defaults" \
   "output=str" \
   -- "$cli_path" settings write-defaults --output "$settings_url" --json
+
+write_agent_settings_fixture "$settings_url" "$agent_settings_url" true true false
+write_agent_settings_fixture "$settings_url" "$agent_disabled_settings_url" false false false
 
 run_json "settings validate" "settings-validate" \
   "@=dict" \
@@ -590,6 +642,27 @@ run_json "agent manifest" "agent-manifest" \
   "workflows=nonempty-list" \
   -- "$cli_path" agent manifest "$project_url" --json
 validate_json_omits_absolute_paths "agent manifest redacts local paths" "$logs_dir/agent-manifest.json" "$work_dir"
+
+run_json "agent manifest saved privacy defaults" "agent-manifest-saved-defaults" \
+  "files=nonempty-list" \
+  -- "$cli_path" agent manifest "$project_url" --settings "$agent_settings_url" --json
+validate_agent_manifest_path_policy \
+  "agent manifest applies saved media path default" \
+  "$logs_dir/agent-manifest-saved-defaults.json" \
+  "screen.mp4"
+
+run_json "agent manifest explicit privacy override" "agent-manifest-explicit-override" \
+  "files=nonempty-list" \
+  -- "$cli_path" agent manifest "$project_url" --settings "$settings_url" --include-media-paths --json
+validate_agent_manifest_path_policy \
+  "agent manifest explicit include overrides redacted default" \
+  "$logs_dir/agent-manifest-explicit-override.json" \
+  "screen.mp4"
+
+run_expected_failure \
+  "agent manifest disabled by settings" \
+  "Agent manifest generation is disabled in settings." \
+  "$cli_path" agent manifest "$project_url" --settings "$agent_disabled_settings_url" --json
 
 run_json "agent workflows" "agent-workflows" \
   "@=nonempty-list" \

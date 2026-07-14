@@ -155,6 +155,7 @@ swift run dmlesson record microphone --duration 10 --output /tmp/microphone.m4a 
 swift run dmlesson record webcam --duration 10 --output /tmp/webcam.mov
 swift run dmlesson project create --lesson-title "Intro" --output /tmp/Intro.dmlm
 swift run dmlesson edit validate /tmp/Intro.dmlm --json
+swift run dmlesson agent manifest /tmp/Intro.dmlm --settings /tmp/settings.json --json
 swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --json
 swift run dmlesson render export /tmp/Intro.dmlm --output /tmp/lesson.mp4
 swift run dmlesson presets create-from-project /tmp/Intro.dmlm --output /tmp/workshop.dmlpreset --name "Workshop"
