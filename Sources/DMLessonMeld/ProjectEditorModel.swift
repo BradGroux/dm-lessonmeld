@@ -48,6 +48,7 @@ final class ProjectEditorModel: ObservableObject {
     @Published var isExtractingRawAssets = false
     @Published var isBuildingSharePackage = false
     @Published var isExportingFrame = false
+    @Published private(set) var isImportingVideo = false
     @Published var jobHistory: [EditorJobRecord] = []
     @Published var selectedJobID: String?
     @Published var metadataLessonTitle = ""
@@ -149,6 +150,10 @@ final class ProjectEditorModel: ObservableObject {
     private var lastEditDecisionList: EditDecisionList?
     private var renderTask: Task<Void, Never>?
     private var editorJobTasks: [String: Task<Void, Never>] = [:]
+    private var videoImportTask: Task<ProjectVideoImportResult, Error>?
+    private var videoImportCompletionTask: Task<Void, Never>?
+    private var previewDurationTask: Task<Void, Never>?
+    private let projectTaskSession = ProjectTaskSession()
     private var activeRenderJobID: String?
     private var isLoadingProject = false
     private var isDirtyRefreshScheduled = false
@@ -175,6 +180,10 @@ final class ProjectEditorModel: ObservableObject {
 
     var hasActiveEditorJob: Bool {
         activeEditorJob != nil
+    }
+
+    var hasActiveProjectWork: Bool {
+        hasActiveEditorJob || isImportingVideo
     }
 
     var recentEditorJobs: [EditorJobRecord] {
@@ -419,18 +428,13 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     func teardown() {
-        cancelAllTrackedEditorJobTasks()
+        invalidateProjectScopedWork(cancelMessage: "Project closed before the job completed.")
         removeTimeObserver()
         player?.pause()
         player = nil
-        renderTask = nil
-        activeRenderJobID = nil
-        resetEditorJobActivityIndicators()
     }
 
     func closeProject() {
-        cancelTrackedEditorJobTasksForCurrentProject()
-        markActiveJobsCancelledForCurrentProject("Project closed before the job completed.")
         teardown()
         projectURL = nil
         manifest = nil
@@ -546,6 +550,9 @@ final class ProjectEditorModel: ObservableObject {
         )
         let didAccess = sourceURL.startAccessingSecurityScopedResource()
 
+        invalidateProjectScopedWork(cancelMessage: "Project switch cancelled this job.")
+        let generation = projectTaskSession.capture()
+        isImportingVideo = true
         setMessage("Importing \(sourceName)...")
         let importTask = Task.detached(priority: .userInitiated) { () throws -> ProjectVideoImportResult in
             defer {
@@ -555,14 +562,28 @@ final class ProjectEditorModel: ObservableObject {
             }
             return try ProjectVideoImportService.importVideo(request)
         }
+        videoImportTask = importTask
 
-        Task { @MainActor [weak self] in
+        videoImportCompletionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.projectTaskSession.isCurrent(generation) {
+                    self.videoImportTask = nil
+                    self.videoImportCompletionTask = nil
+                    self.isImportingVideo = false
+                }
+            }
             do {
                 let result = try await importTask.value
-                self?.loadProject(result.projectURL)
-                self?.setMessage("Imported \(sourceName) for editing.")
+                guard self.projectTaskSession.isCurrent(generation) else { return }
+                self.loadProject(result.projectURL, invalidatingCurrentWork: false)
+                self.setMessage("Imported \(sourceName) for editing.")
+            } catch is CancellationError {
+                guard self.projectTaskSession.isCurrent(generation) else { return }
+                self.setMessage("Video import cancelled.")
             } catch {
-                self?.setError(error.localizedDescription)
+                guard self.projectTaskSession.isCurrent(generation) else { return }
+                self.setError(error.localizedDescription)
             }
         }
     }
@@ -614,17 +635,23 @@ final class ProjectEditorModel: ObservableObject {
         loadProject(url)
     }
 
-    func loadProject(_ url: URL) {
+    func loadProject(_ url: URL, invalidatingCurrentWork: Bool = true) {
         do {
             let loadedManifest = try ProjectBundle.loadManifest(at: url)
-            try applyLoadedProject(url: url, manifest: loadedManifest, messagePrefix: "Loaded")
+            try applyLoadedProject(
+                url: url,
+                manifest: loadedManifest,
+                messagePrefix: "Loaded",
+                invalidatingCurrentWork: invalidatingCurrentWork
+            )
         } catch ProjectBundleError.manifestNotFound {
             do {
                 let repair = try ProjectBundle.repair(at: url)
                 try applyLoadedProject(
                     url: url,
                     manifest: repair.manifest,
-                    messagePrefix: repair.wroteManifest ? "Recovered" : "Loaded"
+                    messagePrefix: repair.wroteManifest ? "Recovered" : "Loaded",
+                    invalidatingCurrentWork: invalidatingCurrentWork
                 )
             } catch {
                 setError(error.localizedDescription)
@@ -706,8 +733,8 @@ final class ProjectEditorModel: ObservableObject {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.writeObjects([image])
                 finishTrackedEditorJobTask(jobID)
-                isExportingFrame = false
                 guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                isExportingFrame = false
                 completeEditorJob(jobID, message: "Copied current frame to the clipboard.")
                 setMessage("Copied current frame.")
             } catch is CancellationError {
@@ -719,8 +746,8 @@ final class ProjectEditorModel: ObservableObject {
                 )
             } catch {
                 finishTrackedEditorJobTask(jobID)
-                isExportingFrame = false
                 guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                isExportingFrame = false
                 failEditorJob(jobID, error: error)
                 setError(error.localizedDescription)
             }
@@ -760,8 +787,8 @@ final class ProjectEditorModel: ObservableObject {
                     try data.write(to: outputURL, options: [.atomic])
                     try Task.checkCancellation()
                     finishTrackedEditorJobTask(jobID)
-                    isExportingFrame = false
                     guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                    isExportingFrame = false
                     let displayPath = Self.displayPath(outputURL, projectURL: projectURL)
                     completeEditorJob(jobID, outputURL: outputURL, message: "Exported frame to \(displayPath).")
                     setMessage("Exported frame \(displayPath).")
@@ -775,8 +802,8 @@ final class ProjectEditorModel: ObservableObject {
                     )
                 } catch {
                     finishTrackedEditorJobTask(jobID)
-                    isExportingFrame = false
                     guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                    isExportingFrame = false
                     failEditorJob(jobID, error: error)
                     setError(error.localizedDescription)
                 }
@@ -1582,8 +1609,8 @@ final class ProjectEditorModel: ObservableObject {
                     try Task.checkCancellation()
                     await MainActor.run {
                         self.finishTrackedEditorJobTask(jobID)
-                        self.isTrimming = false
                         guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                        self.isTrimming = false
                         let displayPath = Self.displayPath(output, projectURL: projectURL)
                         self.completeEditorJob(jobID, outputURL: output, message: "Exported cut list to \(displayPath).")
                         self.setMessage("Exported cut list \(displayPath).")
@@ -1610,8 +1637,8 @@ final class ProjectEditorModel: ObservableObject {
                 } catch {
                     await MainActor.run {
                         self.finishTrackedEditorJobTask(jobID)
-                        self.isTrimming = false
                         guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                        self.isTrimming = false
                         self.failEditorJob(jobID, error: error)
                         self.setError(error.localizedDescription)
                     }
@@ -2014,9 +2041,9 @@ final class ProjectEditorModel: ObservableObject {
                     try Task.checkCancellation()
                     await MainActor.run {
                         self.finishTrackedEditorJobTask(jobID)
+                        guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                         self.isRendering = false
                         self.renderProgress = 1
-                        guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
                         let displayPath = Self.displayPath(output, projectURL: projectURL)
                         self.completeEditorJob(jobID, outputURL: output, message: "Rendered video to \(displayPath).")
                         self.setMessage("Rendered \(displayPath).")
@@ -2043,8 +2070,8 @@ final class ProjectEditorModel: ObservableObject {
                 } catch {
                     await MainActor.run {
                         self.finishTrackedEditorJobTask(jobID)
-                        self.isRendering = false
                         guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                        self.isRendering = false
                         self.failEditorJob(jobID, error: error)
                         self.setError(error.localizedDescription)
                     }
@@ -2089,8 +2116,8 @@ final class ProjectEditorModel: ObservableObject {
                 try Task.checkCancellation()
                 await MainActor.run {
                     self.finishTrackedEditorJobTask(jobID)
-                    self.isPackagingLearnHouse = false
                     guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                    self.isPackagingLearnHouse = false
                     let revealPath = result.archivePath ?? result.packagePath
                     self.completeEditorJob(
                         jobID,
@@ -2112,8 +2139,8 @@ final class ProjectEditorModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.finishTrackedEditorJobTask(jobID)
-                    self.isPackagingLearnHouse = false
                     guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                    self.isPackagingLearnHouse = false
                     self.failEditorJob(jobID, error: error)
                     self.setError(error.localizedDescription)
                 }
@@ -2148,8 +2175,8 @@ final class ProjectEditorModel: ObservableObject {
                 try Task.checkCancellation()
                 await MainActor.run {
                     self.finishTrackedEditorJobTask(jobID)
-                    self.isExtractingRawAssets = false
                     guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                    self.isExtractingRawAssets = false
                     self.completeEditorJob(
                         jobID,
                         outputURL: URL(fileURLWithPath: result.outputDirectoryPath),
@@ -2170,8 +2197,8 @@ final class ProjectEditorModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.finishTrackedEditorJobTask(jobID)
-                    self.isExtractingRawAssets = false
                     guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                    self.isExtractingRawAssets = false
                     self.failEditorJob(jobID, error: error)
                     self.setError(error.localizedDescription)
                 }
@@ -2211,8 +2238,8 @@ final class ProjectEditorModel: ObservableObject {
                 try Task.checkCancellation()
                 await MainActor.run {
                     self.finishTrackedEditorJobTask(jobID)
-                    self.isBuildingSharePackage = false
                     guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                    self.isBuildingSharePackage = false
                     self.completeEditorJob(
                         jobID,
                         outputURL: URL(fileURLWithPath: result.packagePath),
@@ -2233,8 +2260,8 @@ final class ProjectEditorModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.finishTrackedEditorJobTask(jobID)
-                    self.isBuildingSharePackage = false
                     guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                    self.isBuildingSharePackage = false
                     self.failEditorJob(jobID, error: error)
                     self.setError(error.localizedDescription)
                 }
@@ -2337,8 +2364,8 @@ final class ProjectEditorModel: ObservableObject {
                     try Task.checkCancellation()
                     await MainActor.run {
                         self.finishTrackedEditorJobTask(jobID)
-                        self.isTrimming = false
                         guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                        self.isTrimming = false
                         let displayPath = Self.displayPath(output, projectURL: projectURL)
                         self.completeEditorJob(jobID, outputURL: output, message: "Exported trim to \(displayPath).")
                         self.setMessage("Exported trim \(displayPath).")
@@ -2365,8 +2392,8 @@ final class ProjectEditorModel: ObservableObject {
                 } catch {
                     await MainActor.run {
                         self.finishTrackedEditorJobTask(jobID)
-                        self.isTrimming = false
                         guard self.isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+                        self.isTrimming = false
                         self.failEditorJob(jobID, error: error)
                         self.setError(error.localizedDescription)
                     }
@@ -2384,6 +2411,8 @@ final class ProjectEditorModel: ObservableObject {
     }
 
     private func configurePreview(projectURL: URL, manifest: ProjectManifest) {
+        previewDurationTask?.cancel()
+        previewDurationTask = nil
         removeTimeObserver()
         currentTimeSeconds = 0
         previewDurationSeconds = 0
@@ -2395,14 +2424,18 @@ final class ProjectEditorModel: ObservableObject {
         }
 
         let screenURL = ProjectBundle.fileURL(for: screen, in: projectURL)
+        let generation = projectTaskSession.capture()
+        let expectedProjectPath = Self.normalizedProjectPath(projectURL)
         let nextPlayer = AVPlayer(url: screenURL)
         player = nextPlayer
         timeObserver = nextPlayer.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
             queue: .main
         ) { [weak self] time in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
+                guard self.projectTaskSession.isCurrent(generation),
+                      self.normalizedCurrentProjectPath == expectedProjectPath else { return }
                 let seconds = time.seconds
                 if seconds.isFinite {
                     self.currentTimeSeconds = seconds
@@ -2410,24 +2443,33 @@ final class ProjectEditorModel: ObservableObject {
             }
         }
 
-        Task {
+        previewDurationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             do {
                 let asset = AVURLAsset(url: screenURL)
                 let duration = try await asset.load(.duration).seconds
-                await MainActor.run {
-                    guard duration.isFinite, duration > 0 else { return }
-                    self.previewDurationSeconds = duration
-                    if self.sourceDurationSeconds.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        self.sourceDurationSeconds = Self.formatSecondsForEditing(duration)
-                    }
-                    if self.trimEndSeconds.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        self.trimEndSeconds = Self.formatSecondsForEditing(duration)
-                    }
+                try Task.checkCancellation()
+                guard self.projectTaskSession.isCurrent(generation),
+                      self.normalizedCurrentProjectPath == expectedProjectPath,
+                      duration.isFinite,
+                      duration > 0 else { return }
+                self.previewDurationTask = nil
+                self.previewDurationSeconds = duration
+                if self.sourceDurationSeconds.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.sourceDurationSeconds = Self.formatSecondsForEditing(duration)
+                }
+                if self.trimEndSeconds.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.trimEndSeconds = Self.formatSecondsForEditing(duration)
+                }
+            } catch is CancellationError {
+                if self.projectTaskSession.isCurrent(generation) {
+                    self.previewDurationTask = nil
                 }
             } catch {
-                await MainActor.run {
-                    self.setError("Could not load preview duration: \(error.localizedDescription)")
-                }
+                guard self.projectTaskSession.isCurrent(generation),
+                      self.normalizedCurrentProjectPath == expectedProjectPath else { return }
+                self.previewDurationTask = nil
+                self.setError("Could not load preview duration: \(error.localizedDescription)")
             }
         }
     }
@@ -2458,7 +2500,15 @@ final class ProjectEditorModel: ObservableObject {
         return pngData
     }
 
-    private func applyLoadedProject(url: URL, manifest loadedManifest: ProjectManifest, messagePrefix: String) throws {
+    private func applyLoadedProject(
+        url: URL,
+        manifest loadedManifest: ProjectManifest,
+        messagePrefix: String,
+        invalidatingCurrentWork: Bool
+    ) throws {
+        if invalidatingCurrentWork {
+            invalidateProjectScopedWork(cancelMessage: "Project switch cancelled this job.")
+        }
         isLoadingProject = true
         defer {
             isLoadingProject = false
@@ -2548,6 +2598,7 @@ final class ProjectEditorModel: ObservableObject {
         )
         job.start()
         jobHistory.insert(job, at: 0)
+        projectTaskSession.registerTask(id: job.id)
         selectedJobID = job.id
         persistEditorJobHistory(projectURL: targetProjectURL)
         return job.id
@@ -2575,6 +2626,7 @@ final class ProjectEditorModel: ObservableObject {
         updateEditorJob(id) { job in
             job.complete(outputPath: outputURL?.path, message: message)
         }
+        projectTaskSession.finishTask(id: id)
     }
 
     private func failEditorJob(_ id: String, error: Error) {
@@ -2585,24 +2637,26 @@ final class ProjectEditorModel: ObservableObject {
         updateEditorJob(id) { job in
             job.fail(message)
         }
+        projectTaskSession.finishTask(id: id)
     }
 
     private func cancelEditorJob(_ id: String, message: String? = nil) {
         updateEditorJob(id) { job in
             job.cancel(message)
         }
+        projectTaskSession.finishTask(id: id)
     }
 
     private func markActiveJobsCancelledForCurrentProject(_ message: String) {
         guard let projectURL, let projectPath = normalizedCurrentProjectPath else { return }
-        var didChange = false
-        for index in jobHistory.indices where jobHistory[index].isActive && jobHistory[index].projectPath == projectPath {
-            jobHistory[index].cancel(message)
-            didChange = true
-        }
-        if didChange {
-            persistEditorJobHistory(projectURL: projectURL)
-        }
+        let updatedHistory = EditorJobProjectTransitionPolicy.cancellingActiveJobs(
+            in: jobHistory,
+            projectPath: projectPath,
+            message: message
+        )
+        guard updatedHistory != jobHistory else { return }
+        jobHistory = updatedHistory
+        persistEditorJobHistory(projectURL: projectURL)
     }
 
     private func trackEditorJobTask(_ task: Task<Void, Never>, jobID: String) {
@@ -2629,24 +2683,22 @@ final class ProjectEditorModel: ObservableObject {
         activeRenderJobID = nil
     }
 
-    private func cancelTrackedEditorJobTasksForCurrentProject() {
-        let cancellableJobIDs = Set(EditorJobCancellationPolicy.cancellableActiveJobIDs(
-            in: jobHistory,
-            projectPath: normalizedCurrentProjectPath
-        ))
-        guard !cancellableJobIDs.isEmpty else { return }
-        for jobID in cancellableJobIDs {
-            editorJobTasks[jobID]?.cancel()
-            editorJobTasks[jobID] = nil
-            if activeRenderJobID == jobID {
-                renderTask?.cancel()
-                renderTask = nil
-                activeRenderJobID = nil
-            }
-        }
+    private func invalidateProjectScopedWork(cancelMessage: String) {
+        projectTaskSession.invalidate()
+        previewDurationTask?.cancel()
+        previewDurationTask = nil
+        videoImportTask?.cancel()
+        videoImportTask = nil
+        videoImportCompletionTask?.cancel()
+        videoImportCompletionTask = nil
+        isImportingVideo = false
+        cancelAllTrackedEditorJobTasks()
+        markActiveJobsCancelledForCurrentProject(cancelMessage)
+        resetEditorJobActivityIndicators()
     }
 
     private func isActiveEditorJob(_ jobID: String, projectURL expectedProjectURL: URL) -> Bool {
+        guard projectTaskSession.isCurrentTask(id: jobID) else { return false }
         guard normalizedCurrentProjectPath == Self.normalizedProjectPath(expectedProjectURL) else {
             return false
         }
@@ -2673,8 +2725,8 @@ final class ProjectEditorModel: ObservableObject {
         message: String
     ) {
         finishTrackedEditorJobTask(jobID)
-        resetEditorJobActivityIndicator(for: kind)
         guard isActiveEditorJob(jobID, projectURL: projectURL) else { return }
+        resetEditorJobActivityIndicator(for: kind)
         cancelEditorJob(jobID, message: message)
         setMessage("\(kind.title) cancelled.")
     }

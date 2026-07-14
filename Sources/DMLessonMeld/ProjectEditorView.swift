@@ -157,7 +157,7 @@ struct ProjectEditorView: View {
 
     func confirmProjectTransition(_ actionName: String, proceed: () -> Void) {
         guard model.hasUnsavedChanges else {
-            proceed()
+            confirmActiveWorkTransition(actionName, proceed: proceed)
             return
         }
 
@@ -165,12 +165,29 @@ struct ProjectEditorView: View {
         case .alertFirstButtonReturn:
             model.saveAllDirtyChanges()
             if !model.hasUnsavedChanges {
-                proceed()
+                confirmActiveWorkTransition(actionName, proceed: proceed)
             }
         case .alertSecondButtonReturn:
-            proceed()
+            confirmActiveWorkTransition(actionName, proceed: proceed)
         default:
             return
+        }
+    }
+
+    func confirmActiveWorkTransition(_ actionName: String, proceed: () -> Void) {
+        guard model.hasActiveProjectWork else {
+            proceed()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Cancel active work and \(actionName)?"
+        alert.informativeText = "Switching projects cancels current render, export, package, import, and preview work before applying the next project."
+        alert.addButton(withTitle: "Cancel Work and Continue")
+        alert.addButton(withTitle: "Keep Working")
+        if alert.runModal() == .alertFirstButtonReturn {
+            proceed()
         }
     }
 

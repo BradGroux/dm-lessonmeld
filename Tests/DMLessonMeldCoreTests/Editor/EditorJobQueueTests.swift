@@ -148,6 +148,37 @@ struct EditorJobQueueTests {
         #expect(selectedIDs == Set(cancellableKinds.map(\.rawValue)))
     }
 
+    @Test("Project transitions cancel only active jobs owned by the departing project")
+    func projectTransitionsCancelActiveJobsForDepartingProject() {
+        let projectPath = "/tmp/departing.dmlm"
+        let finishedAt = Date(timeIntervalSince1970: 200)
+        var render = EditorJobRecord(id: "render", kind: .renderVideo, projectPath: projectPath)
+        render.start()
+        var package = EditorJobRecord(id: "package", kind: .sharePackage, projectPath: projectPath)
+        package.start()
+        var nonCancellable = EditorJobRecord(id: "sidecars", kind: .captionSidecars, projectPath: projectPath)
+        nonCancellable.start()
+        var completed = EditorJobRecord(id: "completed", kind: .renderVideo, projectPath: projectPath)
+        completed.start()
+        completed.complete()
+        var otherProject = EditorJobRecord(id: "other", kind: .renderVideo, projectPath: "/tmp/next.dmlm")
+        otherProject.start()
+
+        let result = EditorJobProjectTransitionPolicy.cancellingActiveJobs(
+            in: [render, package, nonCancellable, completed, otherProject],
+            projectPath: projectPath,
+            message: "Project switch cancelled this job.",
+            at: finishedAt
+        )
+
+        #expect(result[0].status == .cancelled)
+        #expect(result[1].status == .cancelled)
+        #expect(result[2].status == .cancelled)
+        #expect(result[0].finishedAt == finishedAt)
+        #expect(result[3] == completed)
+        #expect(result[4] == otherProject)
+    }
+
     @Test("Job history persists recent records")
     func jobHistoryPersistsRecentRecords() throws {
         let temp = try TemporaryDirectory()
