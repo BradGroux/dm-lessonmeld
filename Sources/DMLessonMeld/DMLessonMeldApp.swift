@@ -1,5 +1,6 @@
 import AppKit
 import DMLessonMeldCore
+import DMLessonMeldSupport
 import SwiftUI
 
 @main
@@ -7,11 +8,24 @@ struct DMLessonMeldApp: App {
     @NSApplicationDelegateAdaptor(LessonMeldAppDelegate.self) private var appDelegate
     @StateObject private var appRouter = LessonMeldAppRouter()
     @StateObject private var annotationOverlay = AnnotationOverlayCoordinator()
-    @StateObject private var preferences = AppPreferencesController()
-    @StateObject private var quickRecorder = QuickRecorderModel()
+    @StateObject private var preferences: AppPreferencesController
+    @StateObject private var quickRecorder: QuickRecorderModel
 
     init() {
+        let preferences = AppPreferencesController()
+        let quickRecorder = QuickRecorderModel()
+        _preferences = StateObject(wrappedValue: preferences)
+        _quickRecorder = StateObject(wrappedValue: quickRecorder)
+
         NSApplication.shared.setActivationPolicy(.regular)
+        appDelegate.configure(
+            quickRecorder: quickRecorder,
+            preferences: preferences
+        )
+        LocalAppControlBridge.shared.configure(
+            quickRecorder: quickRecorder,
+            preferences: preferences
+        )
     }
 
     var body: some Scene {
@@ -35,10 +49,6 @@ struct DMLessonMeldApp: App {
                 .hidesWindowTitle()
                 .handlesLessonMeldAppEvents(appRouter: appRouter)
                 .onAppear {
-                    appDelegate.configure(
-                        quickRecorder: quickRecorder,
-                        preferences: preferences
-                    )
                     annotationOverlay.openSettingsHandler = { section in
                         appRouter.openSettings(section)
                     }
@@ -47,7 +57,7 @@ struct DMLessonMeldApp: App {
                     }
                 }
         }
-        .defaultLaunchBehavior(.presented)
+        .defaultLaunchBehavior(mainWindowLaunchBehavior)
         .windowResizability(.contentMinSize)
         .commands {
             LessonMeldAppCommands(
@@ -101,6 +111,17 @@ struct DMLessonMeldApp: App {
                 .handlesLessonMeldAppEvents(appRouter: appRouter)
         }
         .windowResizability(.contentMinSize)
+    }
+
+    private var mainWindowLaunchBehavior: SceneLaunchBehavior {
+        switch MainWindowLaunchPolicy.action(
+            showMainWindowAtLaunch: preferences.snapshot.general.showMainWindowAtLaunch
+        ) {
+        case .present:
+            .presented
+        case .suppress:
+            .suppressed
+        }
     }
 }
 
