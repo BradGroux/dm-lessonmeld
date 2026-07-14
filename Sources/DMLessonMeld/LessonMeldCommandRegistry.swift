@@ -1,4 +1,5 @@
 import DMLessonMeldCore
+import DMLessonMeldSupport
 import SwiftUI
 
 enum LessonMeldAppCommandID: String, CaseIterable, Identifiable {
@@ -189,17 +190,28 @@ enum LessonMeldCommandRegistry {
         }
     }
 
-    private static func shortcut(for definition: LessonMeldCommandDefinition, context: LessonMeldCommandContext) -> String? {
+    private static func shortcut(for definition: LessonMeldCommandDefinition, context _: LessonMeldCommandContext) -> String? {
         switch definition.id {
         case .settings:
-            context.preferences.shortcuts[.showSettings] ?? "⌘,"
+            builtInShortcut(for: .showSettings)
         case .onboarding:
-            context.preferences.shortcuts[.showOnboarding]
+            builtInShortcut(for: .showOnboarding)
         case .toggleAnnotationOverlay:
-            context.preferences.shortcuts[.openAnnotationOverlay]
+            builtInShortcut(for: .openAnnotationOverlay)
+        case .recordingControls:
+            builtInShortcut(for: .quickRecord)
+        case .stopRecording:
+            builtInShortcut(for: .stopRecording)
         default:
             definition.shortcut
         }
+    }
+
+    private static func builtInShortcut(for action: LessonMeldShortcutAction) -> String? {
+        guard case .builtIn(let displayValue) = ShortcutPresentationPolicy.status(for: action) else {
+            return nil
+        }
+        return displayValue
     }
 
     private static func availability(for id: LessonMeldAppCommandID, context: LessonMeldCommandContext) -> (isEnabled: Bool, disabledReason: String?) {

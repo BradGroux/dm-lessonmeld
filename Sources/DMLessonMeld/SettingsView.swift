@@ -498,18 +498,18 @@ struct LessonMeldSettingsView: View {
     }
 
     private var shortcutsSection: some View {
-        SettingsSectionView(title: "Shortcuts", subtitle: "Stored shortcut preferences for menu commands, command palette actions, and future global handlers.") {
+        SettingsSectionView(title: "Shortcuts", subtitle: "Built-in shortcuts for native menus and current app commands.") {
             ForEach(LessonMeldShortcutAction.allCases) { action in
                 HStack {
                     Text(action.displayName)
                         .frame(width: 190, alignment: .leading)
-                    TextField("Shortcut", text: shortcutBinding(action))
-                        .font(.system(.body, design: .monospaced))
-                        .textFieldStyle(.roundedBorder)
+                    Spacer()
+                    ShortcutStatusView(status: ShortcutPresentationPolicy.status(for: action))
                 }
+                .accessibilityElement(children: .combine)
             }
 
-            Text("Current handlers use native menu shortcuts where available; persisted values give the global shortcut controller a stable source of truth.")
+            Text("Shortcut customization is not available yet. Active bindings are read-only; annotation color shortcuts remain reserved until their handlers ship.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -679,15 +679,6 @@ struct LessonMeldSettingsView: View {
             return "\(minutes)m"
         }
         return "\(minutes)m \(remainder)s"
-    }
-
-    private func shortcutBinding(_ action: LessonMeldShortcutAction) -> Binding<String> {
-        Binding {
-            draft.shortcuts[action] ?? ""
-        } set: { value in
-            draft.shortcuts[action] = value
-            saveMessage = "Unsaved"
-        }
     }
 
     private func paletteColorBinding(_ index: Int) -> Binding<String> {
@@ -866,6 +857,45 @@ struct LessonMeldSettingsView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         draft.transcription.modelPath = url.path
         saveMessage = "Unsaved"
+    }
+}
+
+private struct ShortcutStatusView: View {
+    let status: ShortcutPresentationStatus
+
+    var body: some View {
+        HStack(spacing: 8) {
+            switch status {
+            case .builtIn(let displayValue):
+                Text(displayValue)
+                    .font(.system(.body, design: .monospaced).weight(.semibold))
+                statusPill("Built in", systemImage: "lock.fill")
+            case .reserved:
+                Text("Not active")
+                    .foregroundStyle(.secondary)
+                statusPill("Reserved", systemImage: "clock")
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        switch status {
+        case .builtIn(let displayValue):
+            "Built-in shortcut \(displayValue)"
+        case .reserved:
+            "Reserved shortcut, not active"
+        }
+    }
+
+    private func statusPill(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.quaternary, in: Capsule())
     }
 }
 
