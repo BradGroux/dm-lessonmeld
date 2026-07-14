@@ -29,6 +29,36 @@ public struct AgentManifestOptions: Codable, Equatable, Sendable {
     }
 }
 
+public enum AgentManifestPolicyError: Error, Equatable, LocalizedError, Sendable {
+    case manifestsDisabled
+
+    public var errorDescription: String? {
+        switch self {
+        case .manifestsDisabled:
+            "Agent manifest generation is disabled in settings."
+        }
+    }
+}
+
+public enum AgentManifestPolicy {
+    public static func resolve(
+        preferences: LessonMeldPreferences,
+        explicitOptions: AgentManifestOptions = AgentManifestOptions()
+    ) throws -> AgentManifestOptions {
+        guard preferences.integrations.agentManifestsEnabled else {
+            throw AgentManifestPolicyError.manifestsDisabled
+        }
+
+        return AgentManifestOptions(
+            includeMediaPaths: preferences.privacy.includeMediaPathsInAgentManifests
+                || explicitOptions.includeMediaPaths,
+            includeTranscriptReferences: preferences.privacy.includeTranscriptReferencesInAgentManifests
+                || explicitOptions.includeTranscriptReferences,
+            includeProjectPath: explicitOptions.includeProjectPath
+        )
+    }
+}
+
 public struct AgentProjectManifest: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var redactionPolicy: String

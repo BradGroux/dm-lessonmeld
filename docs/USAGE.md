@@ -273,6 +273,7 @@ swift run dmlesson record window --window-id 123 --duration 10 --output /tmp/win
 swift run dmlesson project create --lesson-title "Intro" --output /tmp/Intro.dmlm
 swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --json
 swift run dmlesson transcript model-status --settings /tmp/settings.json --json
+swift run dmlesson agent manifest /tmp/Intro.dmlm --settings /tmp/settings.json --json
 swift run dmlesson connectors common-cartridge package /tmp/Intro.dmlm --output /tmp/connectors --json
 swift run dmlesson agent workflows --target codex --json
 ```
@@ -281,7 +282,7 @@ JSON output is intended to be stable enough for local agents and scripts. Metada
 
 Window listings redact titles by default in CLI output. Use `--include-window-titles` only for intentional interactive selection.
 
-Agent workflow JSON is available for `openclaw`, `codex`, and `veritas-kanban` targets. These workflows list safe command sequences for inspection, validation, packaging, and handoff without exposing media paths unless explicit flags are used.
+Agent workflow JSON is available for `openclaw`, `codex`, and `veritas-kanban` targets. These workflows list safe command sequences for inspection, validation, packaging, and handoff without exposing media paths unless explicit flags are used. Agent manifests accept `--settings <settings.json>`; saved privacy defaults apply, explicit include flags can enable additional references, and generation fails when those settings disable agent manifests.
 
 ## MCP Wrapper
 
@@ -295,7 +296,7 @@ Agent workflow JSON is available for `openclaw`, `codex`, and `veritas-kanban` t
 
 The wrapper defaults to `.build/debug/dmlesson` when it exists, falls back to `swift run dmlesson`, and accepts `DMLESSON_CLI=/path/to/dmlesson` for packaged binaries. It does not expose recording or export execution tools.
 
-MCP responses redact media paths and transcript references unless the host sets `DMLESSON_MCP_ALLOW_DISCLOSURE=1` and the tool call explicitly requests those fields. The wrapper also removes absolute local paths from successful structured content and CLI error text at the MCP response boundary. `DMLESSON_MCP_TIMEOUT` controls subprocess timeouts, and `DMLESSON_MCP_MAX_OUTPUT_BYTES` caps returned stdout/stderr.
+MCP responses redact media paths and transcript references unless the host sets `DMLESSON_MCP_ALLOW_DISCLOSURE=1` and the tool call explicitly requests those fields. Passing a settings file to `dmlesson_agent_manifest` also requires that host policy because saved defaults may enable path disclosure. The wrapper removes absolute local paths from successful structured content and CLI error text at the MCP response boundary. `DMLESSON_MCP_TIMEOUT` controls subprocess timeouts, and `DMLESSON_MCP_MAX_OUTPUT_BYTES` caps returned stdout/stderr.
 
 Smoke-test it locally:
 

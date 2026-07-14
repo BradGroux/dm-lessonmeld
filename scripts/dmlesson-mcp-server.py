@@ -76,6 +76,10 @@ TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "project": {"type": "string", "description": "Path to a .dmlm project bundle."},
+                "settings": {
+                    "type": "string",
+                    "description": "Optional settings JSON path. Requires host disclosure approval because saved privacy defaults may include paths.",
+                },
                 "includeMediaPaths": {"type": "boolean", "default": False},
                 "includeTranscriptReferences": {"type": "boolean", "default": False},
             },
@@ -161,6 +165,17 @@ def self_test() -> int:
             },
         }
     )
+    settings_disclosure_denied = handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "dmlesson_agent_manifest",
+                "arguments": {"project": "/tmp/lesson.dmlm", "settings": "/tmp/settings.json"},
+            },
+        }
+    )
     with tempfile.TemporaryDirectory(prefix="dm-lessonmeld-mcp-test.") as temp_dir:
         slow_cli = Path(temp_dir) / "slow-dmlesson"
         slow_cli.write_text("#!/bin/sh\nsleep 1\necho '{}'\n", encoding="utf-8")
@@ -186,12 +201,19 @@ def self_test() -> int:
         oversized_output, oversized_truncated = read_limited_output(output_file, MAX_OUTPUT_BYTES)
     assert initialize and initialize["result"]["capabilities"]["tools"]["listChanged"] is False
     assert tools and len(tools["result"]["tools"]) >= 5
+    agent_manifest_tool = next(
+        tool for tool in tools["result"]["tools"] if tool["name"] == "dmlesson_agent_manifest"
+    )
+    assert "settings" in agent_manifest_tool["inputSchema"]["properties"]
     assert workflow and workflow["result"]["isError"] is False
     assert disclosure_denied and disclosure_denied["id"] == 4
     assert disclosure_denied["result"]["isError"] is True
+    assert settings_disclosure_denied and settings_disclosure_denied["result"]["isError"] is True
+    assert DISCLOSURE_POLICY_ENV in json.dumps(settings_disclosure_denied)
     with tempfile.TemporaryDirectory(prefix="dm-lessonmeld-mcp-redaction-test.") as temp_dir:
         private_project = Path(temp_dir) / "private" / "Secret Lesson.dmlm"
         private_artifact = Path(temp_dir) / "private" / "secret output.json"
+        private_settings = Path(temp_dir) / "private" / "settings.json"
         redaction_cli = Path(temp_dir) / "redaction-dmlesson"
         redaction_cli.write_text(
             "#!/usr/bin/env python3\n"
@@ -201,7 +223,7 @@ def self_test() -> int:
             "if sys.argv[1:3] == ['project', 'inspect']:\n"
             "    print(f'Project path is not a directory: {sys.argv[3]}.', file=sys.stderr)\n"
             "    raise SystemExit(2)\n"
-            "print(json.dumps({'artifactPath': artifact, 'message': f'Created {artifact}'}))\n",
+            "print(json.dumps({'artifactPath': artifact, 'message': f'Created {artifact}', 'arguments': sys.argv[1:]}))\n",
             encoding="utf-8",
         )
         redaction_cli.chmod(0o700)
@@ -236,7 +258,11 @@ def self_test() -> int:
                     "method": "tools/call",
                     "params": {
                         "name": "dmlesson_agent_manifest",
-                        "arguments": {"project": str(private_project), "includeMediaPaths": True},
+                        "arguments": {
+                            "project": str(private_project),
+                            "settings": str(private_settings),
+                            "includeMediaPaths": True,
+                        },
                     },
                 }
             )
@@ -262,6 +288,10 @@ def self_test() -> int:
         assert structured_path_result["result"]["structuredContent"]["artifactPath"] == "secret output.json"
         assert disclosed_path_result and disclosed_path_result["result"]["isError"] is False
         assert str(private_artifact) in json.dumps(disclosed_path_result)
+        assert disclosed_path_result["result"]["structuredContent"]["arguments"][-2:] == [
+            "--settings",
+            str(private_settings),
+        ]
         assert launch_failure_result and launch_failure_result["result"]["isError"] is True
         assert temp_dir not in json.dumps(launch_failure_result)
     assert timeout_result and timeout_result["id"] == 5
@@ -341,16 +371,18 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         append_option(args, "--codec", arguments.get("codec"))
     elif name == "dmlesson_agent_manifest":
         args = ["agent", "manifest", required_string(arguments, "project")]
+        settings = arguments.get("settings")
         include_media_paths = bool(arguments.get("includeMediaPaths", False))
         include_transcript_references = bool(arguments.get("includeTranscriptReferences", False))
-        if (include_media_paths or include_transcript_references) and not disclosure_policy_allows_paths():
+        if agent_manifest_request_may_disclose_paths(arguments) and not disclosure_policy_allows_paths():
             raise ToolError(
-                f"Media path and transcript disclosure requires {DISCLOSURE_POLICY_ENV}=1 in the MCP host environment."
+                f"Agent manifest path disclosure or saved settings require {DISCLOSURE_POLICY_ENV}=1 in the MCP host environment."
             )
         if include_media_paths:
             args.append("--include-media-paths")
         if include_transcript_references:
             args.append("--include-transcript-references")
+        append_option(args, "--settings", settings)
     elif name == "dmlesson_agent_workflows":
         args = ["agent", "workflows", "--json"]
         append_option(args, "--target", arguments.get("target"))
@@ -444,7 +476,16 @@ def tool_call_allows_path_disclosure(name: str, arguments: dict[str, Any]) -> bo
     return (
         name == "dmlesson_agent_manifest"
         and disclosure_policy_allows_paths()
-        and bool(arguments.get("includeMediaPaths") or arguments.get("includeTranscriptReferences"))
+        and agent_manifest_request_may_disclose_paths(arguments)
+    )
+
+
+def agent_manifest_request_may_disclose_paths(arguments: dict[str, Any]) -> bool:
+    settings = arguments.get("settings")
+    return (
+        (settings is not None and bool(str(settings).strip()))
+        or bool(arguments.get("includeMediaPaths"))
+        or bool(arguments.get("includeTranscriptReferences"))
     )
 
 

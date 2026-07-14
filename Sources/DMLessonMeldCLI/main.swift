@@ -1359,12 +1359,16 @@ struct DMLessonMeldCLI {
         switch subcommand {
         case "manifest":
             guard arguments.count >= 2 else {
-                throw CLIError.usage("Usage: dmlesson agent manifest <project> [--include-media-paths] [--include-transcript-references] [--include-project-path] [--json]")
+                throw CLIError.usage("Usage: dmlesson agent manifest <project> [--settings <settings.json>] [--include-media-paths] [--include-transcript-references] [--include-project-path] [--json]")
             }
-            let options = AgentManifestOptions(
-                includeMediaPaths: arguments.contains("--include-media-paths"),
-                includeTranscriptReferences: arguments.contains("--include-transcript-references"),
-                includeProjectPath: arguments.contains("--include-project-path") || arguments.contains("--verbose") || arguments.contains("--debug")
+            let preferences = try loadPreferences(from: optionValue("--settings", in: arguments))
+            let options = try AgentManifestPolicy.resolve(
+                preferences: preferences,
+                explicitOptions: AgentManifestOptions(
+                    includeMediaPaths: arguments.contains("--include-media-paths"),
+                    includeTranscriptReferences: arguments.contains("--include-transcript-references"),
+                    includeProjectPath: arguments.contains("--include-project-path") || arguments.contains("--verbose") || arguments.contains("--debug")
+                )
             )
             let manifest = try AgentManifestBuilder.build(projectURL: pathURL(arguments[1]), options: options)
             try printJSON(manifest)
@@ -1497,7 +1501,7 @@ struct DMLessonMeldCLI {
           connectors video-host handoff <project> --output <directory> [--archive] [--json]
           config plan|init|status <config-root> [--json] [--verbose]
           config commit <config-root> --message <message> [--json] [--verbose]
-          agent manifest <project> [--include-media-paths] [--include-transcript-references] [--include-project-path]
+          agent manifest <project> [--settings <settings.json>] [--include-media-paths] [--include-transcript-references] [--include-project-path]
           agent workflows [--target openclaw|codex|veritas-kanban] [--json]
           app status|show-controls|start|pause|resume|toggle-pause|stop [--json] [--verbose]
         """)

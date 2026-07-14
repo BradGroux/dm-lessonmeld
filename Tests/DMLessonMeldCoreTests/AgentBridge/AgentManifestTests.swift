@@ -100,6 +100,42 @@ struct AgentManifestTests {
         #expect(agentManifest.project.urlPath == projectURL.path)
     }
 
+    @Test("Saved privacy defaults and explicit includes resolve into manifest options")
+    func resolvesSavedPrivacyDefaultsAndExplicitIncludes() throws {
+        let preferences = LessonMeldPreferences(
+            privacy: PrivacyPreferences(
+                includeMediaPathsInAgentManifests: true,
+                includeTranscriptReferencesInAgentManifests: false
+            )
+        )
+
+        let options = try AgentManifestPolicy.resolve(
+            preferences: preferences,
+            explicitOptions: AgentManifestOptions(
+                includeTranscriptReferences: true,
+                includeProjectPath: true
+            )
+        )
+
+        #expect(options.includeMediaPaths)
+        #expect(options.includeTranscriptReferences)
+        #expect(options.includeProjectPath)
+    }
+
+    @Test("Disabled agent manifests reject generation")
+    func disabledAgentManifestsRejectGeneration() {
+        let preferences = LessonMeldPreferences(
+            integrations: IntegrationPreferences(agentManifestsEnabled: false)
+        )
+
+        #expect(throws: AgentManifestPolicyError.manifestsDisabled) {
+            try AgentManifestPolicy.resolve(
+                preferences: preferences,
+                explicitOptions: AgentManifestOptions(includeMediaPaths: true)
+            )
+        }
+    }
+
     @Test("Agent workflows are target specific and use stable slugs")
     func agentWorkflows() {
         let workflows = AgentWorkflowCatalog.defaultWorkflows()
