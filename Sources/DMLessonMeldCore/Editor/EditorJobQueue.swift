@@ -263,6 +263,23 @@ public enum EditorJobCancellationPolicy {
     }
 }
 
+public enum EditorJobProjectTransitionPolicy {
+    public static func cancellingActiveJobs(
+        in records: [EditorJobRecord],
+        projectPath: String?,
+        message: String,
+        at date: Date = Date()
+    ) -> [EditorJobRecord] {
+        guard let projectPath else { return records }
+        return records.map { record in
+            guard record.isActive, record.projectPath == projectPath else { return record }
+            var cancelledRecord = record
+            cancelledRecord.cancel(message, at: date)
+            return cancelledRecord
+        }
+    }
+}
+
 public enum EditorJobHistoryFile {
     public static let defaultFileName = "job-history.json"
     public static let defaultRecordLimit = 50

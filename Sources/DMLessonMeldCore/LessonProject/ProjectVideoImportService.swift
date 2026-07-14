@@ -166,6 +166,7 @@ public enum ProjectVideoImportService {
         let stagedMediaURL = stagingProjectURL.appendingPathComponent(mediaFileName)
         do {
             try operations.copyItem(sourceURL, stagedMediaURL)
+            try Task.checkCancellation()
         } catch {
             throw ProjectVideoImportError.mediaCopyFailed(
                 cleanupIncomplete: cleanupCreatedArtifacts([stagingProjectURL], operations: operations)
@@ -182,6 +183,7 @@ public enum ProjectVideoImportService {
         do {
             try operations.writeManifest(manifest, stagingProjectURL)
             try validateStagedProject(at: stagingProjectURL)
+            try Task.checkCancellation()
         } catch {
             throw ProjectVideoImportError.manifestWriteFailed(
                 cleanupIncomplete: cleanupCreatedArtifacts([stagingProjectURL], operations: operations)
@@ -235,6 +237,7 @@ public enum ProjectVideoImportService {
 
         do {
             try operations.copyItem(sourceURL, temporaryMediaURL)
+            try Task.checkCancellation()
         } catch {
             throw ProjectVideoImportError.mediaCopyFailed(
                 cleanupIncomplete: cleanupCreatedArtifacts(
@@ -258,12 +261,30 @@ public enum ProjectVideoImportService {
             throw ProjectVideoImportError.destinationCommitFailed(cleanupIncomplete: cleanupIncomplete)
         }
 
+        if Task.isCancelled {
+            throw ProjectVideoImportError.destinationCommitFailed(
+                cleanupIncomplete: cleanupCreatedArtifacts(
+                    [destinationMediaURL, stagingDirectoryURL] + directoryCleanup,
+                    operations: operations
+                )
+            )
+        }
+
         do {
             try operations.removeItem(stagingDirectoryURL)
         } catch {
             throw ProjectVideoImportError.destinationCommitFailed(
                 cleanupIncomplete: cleanupCreatedArtifacts(
                     [destinationMediaURL, stagingDirectoryURL] + directoryCleanup,
+                    operations: operations
+                )
+            )
+        }
+
+        if Task.isCancelled {
+            throw ProjectVideoImportError.destinationCommitFailed(
+                cleanupIncomplete: cleanupCreatedArtifacts(
+                    [destinationMediaURL] + directoryCleanup,
                     operations: operations
                 )
             )

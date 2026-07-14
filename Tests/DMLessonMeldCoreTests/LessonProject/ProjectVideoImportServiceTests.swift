@@ -1,4 +1,5 @@
 @testable import DMLessonMeldCore
+import Dispatch
 import Foundation
 import Testing
 
@@ -102,6 +103,48 @@ struct ProjectVideoImportServiceTests {
             )
         }
         #expect(!FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("copy-failure.dmlm").path))
+        #expect(try importArtifacts(in: temp.url).isEmpty)
+    }
+
+    @Test("Cancelled imports remove staged project artifacts")
+    func cancelledImportsRemoveStagedProjectArtifacts() async throws {
+        let temp = try TemporaryDirectory()
+        let sourceURL = temp.url.appendingPathComponent("Cancelled Import.mp4")
+        try Data("video".utf8).write(to: sourceURL)
+        let template = try #require(LessonTemplateLibrary.defaultTemplates.first)
+        let copyStarted = DispatchSemaphore(value: 0)
+        let finishCopy = DispatchSemaphore(value: 0)
+        var operations = ProjectVideoImportOperations.live
+        operations.copyItem = { _, destination in
+            copyStarted.signal()
+            finishCopy.wait()
+            try Data("partial".utf8).write(to: destination)
+        }
+        let request = ProjectVideoImportRequest(
+            sourceURL: sourceURL,
+            defaultProjectDirectory: temp.url.path,
+            defaultTemplateID: template.id
+        )
+
+        let task = Task.detached {
+            try ProjectVideoImportService.importVideo(request, operations: operations)
+        }
+        let copyDidStart = await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(returning: copyStarted.wait(timeout: .now() + 2) == .success)
+            }
+        }
+        #expect(copyDidStart)
+        task.cancel()
+        finishCopy.signal()
+
+        do {
+            _ = try await task.value
+            Issue.record("Cancelled import unexpectedly completed")
+        } catch let error as ProjectVideoImportError {
+            #expect(error == .mediaCopyFailed(cleanupIncomplete: false))
+        }
+        #expect(!FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("cancelled-import.dmlm").path))
         #expect(try importArtifacts(in: temp.url).isEmpty)
     }
 
