@@ -799,8 +799,11 @@ final class QuickRecorderModel: ObservableObject {
         return CGSize(width: width, height: round(width / max(webcamPreviewAspectRatio, 0.1)))
     }
 
-    var effectiveRecordDurationSeconds: Int {
-        autoStopEnabled ? recordDurationSeconds : Self.manualStopDurationSeconds
+    var effectiveRecordDurationSeconds: TimeInterval {
+        QuickRecordingDurationPolicy.effectiveDurationSeconds(
+            autoStopEnabled: autoStopEnabled,
+            configuredDurationSeconds: recordDurationSeconds
+        )
     }
 
     var selectedDisplayName: String {
@@ -1152,7 +1155,7 @@ final class QuickRecorderModel: ObservableObject {
                 : "Recording \(enabledTrackLabels) from \(recordTarget.displayName.lowercased()). Press Stop to finish."
             publishStatus()
 
-            let duration = TimeInterval(effectiveRecordDurationSeconds)
+            let duration = effectiveRecordDurationSeconds
             let displayID = selectedDisplayID
             let microphoneDeviceID = selectedMicrophoneID
             let cameraDeviceID = selectedCameraID
@@ -2138,7 +2141,6 @@ final class QuickRecorderModel: ObservableObject {
     }
 
     private static let readyMessage = "Open the recording controls to choose screen, window, region, microphone, webcam, and system audio before recording."
-    private static let manualStopDurationSeconds = 12 * 60 * 60
     private static let stopTimeoutSeconds: TimeInterval = 12
 }
 
