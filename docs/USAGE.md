@@ -295,7 +295,7 @@ Agent workflow JSON is available for `openclaw`, `codex`, and `veritas-kanban` t
 
 The wrapper defaults to `.build/debug/dmlesson` when it exists, falls back to `swift run dmlesson`, and accepts `DMLESSON_CLI=/path/to/dmlesson` for packaged binaries. It does not expose recording or export execution tools.
 
-MCP responses redact media paths and transcript references unless the host sets `DMLESSON_MCP_ALLOW_DISCLOSURE=1` and the tool call explicitly requests those fields. `DMLESSON_MCP_TIMEOUT` controls subprocess timeouts, and `DMLESSON_MCP_MAX_OUTPUT_BYTES` caps returned stdout/stderr.
+MCP responses redact media paths and transcript references unless the host sets `DMLESSON_MCP_ALLOW_DISCLOSURE=1` and the tool call explicitly requests those fields. The wrapper also removes absolute local paths from successful structured content and CLI error text at the MCP response boundary. `DMLESSON_MCP_TIMEOUT` controls subprocess timeouts, and `DMLESSON_MCP_MAX_OUTPUT_BYTES` caps returned stdout/stderr.
 
 Smoke-test it locally:
 
