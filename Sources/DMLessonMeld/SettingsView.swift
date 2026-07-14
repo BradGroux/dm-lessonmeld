@@ -1,5 +1,6 @@
 import AppKit
 import DMLessonMeldCore
+import DMLessonMeldSupport
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -44,6 +45,7 @@ struct LessonMeldSettingsView: View {
         .onReceive(appRouter.$settingsRequest.compactMap(\.self)) { request in
             applySettingsRequest(request)
         }
+        .confirmsWindowClose(confirmWindowClose)
     }
 
     private var hasUnsavedChanges: Bool {
@@ -491,7 +493,7 @@ struct LessonMeldSettingsView: View {
             Toggle("Exclude media from backups", isOn: binding(\.privacy.excludeMediaFromBackups))
             Toggle("Include media paths in agent manifests", isOn: binding(\.privacy.includeMediaPathsInAgentManifests))
             Toggle("Include transcript references in agent manifests", isOn: binding(\.privacy.includeTranscriptReferencesInAgentManifests))
-            ConfigBackupSettingsPanel(preferences: preferences)
+            ConfigBackupSettingsPanel(context: SettingsBackupDraftContext(preferences: draft))
         }
     }
 
@@ -704,6 +706,30 @@ struct LessonMeldSettingsView: View {
     private func refreshDraft() {
         draft = preferences.snapshot.normalized()
         saveMessage = "Saved"
+    }
+
+    private func confirmWindowClose() -> Bool {
+        guard hasUnsavedChanges else { return true }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Save settings changes before closing?"
+        alert.informativeText = "Closing without saving discards the changes currently shown in Settings."
+        alert.addButton(withTitle: "Save and Close")
+        alert.addButton(withTitle: "Discard Changes")
+        alert.addButton(withTitle: "Cancel")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            preferences.replace(with: draft)
+            refreshDraft()
+            return true
+        case .alertSecondButtonReturn:
+            refreshDraft()
+            return true
+        default:
+            return false
+        }
     }
 
     private func applySettingsRequest(_ request: LessonMeldSettingsWindowRequest?) {
@@ -962,8 +988,8 @@ private extension Color {
 }
 
 private struct ConfigBackupSettingsPanel: View {
-    @ObservedObject var preferences: AppPreferencesController
-    @State private var message = "Writes current settings to JSON before committing safe config files."
+    let context: SettingsBackupDraftContext
+    @State private var message = "Uses the settings currently shown here before committing safe config files."
     @State private var isWorking = false
     @State private var messageIsError = false
 
@@ -988,7 +1014,7 @@ private struct ConfigBackupSettingsPanel: View {
                     backupButtons
                 }
             }
-            .disabled(isWorking || !preferences.snapshot.privacy.allowGitBackupsForSettings)
+            .disabled(isWorking || !context.isEnabled)
         }
     }
 
@@ -1059,14 +1085,13 @@ private struct ConfigBackupSettingsPanel: View {
     private func writeSettingsFile() throws -> URL {
         let fileURL = rootURL().appendingPathComponent("settings/preferences.json")
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try DMLessonJSON.encoder().encode(preferences.snapshot.normalized())
+        let data = try context.encodedPreferences()
         try data.write(to: fileURL, options: [.atomic])
         return fileURL
     }
 
     private func rootURL() -> URL {
-        let expanded = NSString(string: preferences.snapshot.privacy.configBackupRootPath).expandingTildeInPath
-        return URL(fileURLWithPath: expanded, isDirectory: true)
+        context.rootURL
     }
 }
 
