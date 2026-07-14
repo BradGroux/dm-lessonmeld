@@ -128,7 +128,34 @@ git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```
 
-The workflow fails if the tag does not match `CFBundleShortVersionString`.
+Before any secret-bearing job starts, the workflow fails unless all of these are true:
+
+- The tagged commit is reachable from the repository's current default branch.
+- The tag exactly matches `v` plus `CFBundleShortVersionString`.
+- `CFBundleVersion` is valid numeric build metadata.
+
+The `build-release` job is bound to the protected `release-signing` GitHub Environment. Configure that environment and the release-tag rules below before pushing a release tag. Workflow YAML alone is not the authorization boundary.
+
+### Required GitHub release controls
+
+Configure these repository controls before the next release:
+
+1. Create a GitHub Environment named `release-signing`.
+2. Add the approved release reviewer or team. Enable prevent-self-review when at least two maintainers can operate the release path.
+3. Limit the environment's deployment tag pattern to `v*`; do not permit arbitrary branches or tags.
+4. Store the six Apple signing and notarization secrets listed below as environment secrets. Confirm all six names exist there, then remove their repository-scoped copies so only the protected job can receive them.
+5. Create an active tag ruleset for `refs/tags/v*` that restricts tag creation, update, and deletion to the approved maintainer or release automation path. Keep bypass access as narrow as recovery requires.
+6. Inspect the environment and tag ruleset through the GitHub API before a release. Do not treat a successful workflow-file review as proof that the repository controls exist.
+
+The provenance job runs without an environment or release secrets. Only after it succeeds can GitHub request approval for the secret-bearing `build-release` job. Publishing still depends on the verified artifacts produced by that job.
+
+### Rejected-release recovery
+
+- If provenance verification rejects the tag, do not approve or retry the secret-bearing job. Correct the version/build metadata on a reviewed default-branch commit, then create the intended tag through the approved tag-ruleset path.
+- If an incorrect tag must be removed, use only the tag-ruleset recovery/bypass path and record why it was needed. Never move a tag for an artifact that was already published; increment the version instead.
+- If environment approval is rejected, leave the run rejected until the reviewer concern is resolved. A retry must still pass provenance and receive a fresh environment decision.
+- If environment secrets are incomplete, repair their names or values in the protected environment. Do not copy them back to repository scope as a workaround.
+- If any signing credential may have been exposed, stop the release. Credential rotation is an explicit maintainer action and must not be performed as routine workflow recovery.
 
 Set the release mode before pushing the tag:
 
@@ -160,7 +187,7 @@ It then creates a GitHub Release and attaches:
 
 ## Signing secrets
 
-Set these repository secrets before publishing a signed and notarized release. The `BradGroux/dm-lessonmeld` repository already has them configured. If any are missing while release mode is `signed`, the tag workflow fails. If only some are configured, the tag workflow fails in every release mode to avoid accidental partial signing state.
+Set these as environment secrets on the protected `release-signing` environment before publishing a signed and notarized release. Do not retain repository-scoped copies after the migration is verified. If any are missing while release mode is `signed`, the tag workflow fails. If only some are configured, the tag workflow fails in every release mode to avoid accidental partial signing state.
 
 - `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`: base64-encoded `.p12` export containing the Developer ID Application certificate and private key.
 - `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`: password for the `.p12` export.
