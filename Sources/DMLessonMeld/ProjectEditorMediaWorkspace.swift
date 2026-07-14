@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import AVKit
 import DMLessonMeldCore
+import DMLessonMeldSupport
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -844,6 +845,13 @@ extension ProjectEditorView {
                         HStack {
                             Toggle("Enabled", isOn: $zoom.isEnabled)
                                 .toggleStyle(.checkbox)
+                                .accessibilityLabel(
+                                    EditorRowAccessibilityPolicy.label(
+                                        for: .enabled,
+                                        kind: .zoom,
+                                        startSeconds: zoom.startSeconds
+                                    )
+                                )
                             Spacer()
                             Button {
                                 model.seek(to: secondsValue(zoom.startSeconds) ?? 0)
@@ -851,12 +859,28 @@ extension ProjectEditorView {
                                 Image(systemName: "playhead.left")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel(
+                                EditorRowAccessibilityPolicy.label(
+                                    for: .seek,
+                                    kind: .zoom,
+                                    startSeconds: zoom.startSeconds
+                                )
+                            )
+                            .accessibilityHint("Moves the playhead to this zoom's start time.")
                             Button {
                                 model.removeZoom(id: zoom.id)
                             } label: {
                                 Image(systemName: "trash")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel(
+                                EditorRowAccessibilityPolicy.label(
+                                    for: .delete,
+                                    kind: .zoom,
+                                    startSeconds: zoom.startSeconds
+                                )
+                            )
+                            .accessibilityHint("Removes this zoom region from the project.")
                         }
                         HStack {
                             compactNumberField("Start", text: $zoom.startSeconds)
@@ -1115,8 +1139,16 @@ extension ProjectEditorView {
                 }
                 ForEach($model.cameraReactionRows) { $reaction in
                     HStack {
-                        Toggle("", isOn: $reaction.isEnabled)
+                        Toggle(
+                            EditorRowAccessibilityPolicy.label(
+                                for: .enabled,
+                                kind: .reaction,
+                                startSeconds: reaction.startSeconds
+                            ),
+                            isOn: $reaction.isEnabled
+                        )
                             .toggleStyle(.checkbox)
+                            .labelsHidden()
                         TextField("Reaction", text: $reaction.text)
                             .frame(width: 76)
                         compactNumberField("Start", text: $reaction.startSeconds)
@@ -1127,6 +1159,14 @@ extension ProjectEditorView {
                             Image(systemName: "trash")
                         }
                         .buttonStyle(.borderless)
+                        .accessibilityLabel(
+                            EditorRowAccessibilityPolicy.label(
+                                for: .delete,
+                                kind: .reaction,
+                                startSeconds: reaction.startSeconds
+                            )
+                        )
+                        .accessibilityHint("Removes this camera reaction from the project.")
                     }
                 }
 
@@ -1355,12 +1395,28 @@ extension ProjectEditorView {
                                 Image(systemName: "playhead.left")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel(
+                                EditorRowAccessibilityPolicy.label(
+                                    for: .seek,
+                                    kind: .caption,
+                                    startSeconds: caption.startSeconds
+                                )
+                            )
+                            .accessibilityHint("Moves the playhead to this caption's start time.")
                             Button {
                                 model.removeCaption(id: caption.id)
                             } label: {
                                 Image(systemName: "trash")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel(
+                                EditorRowAccessibilityPolicy.label(
+                                    for: .delete,
+                                    kind: .caption,
+                                    startSeconds: caption.startSeconds
+                                )
+                            )
+                            .accessibilityHint("Removes this caption from the project.")
                         }
                         TextField("Caption text", text: $caption.text, axis: .vertical)
                             .lineLimit(2...4)

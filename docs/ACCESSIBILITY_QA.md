@@ -34,6 +34,7 @@ Run this checklist before tagging a release or after changing primary app surfac
 - `Option-1` through `Option-0`, `Option--`, and `Option-=` switch inspector panels.
 - Timeline lanes and blocks announce lane, item title, enabled/selected state, and start/end times.
 - Overlay and caption preview items announce selectable edit targets, and all drag-only actions have inspector fields for keyboard editing.
+- Zoom enable, seek, and delete controls announce the zoom start time; reaction enable/delete and caption seek/delete controls announce their item type and start time.
 
 ## Annotation Tools
 
