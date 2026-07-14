@@ -410,7 +410,7 @@ private struct ConnectorPackageWriter {
         let slug = ConnectorPackageUtilities.slug(manifest.metadata.lessonTitle)
         let packageURL = outputDirectory.appendingPathComponent("\(slug).\(directoryExtension)", isDirectory: true)
         let assetsURL = packageURL.appendingPathComponent("assets", isDirectory: true)
-        try ConnectorPackageUtilities.ensureSafeDirectory(packageURL, within: outputDirectory)
+        try ConnectorPackageUtilities.recreateSafeDirectory(packageURL, within: outputDirectory)
         try ConnectorPackageUtilities.ensureSafeDirectory(assetsURL, within: packageURL)
 
         var files = try ConnectorPackageUtilities.copyProjectFiles(
@@ -629,6 +629,26 @@ private enum ConnectorPackageUtilities {
                 try FileManager.default.createDirectory(at: current, withIntermediateDirectories: false)
             }
         }
+    }
+
+    static func recreateSafeDirectory(_ directoryURL: URL, within rootURL: URL) throws {
+        let rootPath = rootURL.standardizedFileURL.resolvingSymlinksInPath().path
+        let targetPath = directoryURL.standardizedFileURL.path
+        guard targetPath != rootPath else {
+            throw ConnectorPackageError.unsafeDestination(directoryURL.path)
+        }
+
+        try Task.checkCancellation()
+        try ensureSafeDirectory(directoryURL, within: rootURL)
+        if FileManager.default.fileExists(atPath: directoryURL.path) {
+            try Task.checkCancellation()
+            guard !isSymbolicLink(directoryURL) else {
+                throw ConnectorPackageError.unsafeDestination(directoryURL.path)
+            }
+            try FileManager.default.removeItem(at: directoryURL)
+        }
+        try Task.checkCancellation()
+        try ensureSafeDirectory(directoryURL, within: rootURL)
     }
 
     static func sha256Hex(for url: URL) throws -> String {

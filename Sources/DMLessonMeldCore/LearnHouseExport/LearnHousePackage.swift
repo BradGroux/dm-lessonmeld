@@ -437,7 +437,7 @@ public struct LearnHousePackageBuilder {
         let assetsURL = packageURL.appendingPathComponent("assets", isDirectory: true)
 
         try Task.checkCancellation()
-        try ensureSafeDirectory(packageURL, within: outputDirectory)
+        try recreateSafeDirectory(packageURL, within: outputDirectory)
         try ensureSafeDirectory(assetsURL, within: packageURL)
         try Task.checkCancellation()
         try writeProjectManifest(manifest, packageURL: packageURL)
@@ -745,6 +745,26 @@ public struct LearnHousePackageBuilder {
                 try FileManager.default.createDirectory(at: current, withIntermediateDirectories: false)
             }
         }
+    }
+
+    private func recreateSafeDirectory(_ directoryURL: URL, within rootURL: URL) throws {
+        let rootPath = rootURL.standardizedFileURL.resolvingSymlinksInPath().path
+        let targetPath = directoryURL.standardizedFileURL.path
+        guard targetPath != rootPath else {
+            throw LearnHousePackageError.unsafeDestination(directoryURL.path)
+        }
+
+        try Task.checkCancellation()
+        try ensureSafeDirectory(directoryURL, within: rootURL)
+        if FileManager.default.fileExists(atPath: directoryURL.path) {
+            try Task.checkCancellation()
+            guard !isSymbolicLink(directoryURL) else {
+                throw LearnHousePackageError.unsafeDestination(directoryURL.path)
+            }
+            try FileManager.default.removeItem(at: directoryURL)
+        }
+        try Task.checkCancellation()
+        try ensureSafeDirectory(directoryURL, within: rootURL)
     }
 
     private func stableID(prefix: String, value: String) -> String {

@@ -61,6 +61,28 @@ struct LearnHousePackageTests {
         #expect((try FileManager.default.attributesOfItem(atPath: archivePath)[.size] as? UInt64) ?? 0 > 0)
     }
 
+    @Test("Re-export removes stale files from an existing LearnHouse package")
+    func reexportRemovesStaleLearnHouseFiles() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = try makeProject(in: temp.url)
+        let outputURL = temp.url.appendingPathComponent("exports", isDirectory: true)
+        let firstResult = try LearnHousePackageBuilder().buildPackage(
+            projectURL: projectURL,
+            outputDirectory: outputURL
+        )
+        let staleURL = URL(fileURLWithPath: firstResult.packagePath)
+            .appendingPathComponent("assets/stale-secret.txt")
+        try Data("stale".utf8).write(to: staleURL)
+
+        let secondResult = try LearnHousePackageBuilder().buildPackage(
+            projectURL: projectURL,
+            outputDirectory: outputURL
+        )
+
+        #expect(secondResult.packagePath == firstResult.packagePath)
+        #expect(!FileManager.default.fileExists(atPath: staleURL.path))
+    }
+
     @Test("Writes stable package manifest field names")
     func writesStableManifestFieldNames() throws {
         let temp = try TemporaryDirectory()
