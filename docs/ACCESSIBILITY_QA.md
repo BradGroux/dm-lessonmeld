@@ -21,6 +21,7 @@ Run this checklist before tagging a release or after changing primary app surfac
 - `Option-Command-R` opens the floating recorder controls.
 - Tab reaches capture target, camera, microphone, system audio, annotate, options, start, pause/resume, restart, delete, and stop controls.
 - Each icon-only recorder control has a meaningful VoiceOver label, value, and hint.
+- During recording, the camera popover announces that capture settings are locked; disabled setup controls cannot change future defaults, while the floating-preview toggle remains keyboard reachable.
 - Stopping state announces that recording is stopping and remains keyboard reachable for cancel/retry paths.
 
 ## Video Editor

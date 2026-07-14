@@ -2,6 +2,7 @@
 import AppKit
 import CoreGraphics
 import DMLessonMeldCore
+import DMLessonMeldSupport
 import SwiftUI
 
 struct DisplayPopover: View {
@@ -49,75 +50,93 @@ struct CameraPopover: View {
 
             WebcamPreviewCard(model: model)
 
-            Toggle("Capture webcam", isOn: captureWebcamBinding)
-
-            Divider()
-
-            if model.cameraChoices.isEmpty {
-                Text("No cameras were found.")
+            if model.isRecording {
+                Label("Capture settings are locked until this recording ends.", systemImage: "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else {
-                Picker("Camera", selection: selectedCameraBinding) {
-                    ForEach(model.cameraChoices) { camera in
-                        Text(camera.name).tag(camera.id)
-                    }
-                }
-                .pickerStyle(.menu)
-                .disabled(model.isRecording)
+                    .accessibilityIdentifier("camera-capture-settings-locked")
             }
 
-            Picker("Format", selection: webcamAspectRatioBinding) {
-                ForEach(WebcamAspectRatio.allCases) { ratio in
-                    Text(ratio.displayName).tag(ratio)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(model.webcamFrameShape == .circle)
-            .opacity(model.webcamFrameShape == .circle ? 0.48 : 1)
-            .help(model.webcamFrameShape == .circle ? "Circle webcam frames always use a 1:1 crop." : "Choose the webcam frame format.")
+            Group {
+                Toggle("Capture webcam", isOn: captureWebcamBinding)
 
-            Picker("Frame", selection: webcamFrameShapeBinding) {
-                ForEach(WebcamFrameShape.allCases) { shape in
-                    Text(shape.displayName).tag(shape)
-                }
-            }
-            .pickerStyle(.segmented)
+                Divider()
 
-            if model.webcamFrameShape == .roundedRectangle {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Corner radius: \(Int(model.webcamCornerRadius))")
+                if model.cameraChoices.isEmpty {
+                    Text("No cameras were found.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Slider(value: webcamCornerRadiusBinding, in: 0...64, step: 1)
+                } else {
+                    Picker("Camera", selection: selectedCameraBinding) {
+                        ForEach(model.cameraChoices) { camera in
+                            Text(camera.name).tag(camera.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
                 }
-            }
 
-            HStack(spacing: 12) {
-                Picker("Resolution", selection: cameraResolutionBinding) {
-                    ForEach(CameraResolution.allCases) { resolution in
-                        Text(resolution.rawValue).tag(resolution)
+                Picker("Format", selection: webcamAspectRatioBinding) {
+                    ForEach(WebcamAspectRatio.allCases) { ratio in
+                        Text(ratio.displayName).tag(ratio)
                     }
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.segmented)
+                .disabled(!controlAvailability.canEditAspectRatio)
+                .opacity(model.webcamFrameShape == .circle ? 0.48 : 1)
+                .help(model.webcamFrameShape == .circle ? "Circle webcam frames always use a 1:1 crop." : "Choose the webcam frame format.")
 
-                Picker("FPS", selection: webcamFPSBinding) {
-                    ForEach(CapturePreferences.supportedWebcamFPS, id: \.self) { fps in
-                        Text("\(fps)").tag(fps)
+                Picker("Frame", selection: webcamFrameShapeBinding) {
+                    ForEach(WebcamFrameShape.allCases) { shape in
+                        Text(shape.displayName).tag(shape)
                     }
                 }
-                .pickerStyle(.menu)
-            }
+                .pickerStyle(.segmented)
 
-            HStack(spacing: 14) {
-                Toggle("Mirror", isOn: webcamMirrorBinding)
-                Toggle("Border", isOn: webcamBorderBinding)
-                Toggle("Shadow", isOn: webcamShadowBinding)
+                if model.webcamFrameShape == .roundedRectangle {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Corner radius: \(Int(model.webcamCornerRadius))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Slider(value: webcamCornerRadiusBinding, in: 0...64, step: 1)
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Picker("Resolution", selection: cameraResolutionBinding) {
+                        ForEach(CameraResolution.allCases) { resolution in
+                            Text(resolution.rawValue).tag(resolution)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Picker("FPS", selection: webcamFPSBinding) {
+                        ForEach(CapturePreferences.supportedWebcamFPS, id: \.self) { fps in
+                            Text("\(fps)").tag(fps)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                HStack(spacing: 14) {
+                    Toggle("Mirror", isOn: webcamMirrorBinding)
+                    Toggle("Border", isOn: webcamBorderBinding)
+                    Toggle("Shadow", isOn: webcamShadowBinding)
+                }
             }
+            .disabled(!controlAvailability.canEditCaptureConfiguration)
+            .help(model.isRecording ? "Capture settings can be changed after recording ends." : "Configure webcam capture.")
 
             Toggle("Floating preview while recording", isOn: floatingPreviewBinding)
-                .disabled(!model.captureWebcam)
+                .disabled(!controlAvailability.canToggleFloatingPreview)
         }
+    }
+
+    private var controlAvailability: QuickRecordingCameraControlAvailability {
+        QuickRecordingCameraControlAvailability(
+            isRecording: model.isRecording,
+            captureWebcam: model.captureWebcam,
+            frameShape: model.webcamFrameShape
+        )
     }
 
     private var captureWebcamBinding: Binding<Bool> {

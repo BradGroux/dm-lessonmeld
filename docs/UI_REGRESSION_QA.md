@@ -20,7 +20,7 @@ Check these scenarios:
 
 - `editor-empty`: first-run dashboard at laptop width.
 - `recorder-setup`: floating recorder before recording starts.
-- `recorder-active`: floating recorder while recording, including pause and stop controls.
+- `recorder-active`: floating recorder while recording, including pause and stop controls. In the camera popover, capture, device, format, frame, resolution, FPS, and styling controls are locked while the live preview and floating-preview toggle remain available.
 - `video-editor-overlays`: loaded project with the Overlays inspector open and at least one text or shape overlay visible.
 - `video-editor-captions`: loaded project with the Captions inspector open and a caption visible in preview.
 - `video-editor-narrow`: loaded project at the minimum supported editor width; inspector may collapse but stage and timeline must not overlap.
