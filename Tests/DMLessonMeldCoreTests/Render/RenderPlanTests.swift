@@ -165,6 +165,135 @@ struct RenderPlanTests {
         })
     }
 
+    @Test("Render plan compiles trim and enabled cuts into retained source ranges")
+    func renderPlanCompilesRetainedSourceRanges() throws {
+        let plan = try RenderPlan.make(
+            manifest: ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Edited Lesson"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo)
+                )
+            ),
+            projectURL: URL(fileURLWithPath: "/tmp/Lesson.dmlm"),
+            destinationURL: URL(fileURLWithPath: "/tmp/lesson.mp4"),
+            editDecisionList: EditDecisionList(
+                id: "lesson-edit",
+                sourceDurationSeconds: 10,
+                trimRange: EditTimeRange(startSeconds: 1, endSeconds: 9),
+                cuts: [
+                    TimelineCut(id: "first", range: EditTimeRange(startSeconds: 2, endSeconds: 4)),
+                    TimelineCut(id: "disabled", range: EditTimeRange(startSeconds: 5, endSeconds: 6), isEnabled: false),
+                    TimelineCut(id: "second", range: EditTimeRange(startSeconds: 7, endSeconds: 8))
+                ]
+            )
+        )
+
+        #expect(plan.retainedSourceRanges == [
+            EditTimeRange(startSeconds: 1, endSeconds: 2),
+            EditTimeRange(startSeconds: 4, endSeconds: 7),
+            EditTimeRange(startSeconds: 8, endSeconds: 9)
+        ])
+    }
+
+    @Test("Render plan preserves trim-only edits and ignores disabled-only cuts")
+    func renderPlanHandlesTrimOnlyAndDisabledCuts() throws {
+        let manifest = ProjectManifest(
+            metadata: LessonMetadata(lessonTitle: "Edited Lesson"),
+            media: ProjectMedia(screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo))
+        )
+        let projectURL = URL(fileURLWithPath: "/tmp/Lesson.dmlm")
+        let destinationURL = URL(fileURLWithPath: "/tmp/lesson.mp4")
+
+        let trimOnlyPlan = try RenderPlan.make(
+            manifest: manifest,
+            projectURL: projectURL,
+            destinationURL: destinationURL,
+            editDecisionList: EditDecisionList(
+                id: "trim-only",
+                sourceDurationSeconds: 10,
+                trimRange: EditTimeRange(startSeconds: 2, endSeconds: 6)
+            )
+        )
+        let disabledCutPlan = try RenderPlan.make(
+            manifest: manifest,
+            projectURL: projectURL,
+            destinationURL: destinationURL,
+            editDecisionList: EditDecisionList(
+                id: "disabled-cut",
+                sourceDurationSeconds: 10,
+                cuts: [
+                    TimelineCut(
+                        id: "disabled",
+                        range: EditTimeRange(startSeconds: 2, endSeconds: 6),
+                        isEnabled: false
+                    )
+                ]
+            )
+        )
+
+        #expect(trimOnlyPlan.retainedSourceRanges == [EditTimeRange(startSeconds: 2, endSeconds: 6)])
+        #expect(disabledCutPlan.retainedSourceRanges == nil)
+    }
+
+    @Test("Render plan drops cut markers and maps retained markers to output time")
+    func renderPlanMapsMarkersToOutputTime() throws {
+        let plan = try RenderPlan.make(
+            manifest: ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Marked Lesson"),
+                media: ProjectMedia(screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo)),
+                markers: [
+                    ProjectTimelineMarker(id: "intro", kind: .chapter, timeSeconds: 0.5, title: "Intro"),
+                    ProjectTimelineMarker(id: "removed", kind: .retake, timeSeconds: 1.5, title: "Removed"),
+                    ProjectTimelineMarker(id: "middle", kind: .chapter, timeSeconds: 3, title: "Middle"),
+                    ProjectTimelineMarker(id: "ending", kind: .segment, timeSeconds: 5, title: "Ending")
+                ]
+            ),
+            projectURL: URL(fileURLWithPath: "/tmp/Lesson.dmlm"),
+            destinationURL: URL(fileURLWithPath: "/tmp/lesson.mp4"),
+            editDecisionList: EditDecisionList(
+                id: "marked-edit",
+                sourceDurationSeconds: 6,
+                cuts: [
+                    TimelineCut(id: "remove-retake", range: EditTimeRange(startSeconds: 1, endSeconds: 2))
+                ],
+                speedRegions: [
+                    SpeedRegion(
+                        id: "fast-middle",
+                        range: EditTimeRange(startSeconds: 2, endSeconds: 4),
+                        playbackRate: 2
+                    )
+                ]
+            )
+        )
+
+        #expect(plan.markers.map(\.id) == ["intro", "middle", "ending"])
+        #expect(plan.markers.map(\.timeSeconds) == [0.5, 1.5, 3])
+    }
+
+    @Test("Render plan rejects invalid retained edit decisions")
+    func renderPlanRejectsInvalidRetainedEditDecisions() {
+        #expect(throws: RenderPlanError.self) {
+            try RenderPlan.make(
+                manifest: ProjectManifest(
+                    metadata: LessonMetadata(lessonTitle: "Invalid Edit"),
+                    media: ProjectMedia(screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo))
+                ),
+                projectURL: URL(fileURLWithPath: "/tmp/Lesson.dmlm"),
+                destinationURL: URL(fileURLWithPath: "/tmp/lesson.mp4"),
+                editDecisionList: EditDecisionList(
+                    id: "invalid-edit",
+                    sourceDurationSeconds: 6,
+                    cuts: [
+                        TimelineCut(
+                            id: "invalid-cut",
+                            range: EditTimeRange(startSeconds: .nan, durationSeconds: 1)
+                        )
+                    ]
+                )
+            )
+        }
+    }
+
     @Test("Render validation rejects overlapping speed regions")
     func renderValidationRejectsOverlappingSpeedRegions() throws {
         let temp = try TemporaryDirectory()
@@ -268,6 +397,32 @@ struct RenderPlanTests {
         #expect(mapper.outputTime(forSourceTime: 7) == 7)
         #expect(mapper.outputDuration(forSourceDuration: 10) == 11)
         #expect(mappedRange == EditTimeRange(startSeconds: 1, endSeconds: 4))
+    }
+
+    @Test("Timeline retiming mapper removes cuts before applying speed regions")
+    func timelineRetimingMapperRemovesCutsBeforeSpeedRegions() {
+        let mapper = TimelineRetimingMapper(
+            speedRegions: [
+                SpeedRegion(
+                    id: "fast",
+                    range: EditTimeRange(startSeconds: 1, endSeconds: 5),
+                    playbackRate: 2
+                )
+            ],
+            retainedSourceRanges: [
+                EditTimeRange(startSeconds: 0, endSeconds: 2),
+                EditTimeRange(startSeconds: 4, endSeconds: 8)
+            ],
+            sourceDurationSeconds: 10
+        )
+
+        #expect(mapper.outputTime(forSourceTime: 1.5) == 1.25)
+        #expect(mapper.outputTime(forSourceTime: 3) == 1.5)
+        #expect(mapper.outputTime(forSourceTime: 4.5) == 1.75)
+        #expect(mapper.outputTime(forSourceTime: 7) == 4)
+        #expect(mapper.outputDuration(forSourceDuration: 10) == 5)
+        #expect(!mapper.isSourceTimeRetained(3))
+        #expect(mapper.isSourceTimeRetained(4.5))
     }
 
     @Test("Validation can check missing media only when requested")
@@ -754,13 +909,23 @@ struct RenderPlanTests {
                 )
             ),
             projectURL: URL(fileURLWithPath: "/tmp/Lesson.dmlm"),
-            destinationURL: URL(fileURLWithPath: "/tmp/lesson.mp4")
+            destinationURL: URL(fileURLWithPath: "/tmp/lesson.mp4"),
+            editDecisionList: EditDecisionList(
+                id: "codable-edit",
+                sourceDurationSeconds: 10,
+                trimRange: EditTimeRange(startSeconds: 1, endSeconds: 9)
+            )
         )
 
         let data = try JSONEncoder().encode(plan)
         let decoded = try JSONDecoder().decode(RenderPlan.self, from: data)
+        var legacyObject = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacyObject.removeValue(forKey: "retainedSourceRanges")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let legacyDecoded = try JSONDecoder().decode(RenderPlan.self, from: legacyData)
 
         #expect(decoded == plan)
+        #expect(legacyDecoded.retainedSourceRanges == nil)
     }
 
     @Test("Circle webcam placement always resolves to square")
@@ -1283,6 +1448,120 @@ struct RenderPlanTests {
 
         #expect(renderedURL.pathExtension == "mp4")
         #expect(abs(duration.seconds - 0.5) < 0.25)
+    }
+
+    @Test("Exports only retained source ranges from the full render path")
+    func exportsOnlyRetainedSourceRanges() async throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let mediaURL = projectURL.appendingPathComponent("media/screen.mp4")
+        let outputURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+
+        try await SyntheticVideoWriter.write(
+            outputURL: mediaURL,
+            size: CGSize(width: 320, height: 180),
+            color: (red: 50, green: 100, blue: 180),
+            frameCount: 30,
+            fps: 15
+        )
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Cut Export"),
+                media: ProjectMedia(screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo))
+            ),
+            to: projectURL
+        )
+        try EditDecisionListFile.save(
+            EditDecisionList(
+                id: "lesson-edit",
+                sourceDurationSeconds: 2,
+                cuts: [
+                    TimelineCut(id: "remove-middle", range: EditTimeRange(startSeconds: 0.5, endSeconds: 1.5))
+                ]
+            ),
+            toProject: projectURL
+        )
+
+        let renderedURL = try await AVFoundationRenderService().export(
+            projectURL: projectURL,
+            destinationURL: outputURL,
+            preset: RenderPreset(fileType: .mp4)
+        )
+
+        let duration = try await AVURLAsset(url: renderedURL).load(.duration).seconds
+        #expect(abs(duration - 1) < 0.25)
+    }
+
+    @Test("Keeps mixed media tracks aligned across cuts and speed regions")
+    func keepsMixedMediaAlignedAcrossCutsAndSpeedRegions() async throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let screenURL = projectURL.appendingPathComponent("media/screen.mp4")
+        let webcamURL = projectURL.appendingPathComponent("media/webcam.mp4")
+        let microphoneURL = projectURL.appendingPathComponent("media/microphone.caf")
+        let outputURL = temp.url.appendingPathComponent("exports/lesson.mp4")
+
+        try await SyntheticVideoWriter.write(
+            outputURL: screenURL,
+            size: CGSize(width: 320, height: 180),
+            color: (red: 40, green: 90, blue: 170),
+            frameCount: 30,
+            fps: 15
+        )
+        try await SyntheticVideoWriter.write(
+            outputURL: webcamURL,
+            size: CGSize(width: 160, height: 90),
+            color: (red: 170, green: 80, blue: 50),
+            frameCount: 30,
+            fps: 15
+        )
+        try SyntheticAudioWriter.write(outputURL: microphoneURL, frameCount: 88_200)
+        try ProjectBundle.writeManifest(
+            ProjectManifest(
+                metadata: LessonMetadata(lessonTitle: "Mixed Edit"),
+                media: ProjectMedia(
+                    screen: ProjectFile(relativePath: "media/screen.mp4", role: .screenVideo),
+                    webcam: ProjectFile(relativePath: "media/webcam.mp4", role: .webcamVideo),
+                    microphoneAudio: ProjectFile(relativePath: "media/microphone.caf", role: .microphoneAudio)
+                )
+            ),
+            to: projectURL
+        )
+        try EditDecisionListFile.save(
+            EditDecisionList(
+                id: "mixed-edit",
+                sourceDurationSeconds: 2,
+                cuts: [
+                    TimelineCut(id: "remove-middle", range: EditTimeRange(startSeconds: 0.5, endSeconds: 1))
+                ],
+                speedRegions: [
+                    SpeedRegion(
+                        id: "speed-tail",
+                        range: EditTimeRange(startSeconds: 1, endSeconds: 2),
+                        playbackRate: 2
+                    )
+                ]
+            ),
+            toProject: projectURL
+        )
+
+        let renderedURL = try await AVFoundationRenderService().export(
+            projectURL: projectURL,
+            destinationURL: outputURL,
+            preset: RenderPreset(fileType: .mp4)
+        )
+        let asset = AVURLAsset(url: renderedURL)
+        let duration = try await asset.load(.duration).seconds
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+
+        #expect(abs(duration - 1) < 0.25)
+        #expect(videoTracks.count == 1)
+        #expect(!audioTracks.isEmpty)
+        for track in videoTracks + audioTracks {
+            let trackDuration = try await track.load(.timeRange).duration.seconds
+            #expect(abs(trackDuration - duration) < 0.25)
+        }
     }
 
     @Test("Exports synthetic media as ProRes MOV")

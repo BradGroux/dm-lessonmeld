@@ -527,6 +527,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
     public var captionSource: RenderMediaSource?
     public var zoomRegions: [ZoomRegion]
     public var speedRegions: [SpeedRegion]
+    public var retainedSourceRanges: [EditTimeRange]?
     public var markers: [ProjectTimelineMarker]
     public var canvas: EditorCanvasSettings
     public var camera: EditorCameraSettings
@@ -548,6 +549,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         captionSource: RenderMediaSource? = nil,
         zoomRegions: [ZoomRegion] = [],
         speedRegions: [SpeedRegion] = [],
+        retainedSourceRanges: [EditTimeRange]? = nil,
         markers: [ProjectTimelineMarker] = [],
         canvas: EditorCanvasSettings = EditorCanvasSettings(),
         camera: EditorCameraSettings = EditorCameraSettings(),
@@ -568,6 +570,7 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         self.captionSource = captionSource
         self.zoomRegions = zoomRegions
         self.speedRegions = speedRegions
+        self.retainedSourceRanges = retainedSourceRanges
         self.markers = markers
         self.canvas = canvas
         self.camera = camera
@@ -673,6 +676,39 @@ public struct RenderPlan: Codable, Equatable, Sendable {
         }
 
         let captionSource = try transcriptRenderSource(manifest: manifest, projectURL: projectURL)
+        let retainedSourceRanges: [EditTimeRange]?
+        if let editDecisionList,
+           editDecisionList.trimRange != nil || !editDecisionList.enabledCuts.isEmpty {
+            let retentionErrors = editDecisionList.validate().filter {
+                $0.severity == .error &&
+                    ($0.path == "sourceDurationSeconds" ||
+                     $0.path.hasPrefix("trimRange") ||
+                     $0.path.hasPrefix("cuts"))
+            }
+            if !retentionErrors.isEmpty {
+                throw RenderPlanError.invalidEditDecisions(retentionErrors.map(\.message))
+            }
+            guard let sourceRange = editDecisionList.effectiveSourceRange else {
+                throw RenderPlanError.missingEditSourceRange
+            }
+            retainedSourceRanges = EditTimelineCompiler.retainedRanges(
+                sourceRange: sourceRange,
+                cuts: editDecisionList.enabledCuts
+            )
+        } else {
+            retainedSourceRanges = nil
+        }
+        let markerTimelineMapper = TimelineRetimingMapper(
+            speedRegions: editDecisionList?.speedRegions ?? [],
+            retainedSourceRanges: retainedSourceRanges,
+            sourceDurationSeconds: editDecisionList?.sourceDurationSeconds ?? editDecisionList?.effectiveSourceRange?.endSeconds
+        )
+        let mappedMarkers = manifest.markers.compactMap { marker -> ProjectTimelineMarker? in
+            guard markerTimelineMapper.isSourceTimeRetained(marker.timeSeconds) else { return nil }
+            var mappedMarker = marker
+            mappedMarker.timeSeconds = markerTimelineMapper.outputTime(forSourceTime: marker.timeSeconds)
+            return mappedMarker
+        }
 
         return RenderPlan(
             projectURL: projectURL,
@@ -688,7 +724,8 @@ public struct RenderPlan: Codable, Equatable, Sendable {
             captionSource: captionSource,
             zoomRegions: editDecisionList?.enabledZoomRegions ?? [],
             speedRegions: editDecisionList?.speedRegions ?? [],
-            markers: manifest.markers,
+            retainedSourceRanges: retainedSourceRanges,
+            markers: mappedMarkers,
             canvas: editorSettings?.canvas ?? EditorCanvasSettings(),
             camera: cameraSettings,
             audio: editorSettings?.audio ?? EditorAudioSettings(),
@@ -729,11 +766,17 @@ public struct RenderPlan: Codable, Equatable, Sendable {
 
 public enum RenderPlanError: Error, Equatable, LocalizedError, Sendable {
     case missingScreenVideo
+    case missingEditSourceRange
+    case invalidEditDecisions([String])
 
     public var errorDescription: String? {
         switch self {
         case .missingScreenVideo:
             "Project manifest does not reference a screen video."
+        case .missingEditSourceRange:
+            "The edit decision list must include a source duration or trim range before cuts can be rendered."
+        case .invalidEditDecisions(let messages):
+            messages.joined(separator: " ")
         }
     }
 }

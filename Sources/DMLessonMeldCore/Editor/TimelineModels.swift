@@ -59,72 +59,121 @@ public struct SpeedRegion: Codable, Equatable, Identifiable, Sendable {
 }
 
 public struct TimelineRetimingMapper: Equatable, Sendable {
-    private struct Segment: Equatable, Sendable {
-        var startSeconds: Double
-        var endSeconds: Double
+    struct Segment: Equatable, Sendable {
+        var sourceRange: EditTimeRange
+        var outputRange: EditTimeRange
         var playbackRate: Double
     }
 
     private var segments: [Segment]
+    private var retainedSourceRanges: [EditTimeRange]?
     private var sourceDurationSeconds: Double?
 
-    public init(speedRegions: [SpeedRegion] = [], sourceDurationSeconds: Double? = nil) {
+    public init(
+        speedRegions: [SpeedRegion] = [],
+        retainedSourceRanges: [EditTimeRange]? = nil,
+        sourceDurationSeconds: Double? = nil
+    ) {
         let normalizedDuration = sourceDurationSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         self.sourceDurationSeconds = normalizedDuration
+        self.retainedSourceRanges = retainedSourceRanges.map {
+            Self.normalizedRetainedRanges($0, sourceDurationSeconds: normalizedDuration)
+        }
 
-        var lastEndSeconds = 0.0
-        segments = speedRegions
+        let normalizedSpeedRegions: [SpeedRegion] = speedRegions
             .sorted { left, right in
                 if left.range.startSeconds == right.range.startSeconds {
                     return left.id < right.id
                 }
                 return left.range.startSeconds < right.range.startSeconds
             }
-            .compactMap { region in
+            .compactMap { region -> SpeedRegion? in
                 guard region.playbackRate.isFinite, region.playbackRate > 0 else { return nil }
                 let startSeconds = max(0, region.range.startSeconds)
                 var endSeconds = max(startSeconds, region.range.endSeconds)
                 if let normalizedDuration {
                     endSeconds = min(endSeconds, normalizedDuration)
                 }
-                guard endSeconds > startSeconds, startSeconds >= lastEndSeconds else { return nil }
-                lastEndSeconds = endSeconds
-                return Segment(
-                    startSeconds: startSeconds,
-                    endSeconds: endSeconds,
+                guard endSeconds > startSeconds else { return nil }
+                return SpeedRegion(
+                    id: region.id,
+                    range: EditTimeRange(startSeconds: startSeconds, endSeconds: endSeconds),
                     playbackRate: region.playbackRate
                 )
             }
+
+        let sourceRanges: [EditTimeRange]
+        if let retainedSourceRanges = self.retainedSourceRanges {
+            sourceRanges = retainedSourceRanges
+        } else if let normalizedDuration, normalizedDuration > 0 {
+            sourceRanges = [EditTimeRange(startSeconds: 0, durationSeconds: normalizedDuration)]
+        } else if let lastSpeedEnd = normalizedSpeedRegions.map(\.range.endSeconds).max(), lastSpeedEnd > 0 {
+            sourceRanges = [EditTimeRange(startSeconds: 0, endSeconds: lastSpeedEnd)]
+        } else {
+            sourceRanges = []
+        }
+
+        var outputCursorSeconds = 0.0
+        var builtSegments: [Segment] = []
+        for sourceRange in sourceRanges {
+            let boundaries: [Double] = Set(
+                [sourceRange.startSeconds, sourceRange.endSeconds] +
+                normalizedSpeedRegions.flatMap { region -> [Double] in
+                    guard region.range.overlaps(sourceRange) else { return [] }
+                    return [
+                        max(sourceRange.startSeconds, region.range.startSeconds),
+                        min(sourceRange.endSeconds, region.range.endSeconds)
+                    ]
+                }
+            ).sorted()
+
+            for (startSeconds, endSeconds) in zip(boundaries, boundaries.dropFirst()) where endSeconds > startSeconds {
+                let midpoint = startSeconds + (endSeconds - startSeconds) / 2
+                let matchingSpeedRegion: SpeedRegion? = normalizedSpeedRegions.first {
+                    midpoint >= $0.range.startSeconds && midpoint < $0.range.endSeconds
+                }
+                let playbackRate = matchingSpeedRegion?.playbackRate ?? 1
+                let outputDurationSeconds = (endSeconds - startSeconds) / playbackRate
+                builtSegments.append(Segment(
+                    sourceRange: EditTimeRange(startSeconds: startSeconds, endSeconds: endSeconds),
+                    outputRange: EditTimeRange(startSeconds: outputCursorSeconds, durationSeconds: outputDurationSeconds),
+                    playbackRate: playbackRate
+                ))
+                outputCursorSeconds += outputDurationSeconds
+            }
+        }
+        segments = builtSegments
     }
 
     public var isIdentity: Bool {
-        segments.isEmpty
+        retainedSourceRanges == nil && segments.allSatisfy { $0.playbackRate == 1 }
     }
 
     public func outputTime(forSourceTime sourceTimeSeconds: Double) -> Double {
         guard sourceTimeSeconds.isFinite else { return 0 }
         let sourceTimeSeconds = clampedSourceTime(sourceTimeSeconds)
-        var outputSeconds = 0.0
-        var sourceCursorSeconds = 0.0
-
+        if segments.isEmpty {
+            return retainedSourceRanges == nil ? sourceTimeSeconds : 0
+        }
+        var priorOutputEndSeconds = 0.0
         for segment in segments {
-            if sourceTimeSeconds < segment.startSeconds {
-                outputSeconds += sourceTimeSeconds - sourceCursorSeconds
-                return max(0, outputSeconds)
+            if sourceTimeSeconds < segment.sourceRange.startSeconds {
+                return priorOutputEndSeconds
             }
-
-            outputSeconds += segment.startSeconds - sourceCursorSeconds
-            if sourceTimeSeconds <= segment.endSeconds {
-                outputSeconds += (sourceTimeSeconds - segment.startSeconds) / segment.playbackRate
-                return max(0, outputSeconds)
+            if sourceTimeSeconds <= segment.sourceRange.endSeconds {
+                return max(
+                    0,
+                    segment.outputRange.startSeconds +
+                    (sourceTimeSeconds - segment.sourceRange.startSeconds) / segment.playbackRate
+                )
             }
-
-            outputSeconds += (segment.endSeconds - segment.startSeconds) / segment.playbackRate
-            sourceCursorSeconds = segment.endSeconds
+            priorOutputEndSeconds = segment.outputRange.endSeconds
         }
 
-        outputSeconds += sourceTimeSeconds - sourceCursorSeconds
-        return max(0, outputSeconds)
+        guard retainedSourceRanges == nil, let lastSegment = segments.last else {
+            return priorOutputEndSeconds
+        }
+        return max(0, lastSegment.outputRange.endSeconds + sourceTimeSeconds - lastSegment.sourceRange.endSeconds)
     }
 
     public func outputRange(forSourceRange sourceRange: EditTimeRange) -> EditTimeRange {
@@ -137,12 +186,50 @@ public struct TimelineRetimingMapper: Equatable, Sendable {
         outputTime(forSourceTime: sourceDurationSeconds)
     }
 
+    public func isSourceTimeRetained(_ sourceTimeSeconds: Double) -> Bool {
+        guard sourceTimeSeconds.isFinite else { return false }
+        guard let retainedSourceRanges else {
+            return sourceTimeSeconds >= 0 && sourceTimeSeconds <= (sourceDurationSeconds ?? sourceTimeSeconds)
+        }
+        return retainedSourceRanges.contains {
+            sourceTimeSeconds >= $0.startSeconds && sourceTimeSeconds < $0.endSeconds
+        }
+    }
+
+    var sourceSegments: [Segment] {
+        segments
+    }
+
     private func clampedSourceTime(_ seconds: Double) -> Double {
         let nonNegativeSeconds = max(0, seconds)
         guard let sourceDurationSeconds else {
             return nonNegativeSeconds
         }
         return min(nonNegativeSeconds, sourceDurationSeconds)
+    }
+
+    private static func normalizedRetainedRanges(
+        _ ranges: [EditTimeRange],
+        sourceDurationSeconds: Double?
+    ) -> [EditTimeRange] {
+        var normalized: [EditTimeRange] = []
+        for range in ranges.sorted(by: { $0.startSeconds < $1.startSeconds }) {
+            let startSeconds = max(0, range.startSeconds)
+            let endSeconds = min(
+                max(startSeconds, range.endSeconds),
+                sourceDurationSeconds ?? .greatestFiniteMagnitude
+            )
+            guard endSeconds > startSeconds else { continue }
+            if let last = normalized.last, startSeconds <= last.endSeconds {
+                normalized[normalized.count - 1] = EditTimeRange(
+                    startSeconds: last.startSeconds,
+                    endSeconds: max(last.endSeconds, endSeconds)
+                )
+            } else {
+                normalized.append(EditTimeRange(startSeconds: startSeconds, endSeconds: endSeconds))
+            }
+        }
+        return normalized
     }
 }
 

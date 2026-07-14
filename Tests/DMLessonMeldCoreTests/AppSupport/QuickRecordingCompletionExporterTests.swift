@@ -141,6 +141,40 @@ struct QuickRecordingCompletionServiceTests {
 
         #expect(plan.webcamOverlay?.placement == fallback)
     }
+
+    @Test("App render planner applies saved trim and cut decisions")
+    func appRenderPlannerAppliesSavedTrimAndCuts() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = temp.url.appendingPathComponent("Lesson.dmlm", isDirectory: true)
+        let destinationURL = temp.url.appendingPathComponent("lesson.mp4")
+        let manifest = ProjectManifest(
+            metadata: LessonMetadata(lessonTitle: "Edited Lesson"),
+            media: ProjectMedia(screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo))
+        )
+        try EditDecisionListFile.save(
+            EditDecisionList(
+                id: "app-edit",
+                sourceDurationSeconds: 6,
+                trimRange: EditTimeRange(startSeconds: 0.5, endSeconds: 5.5),
+                cuts: [
+                    TimelineCut(id: "remove-retake", range: EditTimeRange(startSeconds: 2, endSeconds: 4))
+                ]
+            ),
+            toProject: projectURL
+        )
+
+        let plan = try ProjectEditorRenderPlanner.makePlan(
+            projectURL: projectURL,
+            manifest: manifest,
+            destinationURL: destinationURL,
+            preset: RenderPreset()
+        )
+
+        #expect(plan.retainedSourceRanges == [
+            EditTimeRange(startSeconds: 0.5, endSeconds: 2),
+            EditTimeRange(startSeconds: 4, endSeconds: 5.5)
+        ])
+    }
 }
 
 @Suite("Recording project deletion")

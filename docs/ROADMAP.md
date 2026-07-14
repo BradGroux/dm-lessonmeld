@@ -6,7 +6,7 @@
 - Native foreground macOS app shell with permission status, quick-record panel, and live annotation overlay. Done.
 - First-run onboarding, persistent settings, shortcut preferences, command palette, and launch diagnostics for recording, package export, agents, and local-only privacy. Done.
 - In-app config backup controls for plan/init/settings JSON write/commit. Done.
-- App project editor for manifest inspection, screen preview/scrub, edit-decision cuts, render readiness, full render export, and contiguous trim export. Done.
+- App project editor for manifest inspection, screen preview/scrub, edit-decision trims and cuts, render readiness, and cut-aware full render export. Done.
 - Shared `edit-decision-list.json` project sidecar with app and CLI read/add-cut/validate/export support. Done.
 - Git-friendly settings JSON defaults/export/validation through the CLI. Done.
 - Project bundle manifest and validation. Done.
@@ -29,7 +29,7 @@
 - Harden webcam, microphone, system audio, cursor metadata, click/shortcut metadata capture in combined app workflows. Initial combined app workflow is wired; broader device and permission-matrix QA remains.
 - Add recording recovery, Finder/open-url project handling, and richer project bundle creation. Finder/open-url project handling is wired; recovery remains.
 - Add a post-recording completion widget with Edit, Save Video, Copy Path, Open Project, Package LearnHouse, and caption/transcript export actions.
-- Extend cut-list export into the full render pipeline with webcam PiP/audio/cursor effects/zoom regions/annotations/captions, then add zoom/pan keyframes, webcam PiP controls, canvas styling, and richer render progress. Full render, ProRes MOV export, share packages, and raw asset extraction are wired; GIF/alpha/parallel execution remains behind explicit export gates.
+- Extend cut-list export into the full render pipeline with webcam PiP/audio/cursor effects/zoom regions/annotations/captions, then add zoom/pan keyframes, webcam PiP controls, canvas styling, and richer render progress. Cut-aware full render, synchronized speed retiming, ProRes MOV export, share packages, and raw asset extraction are wired and covered by synthetic mixed-media tests; GIF/alpha/parallel execution remains behind explicit export gates.
 - Expand annotation overlay polish: horizontal/vertical toolbar, pen, highlighter, eraser, line, arrow, box, ellipse, text, spotlight, whiteboard, blackboard, swatches, line weights, text sizes, undo/redo, clear, and frame capture.
 - Expand presets/templates to cover capture sources, webcam layout, annotations, zoom behavior, captions, canvas/background, export, and LearnHouse packaging. Project/app preset files are wired; additional bundled preset templates remain.
 - Add local transcription model handling. Settings and CLI model-readiness status are wired; runtime execution remains.

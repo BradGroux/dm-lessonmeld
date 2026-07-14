@@ -83,6 +83,7 @@ public enum RenderPlanValidator {
 
         validateZoomRegions(plan.zoomRegions, issues: &issues)
         validateSpeedRegions(plan.speedRegions, issues: &issues)
+        validateRetainedSourceRanges(plan.retainedSourceRanges, issues: &issues)
         validateCameraSettings(plan.camera, issues: &issues)
         validateAudioSettings(plan.audio, projectURL: plan.projectURL, issues: &issues, fileManager: fileManager, checkFileExistence: options.checkFileExistence)
         validateCaptionSettings(plan.captions, issues: &issues)
@@ -261,6 +262,45 @@ public enum RenderPlanValidator {
                 message: "Speed regions must not overlap.",
                 path: "speedRegions[\(pair.1.index)].range"
             ))
+        }
+    }
+
+    private static func validateRetainedSourceRanges(
+        _ retainedSourceRanges: [EditTimeRange]?,
+        issues: inout [RenderValidationIssue]
+    ) {
+        guard let retainedSourceRanges else { return }
+        if retainedSourceRanges.isEmpty {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Saved trim and cut decisions must retain at least one source range.",
+                path: "retainedSourceRanges"
+            ))
+            return
+        }
+
+        var priorEndSeconds = 0.0
+        for (index, range) in retainedSourceRanges.enumerated() {
+            let path = "retainedSourceRanges[\(index)]"
+            if !range.startSeconds.isFinite ||
+                !range.durationSeconds.isFinite ||
+                range.startSeconds < 0 ||
+                range.durationSeconds <= 0 {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "Retained source ranges must be finite, non-negative, and positive.",
+                    path: path
+                ))
+                continue
+            }
+            if index > 0, range.startSeconds < priorEndSeconds {
+                issues.append(RenderValidationIssue(
+                    severity: .error,
+                    message: "Retained source ranges must be sorted and non-overlapping.",
+                    path: path
+                ))
+            }
+            priorEndSeconds = max(priorEndSeconds, range.endSeconds)
         }
     }
 
