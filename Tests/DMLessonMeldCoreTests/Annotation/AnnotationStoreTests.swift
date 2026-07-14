@@ -131,7 +131,85 @@ struct AnnotationStoreTests {
         let data = try JSONEncoder().encode(store)
         let decoded = try JSONDecoder().decode(AnnotationStore.self, from: data)
 
-        #expect(decoded == store)
+        #expect(decoded.annotations == store.annotations)
+        #expect(decoded.isVisible == store.isVisible)
+        #expect(decoded.isLocked == store.isLocked)
+        #expect(!decoded.canUndo)
+        #expect(!decoded.canRedo)
+    }
+
+    @Test("Encoding omits erased annotations retained by undo history")
+    func encodingOmitsUndoHistory() throws {
+        let erased = annotation(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000197")!,
+            kind: .text,
+            points: [CGPoint(x: 10, y: 10)],
+            text: "private erased annotation"
+        )
+        let retained = annotation(kind: .rectangle, points: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
+        var store = AnnotationStore(annotations: [erased, retained])
+
+        #expect(store.erase(id: erased.id) == erased)
+        #expect(store.canUndo)
+
+        let data = try DMLessonJSON.encoder().encode(store)
+        let json = String(decoding: data, as: UTF8.self)
+        let decoded = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+
+        #expect(!json.contains(erased.id.uuidString))
+        #expect(!json.contains("private erased annotation"))
+        #expect(!json.contains("undoStack"))
+        #expect(!json.contains("redoStack"))
+        #expect(decoded.annotations == [retained])
+        #expect(!decoded.canUndo)
+        #expect(!decoded.canRedo)
+    }
+
+    @Test("Encoding omits annotations retained only by redo history")
+    func encodingOmitsRedoHistory() throws {
+        let undone = annotation(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000198")!,
+            kind: .text,
+            points: [CGPoint(x: 10, y: 10)],
+            text: "private undone annotation"
+        )
+        var store = AnnotationStore()
+        store.add(undone)
+
+        let didUndo = store.undo()
+        #expect(didUndo)
+        #expect(store.canRedo)
+
+        let data = try DMLessonJSON.encoder().encode(store)
+        let json = String(decoding: data, as: UTF8.self)
+        let decoded = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
+
+        #expect(!json.contains(undone.id.uuidString))
+        #expect(!json.contains("private undone annotation"))
+        #expect(decoded.annotations.isEmpty)
+        #expect(!decoded.canUndo)
+        #expect(!decoded.canRedo)
+    }
+
+    @Test("Legacy sidecars discard persisted history when decoded")
+    func legacySidecarsDiscardHistory() throws {
+        let json = """
+        {
+          "annotations": [],
+          "isVisible": true,
+          "isLocked": false,
+          "undoStack": [{"legacyPrivateHistory": "must not load"}],
+          "redoStack": [{"legacyPrivateHistory": "must not load"}]
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: json)
+
+        #expect(decoded.annotations.isEmpty)
+        #expect(decoded.isVisible)
+        #expect(!decoded.isLocked)
+        #expect(!decoded.canUndo)
+        #expect(!decoded.canRedo)
     }
 
     @Test("Timed normalized annotations round trip and convert to canvas points")
@@ -219,7 +297,11 @@ struct AnnotationStoreTests {
         await writer.schedule(second, to: url)
 
         let decoded = try await waitForAnnotationStore(at: url)
-        #expect(decoded == second)
+        #expect(decoded.annotations == second.annotations)
+        #expect(decoded.isVisible == second.isVisible)
+        #expect(decoded.isLocked == second.isLocked)
+        #expect(!decoded.canUndo)
+        #expect(!decoded.canRedo)
     }
 
     @Test("Sidecar writer flushes pending writes immediately")
@@ -237,7 +319,11 @@ struct AnnotationStoreTests {
 
         let data = try Data(contentsOf: url)
         let decoded = try DMLessonJSON.decoder().decode(AnnotationStore.self, from: data)
-        #expect(decoded == store)
+        #expect(decoded.annotations == store.annotations)
+        #expect(decoded.isVisible == store.isVisible)
+        #expect(decoded.isLocked == store.isLocked)
+        #expect(!decoded.canUndo)
+        #expect(!decoded.canRedo)
     }
 }
 
@@ -269,6 +355,7 @@ private func waitForAnnotationStore(at url: URL) async throws -> AnnotationStore
 }
 
 private func annotation(
+    id: UUID = UUID(),
     displayID: UInt32 = 1,
     kind: AnnotationKind,
     points: [CGPoint],
@@ -280,6 +367,7 @@ private func annotation(
     isLocked: Bool = false
 ) -> AnnotationItem {
     AnnotationItem(
+        id: id,
         displayID: displayID,
         kind: kind,
         points: points,

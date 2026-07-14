@@ -17,6 +17,28 @@ public struct AnnotationStore: Codable, Equatable, Sendable {
         redoStack = []
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case annotations
+        case isVisible
+        case isLocked
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        annotations = try container.decode([AnnotationItem].self, forKey: .annotations)
+        isVisible = try container.decode(Bool.self, forKey: .isVisible)
+        isLocked = try container.decode(Bool.self, forKey: .isLocked)
+        undoStack = []
+        redoStack = []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(annotations, forKey: .annotations)
+        try container.encode(isVisible, forKey: .isVisible)
+        try container.encode(isLocked, forKey: .isLocked)
+    }
+
     public var canUndo: Bool {
         !undoStack.isEmpty
     }
@@ -166,7 +188,7 @@ public struct AnnotationStore: Codable, Equatable, Sendable {
     }
 }
 
-private enum HistoryAction: Codable, Equatable, Sendable {
+private enum HistoryAction: Equatable, Sendable {
     case add(AnnotationItem)
     case remove(previous: [AnnotationItem], removed: [AnnotationItem])
     case update(previous: AnnotationItem, next: AnnotationItem)
