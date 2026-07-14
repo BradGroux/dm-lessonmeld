@@ -157,7 +157,7 @@ final class ProjectEditorModel: ObservableObject {
     private var activeRenderJobID: String?
     private var isLoadingProject = false
     private var isDirtyRefreshScheduled = false
-    private var savedDirtyFingerprints: [ProjectDirtyArea: String] = [:]
+    private var dirtyState = ProjectEditorDirtyState<ProjectEditorDirtySnapshot>()
     private var dirtyStateCancellables: Set<AnyCancellable> = []
     private static let minimumTimelineRangeSeconds = 0.1
 
@@ -201,153 +201,33 @@ final class ProjectEditorModel: ObservableObject {
         ) == nil
     }
 
-    var metadataDirtyFingerprint: String {
-        [
-            metadataLessonTitle,
-            metadataCourseTitle,
-            metadataModuleTitle,
-            metadataInstructor,
-            metadataSummary,
-            metadataTags
-        ].joined(separator: "||")
-    }
-
-    var editDecisionDirtyFingerprint: String {
-        [
-            trimStartSeconds,
-            trimEndSeconds,
-            sourceDurationSeconds,
-            cutRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.reason)|\($0.isEnabled)" }.joined(separator: "~~"),
-            speedRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.playbackRate)" }.joined(separator: "~~"),
-            zoomRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.scale)|\($0.centerX)|\($0.centerY)|\($0.size)|\($0.focusMode.rawValue)|\($0.easing.rawValue)|\($0.isEnabled)" }.joined(separator: "~~"),
-            cameraRegionRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.preset.rawValue)|\($0.layoutAnimation.rawValue)|\($0.transitionSeconds)|\($0.isEnabled)" }.joined(separator: "~~"),
-            cameraReactionRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.text)|\($0.isEnabled)" }.joined(separator: "~~"),
-            audioVolumeRows.map { "\($0.id)|\($0.track.rawValue)|\($0.startSeconds)|\($0.endSeconds)|\($0.gain)|\($0.fadeInSeconds)|\($0.fadeOutSeconds)|\($0.isEnabled)" }.joined(separator: "~~"),
-            cursorHiddenRangeRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)" }.joined(separator: "~~")
-        ].joined(separator: "||")
-    }
-
-    var editorSettingsDirtyFingerprint: String {
-        [
-            canvasAspectRatio.rawValue,
-            canvasCustomWidth,
-            canvasCustomHeight,
-            canvasBackgroundStyle.rawValue,
-            "\(canvasPrimaryColor)",
-            "\(canvasSecondaryColor)",
-            canvasBackgroundImagePath,
-            "\(canvasPaddingRatio)",
-            "\(canvasInsetRatio)",
-            "\(canvasCornerRadiusRatio)",
-            "\(canvasShadowEnabled)",
-            "\(canvasShadowOpacity)",
-            "\(canvasCropEnabled)",
-            canvasCropX,
-            canvasCropY,
-            canvasCropWidth,
-            canvasCropHeight,
-            cursorPointerStyle.rawValue,
-            "\(cursorPointerVisible)",
-            "\(cursorSmoothMovement)",
-            "\(cursorPointerScale)",
-            "\(cursorPointerFillColor)",
-            "\(cursorPointerStrokeColor)",
-            "\(cursorClickEffectsVisible)",
-            "\(cursorClickColor)",
-            "\(cursorClickScale)",
-            "\(cursorClickOpacity)",
-            "\(cursorClickDuration)",
-            "\(cursorClickSoundEnabled)",
-            "\(cursorClickSoundVolume)",
-            "\(cursorKeyboardVisible)",
-            "\(cursorKeyboardOpacity)",
-            cameraCorner.rawValue,
-            cameraWidthRatio,
-            cameraMarginRatio,
-            cameraAspectRatio.rawValue,
-            cameraFrameShape.rawValue,
-            cameraCornerRadius,
-            "\(cameraMirrored)",
-            "\(cameraBorderEnabled)",
-            "\(cameraShadowEnabled)",
-            screenAudioGain,
-            "\(screenAudioMuted)",
-            "\(screenAudioSoloed)",
-            microphoneAudioGain,
-            "\(microphoneAudioMuted)",
-            "\(microphoneAudioSoloed)",
-            systemAudioGain,
-            "\(systemAudioMuted)",
-            "\(systemAudioSoloed)",
-            backgroundMusicPath,
-            backgroundMusicStart,
-            backgroundMusicSourceStart,
-            backgroundMusicDuration,
-            backgroundMusicGain,
-            "\(backgroundMusicLoop)",
-            "\(backgroundMusicDuckUnderVoice)",
-            backgroundMusicDuckedGain,
-            backgroundMusicFadeIn,
-            backgroundMusicFadeOut,
-            renderQuality.rawValue,
-            renderFileType.rawValue,
-            renderResolution.rawValue,
-            renderFrameRate.rawValue,
-            renderCodec.rawValue,
-            "\(renderHardwareAccelerationEnabled)",
-            "\(renderMaxConcurrentExports)",
-            "\(renderAlphaChannelEnabled)",
-            "\(renderAnimatedGIFEnabled)",
-            "\(renderProResEnabled)"
-        ].joined(separator: "||")
-    }
-
-    var captionDirtyFingerprint: String {
-        [
-            captionRows.map { "\($0.id)|\($0.startSeconds)|\($0.endSeconds)|\($0.text)" }.joined(separator: "~~"),
-            "\(captionBurnInEnabled)",
-            captionPlacement.rawValue,
-            captionFontName,
-            captionFontSize,
-            "\(captionTextColor)",
-            "\(captionBackgroundColor)",
-            "\(captionMaxLineCount)",
-            captionSafeMargin
-        ].joined(separator: "||")
-    }
-
     func refreshDirtyState(_ area: ProjectDirtyArea) {
         guard projectURL != nil, !isLoadingProject else { return }
-        let current = dirtyFingerprint(for: area)
-        var updated = dirtyAreas
-        if savedDirtyFingerprints[area] == current {
-            updated.remove(area)
-        } else {
-            updated.insert(area)
-        }
-        if updated != dirtyAreas {
-            dirtyAreas = updated
-        }
+        dirtyState.updateCurrent(dirtySnapshot(for: area), for: area)
+        publishDirtyAreas()
     }
 
     func refreshAllDirtyStates() {
         guard projectURL != nil, !isLoadingProject else { return }
-        let updated = Set(ProjectDirtyArea.allCases.filter { area in
-            savedDirtyFingerprints[area] != dirtyFingerprint(for: area)
-        })
-        if updated != dirtyAreas {
-            dirtyAreas = updated
-        }
+        dirtyState.replaceCurrent(with: currentDirtySnapshots())
+        publishDirtyAreas()
     }
 
     func clearDirty(_ area: ProjectDirtyArea) {
-        updateSavedFingerprint(for: area)
-        dirtyAreas.remove(area)
+        dirtyState.updateCurrent(dirtySnapshot(for: area), for: area)
+        dirtyState.markSaved(area)
+        publishDirtyAreas()
     }
 
     func clearAllDirtyChanges() {
-        ProjectDirtyArea.allCases.forEach { updateSavedFingerprint(for: $0) }
-        dirtyAreas.removeAll()
+        guard projectURL != nil else {
+            dirtyState.reset()
+            publishDirtyAreas()
+            return
+        }
+        dirtyState.replaceCurrent(with: currentDirtySnapshots())
+        dirtyState.markAllSaved()
+        publishDirtyAreas()
     }
 
     func discardUnsavedChanges() {
@@ -378,29 +258,144 @@ final class ProjectEditorModel: ObservableObject {
         }
     }
 
-    private func dirtyFingerprint(for area: ProjectDirtyArea) -> String {
+    private func currentDirtySnapshots() -> [ProjectDirtyArea: ProjectEditorDirtySnapshot] {
+        Dictionary(uniqueKeysWithValues: ProjectDirtyArea.allCases.map { area in
+            (area, dirtySnapshot(for: area))
+        })
+    }
+
+    private func dirtySnapshot(for area: ProjectDirtyArea) -> ProjectEditorDirtySnapshot {
         switch area {
         case .metadata:
-            return metadataDirtyFingerprint
+            return .metadata(ProjectEditorMetadataDirtySnapshot(
+                lessonTitle: metadataLessonTitle,
+                courseTitle: metadataCourseTitle,
+                moduleTitle: metadataModuleTitle,
+                instructor: metadataInstructor,
+                summary: metadataSummary,
+                tags: metadataTags
+            ))
         case .markers:
-            return markerRows
-                .map { "\($0.id)|\($0.kind.rawValue)|\($0.timeSeconds)|\($0.title)|\($0.notes)" }
-                .joined(separator: "~~")
+            return .markers(markerRows)
         case .editDecisions:
-            return editDecisionDirtyFingerprint
+            return .editDecisions(ProjectEditorEditDecisionDirtySnapshot(
+                trimStartSeconds: trimStartSeconds,
+                trimEndSeconds: trimEndSeconds,
+                sourceDurationSeconds: sourceDurationSeconds,
+                cuts: cutRows,
+                speedRegions: speedRows,
+                zoomRegions: zoomRows,
+                cameraRegions: cameraRegionRows,
+                cameraReactions: cameraReactionRows,
+                audioVolumeRegions: audioVolumeRows,
+                cursorHiddenRanges: cursorHiddenRangeRows
+            ))
         case .editorSettings:
-            return editorSettingsDirtyFingerprint
+            return .editorSettings(ProjectEditorSettingsDirtySnapshot(
+                canvas: ProjectEditorCanvasDirtySnapshot(
+                    aspectRatio: canvasAspectRatio,
+                    customWidth: canvasCustomWidth,
+                    customHeight: canvasCustomHeight,
+                    backgroundStyle: canvasBackgroundStyle,
+                    primaryColor: canvasPrimaryColor,
+                    secondaryColor: canvasSecondaryColor,
+                    backgroundImagePath: canvasBackgroundImagePath,
+                    paddingRatio: canvasPaddingRatio,
+                    insetRatio: canvasInsetRatio,
+                    cornerRadiusRatio: canvasCornerRadiusRatio,
+                    shadowEnabled: canvasShadowEnabled,
+                    shadowOpacity: canvasShadowOpacity,
+                    cropEnabled: canvasCropEnabled,
+                    cropX: canvasCropX,
+                    cropY: canvasCropY,
+                    cropWidth: canvasCropWidth,
+                    cropHeight: canvasCropHeight
+                ),
+                automaticZoomEnabled: zoomAutoGenerationEnabled,
+                cursor: ProjectEditorCursorDirtySnapshot(
+                    pointerStyle: cursorPointerStyle,
+                    pointerVisible: cursorPointerVisible,
+                    smoothMovement: cursorSmoothMovement,
+                    pointerScale: cursorPointerScale,
+                    pointerFillColor: cursorPointerFillColor,
+                    pointerStrokeColor: cursorPointerStrokeColor,
+                    clickEffectsVisible: cursorClickEffectsVisible,
+                    clickColor: cursorClickColor,
+                    clickScale: cursorClickScale,
+                    clickOpacity: cursorClickOpacity,
+                    clickDuration: cursorClickDuration,
+                    clickSoundEnabled: cursorClickSoundEnabled,
+                    clickSoundVolume: cursorClickSoundVolume,
+                    keyboardVisible: cursorKeyboardVisible,
+                    keyboardOpacity: cursorKeyboardOpacity
+                ),
+                camera: ProjectEditorCameraDirtySnapshot(
+                    corner: cameraCorner,
+                    widthRatio: cameraWidthRatio,
+                    marginRatio: cameraMarginRatio,
+                    aspectRatio: cameraAspectRatio,
+                    frameShape: cameraFrameShape,
+                    cornerRadius: cameraCornerRadius,
+                    mirrored: cameraMirrored,
+                    borderEnabled: cameraBorderEnabled,
+                    shadowEnabled: cameraShadowEnabled
+                ),
+                audio: ProjectEditorAudioDirtySnapshot(
+                    screenGain: screenAudioGain,
+                    screenMuted: screenAudioMuted,
+                    screenSoloed: screenAudioSoloed,
+                    microphoneGain: microphoneAudioGain,
+                    microphoneMuted: microphoneAudioMuted,
+                    microphoneSoloed: microphoneAudioSoloed,
+                    systemGain: systemAudioGain,
+                    systemMuted: systemAudioMuted,
+                    systemSoloed: systemAudioSoloed,
+                    backgroundMusicPath: backgroundMusicPath,
+                    backgroundMusicStart: backgroundMusicStart,
+                    backgroundMusicSourceStart: backgroundMusicSourceStart,
+                    backgroundMusicDuration: backgroundMusicDuration,
+                    backgroundMusicGain: backgroundMusicGain,
+                    backgroundMusicLoop: backgroundMusicLoop,
+                    backgroundMusicDuckUnderVoice: backgroundMusicDuckUnderVoice,
+                    backgroundMusicDuckedGain: backgroundMusicDuckedGain,
+                    backgroundMusicFadeIn: backgroundMusicFadeIn,
+                    backgroundMusicFadeOut: backgroundMusicFadeOut
+                ),
+                export: ProjectEditorExportDirtySnapshot(
+                    quality: renderQuality,
+                    fileType: renderFileType,
+                    resolution: renderResolution,
+                    frameRate: renderFrameRate,
+                    codec: renderCodec,
+                    hardwareAccelerationEnabled: renderHardwareAccelerationEnabled,
+                    maxConcurrentExports: renderMaxConcurrentExports,
+                    alphaChannelEnabled: renderAlphaChannelEnabled,
+                    animatedGIFEnabled: renderAnimatedGIFEnabled,
+                    proResEnabled: renderProResEnabled
+                )
+            ))
         case .overlays:
-            return overlayRows
-                .map { "\($0.id)|\($0.kind.rawValue)|\($0.startSeconds)|\($0.endSeconds)|\($0.text)|\($0.x)|\($0.y)|\($0.width)|\($0.height)|\($0.opacity)|\($0.fontSize)|\($0.fadeInSeconds)|\($0.fadeOutSeconds)|\($0.animationPreset.rawValue)|\($0.cornerRadius)|\($0.highlightMode.rawValue)|\($0.highlightShape.rawValue)|\($0.blurRadius)|\($0.featherRadius)|\($0.textColor)|\($0.fillColor)|\($0.strokeColor)|\($0.imagePath)|\($0.zIndex)|\($0.isEnabled)" }
-                .joined(separator: "~~")
+            return .overlays(overlayRows)
         case .captions:
-            return captionDirtyFingerprint
+            return .captions(ProjectEditorCaptionDirtySnapshot(
+                rows: captionRows,
+                burnInEnabled: captionBurnInEnabled,
+                placement: captionPlacement,
+                fontName: captionFontName,
+                fontSize: captionFontSize,
+                textColor: captionTextColor,
+                backgroundColor: captionBackgroundColor,
+                maxLineCount: captionMaxLineCount,
+                safeMargin: captionSafeMargin
+            ))
         }
     }
 
-    private func updateSavedFingerprint(for area: ProjectDirtyArea) {
-        savedDirtyFingerprints[area] = dirtyFingerprint(for: area)
+    private func publishDirtyAreas() {
+        let updated = dirtyState.dirtyAreas
+        if updated != dirtyAreas {
+            dirtyAreas = updated
+        }
     }
 
     private func bindDirtyStateRefresh() {
