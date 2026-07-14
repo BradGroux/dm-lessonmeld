@@ -257,6 +257,10 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             preset: plan.preset
         )
         let renderSize = canvasGeometry.renderSize
+        let canvasIssues = RenderPlanValidator.canvasRenderDimensionIssues(renderSize)
+        if !canvasIssues.isEmpty {
+            throw RenderValidationError(issues: canvasIssues)
+        }
 
         let instruction = AVMutableVideoCompositionInstruction()
         instruction.timeRange = CMTimeRange(start: .zero, duration: outputDuration)

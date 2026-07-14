@@ -120,6 +120,101 @@ struct EditorSettingsTests {
         }
     }
 
+    @Test("Decoded editor settings normalize hostile persisted values")
+    func decodedSettingsNormalizeHostileValues() throws {
+        let encoded = try DMLessonJSON.encoder().encode(EditorSettings(
+            camera: EditorCameraSettings(layoutRegions: [
+                CameraLayoutRegion(
+                    id: "camera-layout",
+                    range: EditTimeRange(startSeconds: 0, durationSeconds: 1),
+                    preset: .cornerPip
+                )
+            ]),
+            audio: EditorAudioSettings(
+                backgroundMusic: EditorBackgroundMusicSettings(relativePath: "music.m4a"),
+                volumeRegions: [
+                    EditorAudioVolumeRegion(
+                        id: "volume",
+                        range: EditTimeRange(startSeconds: 0, durationSeconds: 1)
+                    )
+                ]
+            )
+        ))
+        var root = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+
+        var canvas = try #require(root["canvas"] as? [String: Any])
+        canvas["aspectRatio"] = "custom"
+        canvas["paddingRatio"] = 99
+        canvas["insetRatio"] = -99
+        canvas["cornerRadiusRatio"] = 99
+        canvas["customSize"] = ["width": 999_999, "height": 17]
+        var shadow = try #require(canvas["shadow"] as? [String: Any])
+        shadow["opacity"] = 99
+        shadow["radiusRatio"] = 99
+        shadow["offsetYRatio"] = -99
+        canvas["shadow"] = shadow
+        root["canvas"] = canvas
+
+        var audio = try #require(root["audio"] as? [String: Any])
+        var screenAudio = try #require(audio["screenAudio"] as? [String: Any])
+        screenAudio["gain"] = 99
+        audio["screenAudio"] = screenAudio
+        var backgroundMusic = try #require(audio["backgroundMusic"] as? [String: Any])
+        backgroundMusic["startSeconds"] = -99
+        backgroundMusic["durationSeconds"] = -99
+        backgroundMusic["gain"] = 99
+        audio["backgroundMusic"] = backgroundMusic
+        var volumeRegions = try #require(audio["volumeRegions"] as? [[String: Any]])
+        volumeRegions[0]["gain"] = 99
+        volumeRegions[0]["fadeInSeconds"] = 99
+        volumeRegions[0]["fadeOutSeconds"] = 99
+        audio["volumeRegions"] = volumeRegions
+        root["audio"] = audio
+
+        var captions = try #require(root["captions"] as? [String: Any])
+        captions["fontName"] = "   "
+        captions["fontSize"] = 999
+        captions["maxLineCount"] = 999
+        captions["safeMarginRatio"] = 99
+        root["captions"] = captions
+
+        var cursor = try #require(root["cursor"] as? [String: Any])
+        var keyboardOverlay = try #require(cursor["keyboardOverlay"] as? [String: Any])
+        keyboardOverlay["opacity"] = 99
+        cursor["keyboardOverlay"] = keyboardOverlay
+        root["cursor"] = cursor
+
+        var camera = try #require(root["camera"] as? [String: Any])
+        var layoutRegions = try #require(camera["layoutRegions"] as? [[String: Any]])
+        layoutRegions[0]["transitionSeconds"] = 99
+        camera["layoutRegions"] = layoutRegions
+        root["camera"] = camera
+
+        let hostileData = try JSONSerialization.data(withJSONObject: root)
+        let settings = try DMLessonJSON.decoder().decode(EditorSettings.self, from: hostileData)
+
+        #expect(settings.canvas.paddingRatio == 0.45)
+        #expect(settings.canvas.insetRatio == 0)
+        #expect(settings.canvas.cornerRadiusRatio == 0.25)
+        #expect(settings.canvas.customSize == EditorCanvasCustomSize(width: 7_680, height: 18))
+        #expect(settings.canvas.shadow.opacity == 1)
+        #expect(settings.canvas.shadow.radiusRatio == 0.12)
+        #expect(settings.canvas.shadow.offsetYRatio == -0.12)
+        #expect(settings.audio?.screenAudio.gain == 2)
+        #expect(settings.audio?.backgroundMusic?.startSeconds == 0)
+        #expect(settings.audio?.backgroundMusic?.durationSeconds == nil)
+        #expect(settings.audio?.backgroundMusic?.gain == 2)
+        #expect(settings.audio?.volumeRegions.first?.gain == 2)
+        #expect(settings.audio?.volumeRegions.first?.fadeInSeconds == 10)
+        #expect(settings.audio?.volumeRegions.first?.fadeOutSeconds == 10)
+        #expect(settings.captions?.fontName == "Helvetica-Bold")
+        #expect(settings.captions?.fontSize == 96)
+        #expect(settings.captions?.maxLineCount == 5)
+        #expect(settings.captions?.safeMarginRatio == 0.25)
+        #expect(settings.cursor?.keyboardOverlay.opacity == 1)
+        #expect(settings.camera?.layoutRegions.first?.transitionSeconds == 2)
+    }
+
     @Test("Canvas geometry resolves aspect, padding, crop, and rounded corners")
     func resolvesCanvasGeometry() {
         let settings = EditorCanvasSettings(

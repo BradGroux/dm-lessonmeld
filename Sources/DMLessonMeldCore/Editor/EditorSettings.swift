@@ -29,6 +29,29 @@ public struct EditorSettings: Codable, Equatable, Sendable {
         self.audio = audio
         self.captions = captions
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case canvas
+        case zoom
+        case cursor
+        case camera
+        case audio
+        case captions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            schemaVersion: try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? Self.currentSchemaVersion,
+            canvas: try container.decode(EditorCanvasSettings.self, forKey: .canvas).normalizedForPersistence,
+            zoom: try container.decodeIfPresent(EditorZoomSettings.self, forKey: .zoom),
+            cursor: try container.decodeIfPresent(EditorCursorSettings.self, forKey: .cursor)?.normalizedForPersistence,
+            camera: try container.decodeIfPresent(EditorCameraSettings.self, forKey: .camera)?.normalizedForPersistence,
+            audio: try container.decodeIfPresent(EditorAudioSettings.self, forKey: .audio)?.normalizedForPersistence,
+            captions: try container.decodeIfPresent(EditorCaptionSettings.self, forKey: .captions)?.normalizedForPersistence
+        )
+    }
 }
 
 public enum EditorSettingsFile {
@@ -833,5 +856,142 @@ public struct EditorKeyboardOverlaySettings: Codable, Equatable, Sendable {
     public init(isVisible: Bool = true, opacity: Double = 0.9) {
         self.isVisible = isVisible
         self.opacity = min(1, max(0, opacity.isFinite ? opacity : 0.9))
+    }
+}
+
+private extension EditorCanvasSettings {
+    var normalizedForPersistence: EditorCanvasSettings {
+        EditorCanvasSettings(
+            aspectRatio: aspectRatio,
+            background: background,
+            paddingRatio: paddingRatio,
+            insetRatio: insetRatio,
+            cornerRadiusRatio: cornerRadiusRatio,
+            shadow: EditorCanvasShadow(
+                isEnabled: shadow.isEnabled,
+                opacity: shadow.opacity,
+                radiusRatio: shadow.radiusRatio,
+                offsetYRatio: shadow.offsetYRatio
+            ),
+            cropRect: cropRect,
+            customSize: customSize.map {
+                EditorCanvasCustomSize(width: $0.width, height: $0.height)
+            }
+        )
+    }
+}
+
+private extension EditorAudioSettings {
+    var normalizedForPersistence: EditorAudioSettings {
+        EditorAudioSettings(
+            screenAudio: screenAudio.normalizedForPersistence,
+            microphoneAudio: microphoneAudio.normalizedForPersistence,
+            systemAudio: systemAudio.normalizedForPersistence,
+            backgroundMusic: backgroundMusic?.normalizedForPersistence,
+            volumeRegions: volumeRegions.map(\.normalizedForPersistence)
+        )
+    }
+}
+
+private extension EditorAudioTrackSettings {
+    var normalizedForPersistence: EditorAudioTrackSettings {
+        EditorAudioTrackSettings(gain: gain, isMuted: isMuted, isSoloed: isSoloed)
+    }
+}
+
+private extension EditorAudioVolumeRegion {
+    var normalizedForPersistence: EditorAudioVolumeRegion {
+        EditorAudioVolumeRegion(
+            id: id,
+            track: track,
+            range: range,
+            gain: gain,
+            fadeInSeconds: fadeInSeconds,
+            fadeOutSeconds: fadeOutSeconds,
+            isEnabled: isEnabled
+        )
+    }
+}
+
+private extension EditorBackgroundMusicSettings {
+    var normalizedForPersistence: EditorBackgroundMusicSettings {
+        EditorBackgroundMusicSettings(
+            relativePath: relativePath,
+            startSeconds: startSeconds,
+            sourceStartSeconds: sourceStartSeconds,
+            durationSeconds: durationSeconds,
+            gain: gain,
+            loop: loop,
+            duckUnderVoice: duckUnderVoice,
+            duckedGain: duckedGain,
+            fadeInSeconds: fadeInSeconds,
+            fadeOutSeconds: fadeOutSeconds
+        )
+    }
+}
+
+private extension EditorCaptionSettings {
+    var normalizedForPersistence: EditorCaptionSettings {
+        EditorCaptionSettings(
+            burnInEnabled: burnInEnabled,
+            placement: placement,
+            fontName: fontName,
+            fontSize: fontSize,
+            textColor: textColor,
+            backgroundColor: backgroundColor,
+            maxLineCount: maxLineCount,
+            safeMarginRatio: safeMarginRatio
+        )
+    }
+}
+
+private extension EditorCameraSettings {
+    var normalizedForPersistence: EditorCameraSettings {
+        EditorCameraSettings(
+            defaultPlacement: defaultPlacement,
+            layoutRegions: layoutRegions.map(\.normalizedForPersistence),
+            reactions: reactions
+        )
+    }
+}
+
+private extension CameraLayoutRegion {
+    var normalizedForPersistence: CameraLayoutRegion {
+        CameraLayoutRegion(
+            id: id,
+            range: range,
+            preset: preset,
+            placement: placement,
+            animation: animation,
+            transitionSeconds: transitionSeconds,
+            isEnabled: isEnabled
+        )
+    }
+}
+
+private extension EditorCursorSettings {
+    var normalizedForPersistence: EditorCursorSettings {
+        EditorCursorSettings(
+            pointerStyle: pointerStyle,
+            pointerVisible: pointerVisible,
+            smoothMovement: smoothMovement,
+            pointerScale: pointerScale,
+            pointerFillColor: pointerFillColor,
+            pointerStrokeColor: pointerStrokeColor,
+            hiddenRanges: hiddenRanges,
+            clickEffects: EditorClickEffectSettings(
+                rippleVisible: clickEffects.rippleVisible,
+                color: clickEffects.color,
+                scale: clickEffects.scale,
+                opacity: clickEffects.opacity,
+                durationSeconds: clickEffects.durationSeconds,
+                soundEnabled: clickEffects.soundEnabled,
+                soundVolume: clickEffects.soundVolume
+            ),
+            keyboardOverlay: EditorKeyboardOverlaySettings(
+                isVisible: keyboardOverlay.isVisible,
+                opacity: keyboardOverlay.opacity
+            )
+        )
     }
 }

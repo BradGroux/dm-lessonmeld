@@ -77,6 +77,7 @@ public enum RenderPlanValidator {
         }
 
         validatePreset(plan.preset, issues: &issues)
+        validateCanvas(plan.canvas, preset: plan.preset, issues: &issues)
         if plan.webcamOverlay != nil {
             validatePictureInPicture(plan.webcamOverlay!.placement, issues: &issues)
         }
@@ -122,6 +123,47 @@ public enum RenderPlanValidator {
         }
 
         return issues
+    }
+
+    private static func validateCanvas(
+        _ canvas: EditorCanvasSettings,
+        preset: RenderPreset,
+        issues: inout [RenderValidationIssue]
+    ) {
+        guard canvas.aspectRatio == .custom, let customSize = canvas.customSize else {
+            return
+        }
+
+        let dimensions = [customSize.width, customSize.height]
+        guard dimensions.allSatisfy({ (16...7_680).contains($0) && $0.isMultiple(of: 2) }) else {
+            issues.append(RenderValidationIssue(
+                severity: .error,
+                message: "Canvas custom dimensions must be even values from 16 through 7680 pixels.",
+                path: "canvas"
+            ))
+            return
+        }
+
+        let renderSize = preset.resolution.resolvedRenderSize(baseSize: customSize.cgSize)
+        issues.append(contentsOf: canvasRenderDimensionIssues(renderSize))
+    }
+
+    static func canvasRenderDimensionIssues(_ renderSize: CGSize) -> [RenderValidationIssue] {
+        let dimensions = [renderSize.width, renderSize.height]
+        guard dimensions.allSatisfy({
+            $0.isFinite &&
+                $0 >= 16 &&
+                $0 <= 7_680 &&
+                $0.rounded() == $0 &&
+                Int($0).isMultiple(of: 2)
+        }) else {
+            return [RenderValidationIssue(
+                severity: .error,
+                message: "Canvas render dimensions must be finite, even, and from 16 through 7680 pixels.",
+                path: "canvas"
+            )]
+        }
+        return []
     }
 
     private static func validatePreset(_ preset: RenderPreset, issues: inout [RenderValidationIssue]) {
