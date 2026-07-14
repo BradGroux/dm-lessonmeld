@@ -411,13 +411,17 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Usage: dmlesson record webcam --duration <seconds> --output <webcam.mov> [--camera-id <id>] [--resolution 720p|1080p|4K] [--fps 24|30|40|50|60] [--json]")
         }
         let duration = try recordingDurationValue(durationValue, label: "--duration")
+        let resolution = try cameraResolutionOption(
+            optionValue("--resolution", in: arguments),
+            optionName: "--resolution"
+        )
 
         let result = try await CameraRecorder().record(
             CameraRecordingRequest(
                 outputURL: pathURL(output),
                 durationSeconds: duration,
                 deviceID: optionValue("--camera-id", in: arguments),
-                resolution: optionValue("--resolution", in: arguments) ?? "1080p",
+                resolution: resolution.rawValue,
                 fps: try webcamFPSOption("--fps", in: arguments)
             )
         )
@@ -436,74 +440,112 @@ struct DMLessonMeldCLI {
             throw CLIError.usage("Usage: dmlesson record project --duration <seconds> --output <project.dmlm> --lesson-title <title> [--course-title <title>] [--region x,y,w,h] [--window-id <id>] [--microphone] [--microphone-device-id <id>] [--webcam] [--camera-fps 24|30|40|50|60] [--webcam-format original|1:1|2:3|3:2|16:9] [--webcam-frame rounded|square|circle] [--mirror-webcam] [--webcam-border] [--system-audio] [--json]")
         }
         let duration = try recordingDurationValue(durationValue, label: "--duration")
-
         let projectURL = pathURL(output)
-        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
-        let screenURL = projectURL.appendingPathComponent("screen.mp4")
-        let microphoneURL = projectURL.appendingPathComponent("microphone.m4a")
-        let webcamURL = projectURL.appendingPathComponent("webcam.mov")
         let sourceRect = try optionValue("--region", in: arguments).map { try parseRegion($0) }
         let windowID = try positiveUInt32Option("--window-id", in: arguments)
         if sourceRect != nil, windowID != nil {
             throw CLIError.usage("--region and --window-id cannot be used together.")
         }
         let captureSystemAudio = arguments.contains("--system-audio")
-        let shouldCaptureMicrophone = arguments.contains("--microphone") || optionValue("--microphone-device-id", in: arguments) != nil
-        let shouldCaptureWebcam = arguments.contains("--webcam") || optionValue("--camera-id", in: arguments) != nil
-        let cameraResolution = cameraResolutionOption(optionValue("--camera-resolution", in: arguments))
-        let cameraFPS = try webcamFPSOption("--camera-fps", in: arguments) ?? 30
-
-        let microphoneTask: Task<AudioRecordingResult, Error>? = shouldCaptureMicrophone
-            ? Task {
-                try await recordMicrophoneFile(
-                    outputURL: microphoneURL,
-                    duration: duration,
-                    format: .m4a,
-                    deviceID: optionValue("--microphone-device-id", in: arguments)
-                )
-            }
-            : nil
-        let webcamTask: Task<CameraRecordingResult, Error>? = shouldCaptureWebcam
-            ? Task {
-                try await CameraRecorder().record(
-                    CameraRecordingRequest(
-                        outputURL: webcamURL,
-                        durationSeconds: duration,
-                        deviceID: optionValue("--camera-id", in: arguments),
-                        resolution: cameraResolution.rawValue,
-                        fps: cameraFPS
-                    )
-                )
-            }
-            : nil
-
-        let result = try await DisplayScreenRecorder().record(
-            DisplayRecordingRequest(
-                outputURL: screenURL,
-                durationSeconds: duration,
-                options: RecordingOptions(
-                    captureSystemAudio: captureSystemAudio,
-                    microphoneDeviceID: optionValue("--microphone-device-id", in: arguments),
-                    cameraDeviceID: optionValue("--camera-id", in: arguments),
-                    cameraResolution: cameraResolution.rawValue
-                ),
-                sourceRect: sourceRect,
-                windowID: windowID
-            )
+        let microphoneDeviceID = optionValue("--microphone-device-id", in: arguments)
+        let cameraID = optionValue("--camera-id", in: arguments)
+        let shouldCaptureMicrophone = arguments.contains("--microphone") || microphoneDeviceID != nil
+        let shouldCaptureWebcam = arguments.contains("--webcam") || cameraID != nil
+        let cameraResolution = try cameraResolutionOption(
+            optionValue("--camera-resolution", in: arguments),
+            optionName: "--camera-resolution"
         )
-        let microphoneResult = try await microphoneTask?.value
-        let webcamResult = try await webcamTask?.value
+        let cameraFPS = try webcamFPSOption("--camera-fps", in: arguments) ?? 30
+        let webcamAspectRatio = try webcamAspectRatioOption(optionValue("--webcam-format", in: arguments))
+        let webcamFrameShape = try webcamFrameShapeOption(optionValue("--webcam-frame", in: arguments))
+        let webcamCornerRadius = try boundedDoubleOption(
+            "--webcam-corner-radius",
+            in: arguments,
+            defaultValue: 18,
+            range: 0...64
+        )
+        let webcamRelativeSize = try boundedDoubleOption(
+            "--webcam-size",
+            in: arguments,
+            defaultValue: 0.24,
+            range: 0.10...0.40
+        )
+        guard !FileManager.default.fileExists(atPath: projectURL.path) else {
+            throw CLIError.usage("Project recording destination already exists: \(projectURL.path)")
+        }
 
-        let manifest = ProjectManifest(
-            metadata: LessonMetadata(
-                courseTitle: optionValue("--course-title", in: arguments),
-                lessonTitle: lessonTitle
-            ),
+        let stagingProjectURL = projectURL.deletingLastPathComponent().appendingPathComponent(
+            ".dm-lessonmeld-record-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        let screenURL = stagingProjectURL.appendingPathComponent("screen.mp4")
+        let microphoneURL = stagingProjectURL.appendingPathComponent("microphone.m4a")
+        let webcamURL = stagingProjectURL.appendingPathComponent("webcam.mov")
+
+        let captures: ProjectRecordingCaptureResult
+        do {
+            try FileManager.default.createDirectory(at: stagingProjectURL, withIntermediateDirectories: true)
+            let recordMicrophone: (@Sendable () async throws -> AudioRecordingResult)?
+            if shouldCaptureMicrophone {
+                recordMicrophone = { @Sendable in
+                    try await recordMicrophoneFile(
+                        outputURL: microphoneURL,
+                        duration: duration,
+                        format: .m4a,
+                        deviceID: microphoneDeviceID
+                    )
+                }
+            } else {
+                recordMicrophone = nil
+            }
+            let recordWebcam: (@Sendable () async throws -> CameraRecordingResult)?
+            if shouldCaptureWebcam {
+                recordWebcam = { @Sendable in
+                    try await CameraRecorder().record(
+                        CameraRecordingRequest(
+                            outputURL: webcamURL,
+                            durationSeconds: duration,
+                            deviceID: cameraID,
+                            resolution: cameraResolution.rawValue,
+                            fps: cameraFPS
+                        )
+                    )
+                }
+            } else {
+                recordWebcam = nil
+            }
+            captures = try await ProjectRecordingCaptureCoordinator.capture(
+                ProjectRecordingCaptureOperations(
+                    recordScreen: {
+                        try await DisplayScreenRecorder().record(
+                            DisplayRecordingRequest(
+                                outputURL: screenURL,
+                                durationSeconds: duration,
+                                options: RecordingOptions(
+                                    captureSystemAudio: captureSystemAudio,
+                                    microphoneDeviceID: microphoneDeviceID,
+                                    cameraDeviceID: cameraID,
+                                    cameraResolution: cameraResolution.rawValue
+                                ),
+                                sourceRect: sourceRect,
+                                windowID: windowID
+                            )
+                        )
+                    },
+                    recordMicrophone: recordMicrophone,
+                    recordWebcam: recordWebcam
+                )
+            )
+            let manifest = ProjectManifest(
+                metadata: LessonMetadata(
+                    courseTitle: optionValue("--course-title", in: arguments),
+                    lessonTitle: lessonTitle
+                ),
                 media: ProjectMedia(
                     screen: ProjectFile(relativePath: "screen.mp4", role: .screenVideo, mimeType: "video/mp4"),
-                    webcam: webcamResult.map { _ in ProjectFile(relativePath: "webcam.mov", role: .webcamVideo, mimeType: "video/quicktime") },
-                    microphoneAudio: microphoneResult.map { _ in ProjectFile(relativePath: "microphone.m4a", role: .microphoneAudio, mimeType: "audio/mp4") },
-                    embeddedAudio: result.systemAudioURL == nil ? nil : ProjectEmbeddedAudio(screenVideo: [.systemAudio])
+                    webcam: captures.webcam.map { _ in ProjectFile(relativePath: "webcam.mov", role: .webcamVideo, mimeType: "video/quicktime") },
+                    microphoneAudio: captures.microphone.map { _ in ProjectFile(relativePath: "microphone.m4a", role: .microphoneAudio, mimeType: "audio/mp4") },
+                    embeddedAudio: captures.screen.systemAudioURL == nil ? nil : ProjectEmbeddedAudio(screenVideo: [.systemAudio])
                 ),
                 capture: ProjectCaptureSettings(
                     target: windowID == nil ? (sourceRect == nil ? .screen : .region) : .window,
@@ -513,43 +555,49 @@ struct DMLessonMeldCLI {
                     includeCursor: true,
                     captureInteractionMetadata: true,
                     captureMicrophone: shouldCaptureMicrophone,
-                    microphoneDeviceID: optionValue("--microphone-device-id", in: arguments),
+                    microphoneDeviceID: microphoneDeviceID,
                     captureWebcam: shouldCaptureWebcam,
                     captureSystemAudio: captureSystemAudio,
                     webcam: ProjectWebcamCaptureSettings(
-                        cameraID: optionValue("--camera-id", in: arguments),
+                        cameraID: cameraID,
                         resolution: cameraResolution,
                         fps: cameraFPS,
-                        aspectRatio: try webcamAspectRatioOption(optionValue("--webcam-format", in: arguments)),
-                        frameShape: try webcamFrameShapeOption(optionValue("--webcam-frame", in: arguments)),
-                        cornerRadius: try doubleOption("--webcam-corner-radius", in: arguments) ?? 18,
-                        relativeSize: try doubleOption("--webcam-size", in: arguments) ?? 0.24,
+                        aspectRatio: webcamAspectRatio,
+                        frameShape: webcamFrameShape,
+                        cornerRadius: webcamCornerRadius,
+                        relativeSize: webcamRelativeSize,
                         isMirrored: arguments.contains("--mirror-webcam"),
                         borderEnabled: arguments.contains("--webcam-border"),
                         shadowEnabled: !arguments.contains("--no-webcam-shadow")
                     )
                 ),
                 tracks: projectTracks(
-                    hasWebcam: webcamResult != nil,
-                    hasMicrophone: microphoneResult != nil,
-                hasSystemAudio: result.systemAudioURL != nil
-            ),
-            exportPresets: ["learnhouse-1080p"]
-        )
-        try ProjectBundle.writeManifest(manifest, to: projectURL)
+                    hasWebcam: captures.webcam != nil,
+                    hasMicrophone: captures.microphone != nil,
+                    hasSystemAudio: captures.screen.systemAudioURL != nil
+                ),
+                exportPresets: ["learnhouse-1080p"]
+            )
+            try ProjectBundle.writeManifest(manifest, to: stagingProjectURL)
+            try Task.checkCancellation()
+            try FileManager.default.moveItem(at: stagingProjectURL, to: projectURL)
+        } catch {
+            try? FileManager.default.removeItem(at: stagingProjectURL)
+            throw error
+        }
 
         if arguments.contains("--json") {
             try printJSON(try ProjectBundle.inspect(at: projectURL))
         } else {
             print("Recorded project: \(projectURL.path)")
-            print("Screen: \(result.screenVideoURL.path)")
-            if let microphoneResult {
-                print("Microphone: \(microphoneResult.outputURL.path)")
+            print("Screen: \(projectURL.appendingPathComponent("screen.mp4").path)")
+            if captures.microphone != nil {
+                print("Microphone: \(projectURL.appendingPathComponent("microphone.m4a").path)")
             }
-            if let webcamResult {
-                print("Webcam: \(webcamResult.outputURL.path)")
+            if captures.webcam != nil {
+                print("Webcam: \(projectURL.appendingPathComponent("webcam.mov").path)")
             }
-            if result.systemAudioURL != nil {
+            if captures.screen.systemAudioURL != nil {
                 print("System audio: embedded in screen.mp4")
             }
         }
@@ -1718,9 +1766,12 @@ struct DMLessonMeldCLI {
         return fps
     }
 
-    static func cameraResolutionOption(_ value: String?) -> CameraResolution {
+    static func cameraResolutionOption(_ value: String?, optionName: String) throws -> CameraResolution {
         guard let value else { return .p1080 }
-        return CameraResolution(rawValue: value) ?? .p1080
+        guard let resolution = CameraResolution(rawValue: value) else {
+            throw CLIError.usage("\(optionName) must be one of 720p, 1080p, 4K.")
+        }
+        return resolution
     }
 
     static func webcamAspectRatioOption(_ value: String?) throws -> WebcamAspectRatio {
@@ -1748,6 +1799,19 @@ struct DMLessonMeldCLI {
     static func doubleOption(_ name: String, in arguments: [String]) throws -> Double? {
         guard let value = optionValue(name, in: arguments) else { return nil }
         return try finiteDoubleValue(value, label: name)
+    }
+
+    static func boundedDoubleOption(
+        _ name: String,
+        in arguments: [String],
+        defaultValue: Double,
+        range: ClosedRange<Double>
+    ) throws -> Double {
+        guard let value = try doubleOption(name, in: arguments) else { return defaultValue }
+        guard range.contains(value) else {
+            throw CLIError.usage("\(name) must be from \(range.lowerBound) through \(range.upperBound).")
+        }
+        return value
     }
 
     static func positiveUInt32Option(_ name: String, in arguments: [String], required: Bool = false) throws -> UInt32? {

@@ -579,6 +579,19 @@ run_expected_failure "record region rejects huge geometry" "Capture region width
 run_expected_failure "record webcam rejects invalid fps" "--fps must be one of" \
   "$cli_path" record webcam --duration 1 --output "$work_dir/invalid-webcam.mov" --fps 999 --json
 
+run_expected_failure "record webcam rejects invalid resolution" "--resolution must be one of 720p, 1080p, 4K." \
+  "$cli_path" record webcam --duration 1 --output "$work_dir/invalid-resolution.mov" --resolution potato --json
+
+invalid_project_url="$work_dir/invalid-project.dmlm"
+run_expected_failure "record project validates before output" "--region and --window-id cannot be used together." \
+  "$cli_path" record project --duration 1 --output "$invalid_project_url" --lesson-title "Invalid" --region 0,0,100,100 --window-id 1 --json
+run_step "invalid project validation leaves no bundle" /bin/sh -c 'test ! -e "$1"' sh "$invalid_project_url"
+
+invalid_project_resolution_url="$work_dir/invalid-project-resolution.dmlm"
+run_expected_failure "record project rejects invalid camera resolution" "--camera-resolution must be one of 720p, 1080p, 4K." \
+  "$cli_path" record project --duration 1 --output "$invalid_project_resolution_url" --lesson-title "Invalid" --camera-resolution potato --json
+run_step "invalid project resolution leaves no bundle" /bin/sh -c 'test ! -e "$1"' sh "$invalid_project_resolution_url"
+
 run_json "templates list" "templates-list" \
   "@=nonempty-list" \
   "0.id=str" \
