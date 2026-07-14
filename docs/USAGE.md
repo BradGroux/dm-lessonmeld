@@ -98,6 +98,8 @@ The bottom timeline writes to the same project-local sidecars used by render/exp
 
 Search **Timeline Editing Shortcuts** in the command palette for the active keyboard controls.
 
+The primary app **Export** action and CLI `render export` command both use the saved `edit-decision-list.json`. Trim bounds and enabled cuts are applied before speed retiming, and every captured media track and timed render effect is mapped onto the same retained output timeline. Disabled cuts remain in the project for later editing but do not change the export.
+
 ## Mix Audio and Pacing
 
 Use the **Audio** inspector tab to adjust captured sound and lesson pacing.
@@ -109,7 +111,7 @@ Use the **Audio** inspector tab to adjust captured sound and lesson pacing.
 - Choose whether each volume region targets all tracks, screen audio, microphone, system audio, or music.
 - Add speed regions for slow-downs, fast review, typing cleanup, or dead-air cleanup.
 
-Volume and music settings are saved in `editor-settings.json` and are applied by the full render exporter. Speed regions are saved in `edit-decisions.json` and applied by the render exporter through AV retiming, so fast-review and dead-air cleanup regions produce a retimed output instead of a sidecar-only edit.
+Volume and music settings are saved in `editor-settings.json` and are applied by the full render exporter. Speed regions are saved in `edit-decision-list.json` and applied after trim and cut removal through AV retiming, so fast-review and dead-air cleanup regions produce a synchronized retimed output instead of a sidecar-only edit.
 
 ## Edit Captions
 

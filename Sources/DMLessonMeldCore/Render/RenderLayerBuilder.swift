@@ -258,7 +258,9 @@ extension AVFoundationRenderService {
         renderSize: CGSize,
         timelineMapper: TimelineRetimingMapper
     ) -> [CALayer] {
-        reactions.map { reaction in
+        reactions.compactMap { reaction in
+            let mappedRange = timelineMapper.outputRange(forSourceRange: reaction.range)
+            guard mappedRange.durationSeconds > 0 else { return nil }
             let rect = overlayFrame(reaction.frame, renderSize: renderSize)
             let container = CALayer()
             container.frame = rect
@@ -273,9 +275,8 @@ extension AVFoundationRenderService {
             text.frame = container.bounds
             container.addSublayer(text)
 
-            let mappedRange = timelineMapper.outputRange(forSourceRange: reaction.range)
             let start = mappedRange.startSeconds
-            let duration = max(mappedRange.durationSeconds, 0.1)
+            let duration = mappedRange.durationSeconds
             container.opacity = 0
             let animation = CAKeyframeAnimation(keyPath: "opacity")
             animation.values = [0, 1, 1, 0]
@@ -435,32 +436,6 @@ extension AVFoundationRenderService {
         return try EditDecisionListFile.load(fromProject: projectURL)
     }
 
-    func applySpeedRegions(
-        _ speedRegions: [SpeedRegion],
-        to tracks: [AVMutableCompositionTrack],
-        sourceDuration: CMTime
-    ) {
-        let sourceDurationSeconds = sourceDuration.seconds.isFinite ? max(0, sourceDuration.seconds) : 0
-        guard sourceDurationSeconds > 0 else { return }
-
-        for region in speedRegions.sorted(by: { $0.range.startSeconds > $1.range.startSeconds }) {
-            let startSeconds = min(max(0, region.range.startSeconds), sourceDurationSeconds)
-            let endSeconds = min(max(startSeconds, region.range.endSeconds), sourceDurationSeconds)
-            guard endSeconds > startSeconds, region.playbackRate.isFinite, region.playbackRate > 0 else {
-                continue
-            }
-
-            let sourceRange = CMTimeRange(
-                start: time(startSeconds),
-                duration: time(endSeconds - startSeconds)
-            )
-            let targetDuration = time((endSeconds - startSeconds) / region.playbackRate)
-            for track in tracks {
-                track.scaleTimeRange(sourceRange, toDuration: targetDuration)
-            }
-        }
-    }
-
     func applyZoomRegions(
         _ zoomRegions: [ZoomRegion],
         to instruction: AVMutableVideoCompositionLayerInstruction,
@@ -482,6 +457,7 @@ extension AVFoundationRenderService {
             let mappedRange = timelineMapper.outputRange(
                 forSourceRange: EditTimeRange(startSeconds: startSeconds, endSeconds: endSeconds)
             )
+            guard mappedRange.durationSeconds > 0 else { continue }
             let mappedStartSeconds = mappedRange.startSeconds
             let mappedEndSeconds = mappedRange.endSeconds
             let regionDuration = mappedRange.durationSeconds
@@ -553,6 +529,7 @@ extension AVFoundationRenderService {
             let mappedRange = timelineMapper.outputRange(
                 forSourceRange: EditTimeRange(startSeconds: startSeconds, endSeconds: endSeconds)
             )
+            guard mappedRange.durationSeconds > 0 else { continue }
             let mappedStartSeconds = mappedRange.startSeconds
             let mappedEndSeconds = mappedRange.endSeconds
             let regionDuration = mappedRange.durationSeconds
@@ -662,6 +639,7 @@ extension AVFoundationRenderService {
         try Task.checkCancellation()
         let visibleSamples = samples
             .sorted { $0.timestampSeconds < $1.timestampSeconds }
+            .filter { timelineMapper.isSourceTimeRetained($0.timestampSeconds) }
             .map { sample in
                 CursorSample(
                     timestampSeconds: timelineMapper.outputTime(forSourceTime: sample.timestampSeconds),
@@ -726,7 +704,10 @@ extension AVFoundationRenderService {
         renderSize: CGSize,
         timelineMapper: TimelineRetimingMapper
     ) -> CALayer? {
-        guard click.phase == .down else { return nil }
+        guard click.phase == .down,
+              timelineMapper.isSourceTimeRetained(click.timestampSeconds) else {
+            return nil
+        }
 
         let scale = max(0.75, min(renderSize.width / 1920, 1.8))
         let radius = CGFloat(19 * scale * Double(click.clickCount) * settings.scale)
@@ -819,7 +800,10 @@ extension AVFoundationRenderService {
         renderSize: CGSize,
         timelineMapper: TimelineRetimingMapper
     ) -> CALayer? {
-        guard event.phase == .down, !event.isRepeat, let label = keyboardLabel(for: event) else {
+        guard event.phase == .down,
+              !event.isRepeat,
+              timelineMapper.isSourceTimeRetained(event.timestampSeconds),
+              let label = keyboardLabel(for: event) else {
             return nil
         }
 
@@ -954,7 +938,8 @@ extension AVFoundationRenderService {
         }
         let mappedStartSeconds = timelineMapper.outputTime(forSourceTime: segment.startSeconds)
         let mappedEndSeconds = timelineMapper.outputTime(forSourceTime: segment.endSeconds)
-        let mappedDurationSeconds = max(mappedEndSeconds - mappedStartSeconds, 0.05)
+        guard mappedEndSeconds > mappedStartSeconds else { return nil }
+        let mappedDurationSeconds = mappedEndSeconds - mappedStartSeconds
 
         let maxWidth = min(renderSize.width * 0.82, 980)
         let fontSize = min(max(settings.fontSize, 12), min(renderSize.height * 0.08, 96))
@@ -1256,10 +1241,11 @@ extension AVFoundationRenderService {
     ) {
         let mappedRange = timelineMapper.outputRange(forSourceRange: overlay.timeRange)
         let start = mappedRange.startSeconds
-        let duration = max(mappedRange.durationSeconds, 0.05)
+        let duration = mappedRange.durationSeconds
+        layer.opacity = 0
+        guard duration > 0 else { return }
         let fadeIn = min(overlay.animation.fadeInSeconds, duration / 2)
         let fadeOut = min(overlay.animation.fadeOutSeconds, duration / 2)
-        layer.opacity = 0
 
         let opacity = CAKeyframeAnimation(keyPath: "opacity")
         let visibleOpacity = NSNumber(value: overlay.opacity)
@@ -1429,11 +1415,12 @@ extension AVFoundationRenderService {
         let startSeconds = timelineMapper.outputTime(forSourceTime: timeRange.startSeconds)
         let endSeconds = timelineMapper.outputTime(forSourceTime: timeRange.endSeconds)
         layer.opacity = 0
+        guard endSeconds > startSeconds else { return }
         let animation = CABasicAnimation(keyPath: "opacity")
         animation.fromValue = 1
         animation.toValue = 1
         animation.beginTime = AVCoreAnimationBeginTimeAtZero + startSeconds
-        animation.duration = max(endSeconds - startSeconds, 0.05)
+        animation.duration = endSeconds - startSeconds
         animation.fillMode = .removed
         animation.isRemovedOnCompletion = true
         layer.add(animation, forKey: "annotation-\(annotation.id.uuidString)")

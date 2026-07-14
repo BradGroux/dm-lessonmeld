@@ -163,6 +163,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
            plan.captionSource == nil,
            plan.zoomRegions.isEmpty,
            plan.speedRegions.isEmpty,
+           plan.retainedSourceRanges == nil,
            plan.audio.isDefault,
            plan.canvas.isDefault,
            plan.preset.resolution == .source,
@@ -188,6 +189,17 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         let screenAsset = AVURLAsset(url: plan.screenVideo.url)
         let screenDuration = try await screenAsset.load(.duration)
         let screenVideoTracks = try await screenAsset.loadTracks(withMediaType: .video)
+        let sourceDurationSeconds = screenDuration.seconds.isFinite ? max(0, screenDuration.seconds) : 0
+        let timelineMapper = TimelineRetimingMapper(
+            speedRegions: plan.speedRegions,
+            retainedSourceRanges: plan.retainedSourceRanges,
+            sourceDurationSeconds: sourceDurationSeconds
+        )
+        let outputDurationSeconds = timelineMapper.outputDuration(forSourceDuration: sourceDurationSeconds)
+        guard outputDurationSeconds > 0 else {
+            throw RenderExportError.emptyRetainedTimeline
+        }
+        let outputDuration = time(outputDurationSeconds)
         try Task.checkCancellation()
         let interactionMetadata = try plan.cursorSource.map { try loadInteractionMetadata(from: $0) }
         var temporaryRenderFiles: [URL] = []
@@ -208,25 +220,20 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             throw RenderExportError.unableToCreateCompositionTrack
         }
 
-        try compositionScreenTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: screenDuration),
-            of: screenVideoTrack,
-            at: .zero
+        try insertSourceTimeline(
+            from: screenVideoTrack,
+            into: compositionScreenTrack,
+            maxSourceDuration: screenDuration,
+            timelineMapper: timelineMapper
         )
-
-        let sourceDurationSeconds = screenDuration.seconds.isFinite ? max(0, screenDuration.seconds) : 0
-        let timelineMapper = TimelineRetimingMapper(
-            speedRegions: plan.speedRegions,
-            sourceDurationSeconds: sourceDurationSeconds
-        )
-        let outputDuration = time(timelineMapper.outputDuration(forSourceDuration: sourceDurationSeconds))
 
         var audioTracks: [InsertedAudioTrack] = []
         audioTracks += try await insertAudioTracks(
             from: screenAsset,
             role: .screen,
             into: composition,
-            duration: screenDuration
+            duration: screenDuration,
+            timelineMapper: timelineMapper
         )
 
         for source in plan.audioSources {
@@ -235,7 +242,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
                 from: audioAsset,
                 role: audioTrackRole(for: source.role),
                 into: composition,
-                duration: screenDuration
+                duration: screenDuration,
+                timelineMapper: timelineMapper
             )
         }
 
@@ -271,8 +279,6 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
 
         var layerInstructions = [screenInstruction]
         var webcamStyleSegments: [PictureInPictureStyleSegment] = []
-        var retimedTracks = [compositionScreenTrack]
-        retimedTracks += audioTracks.map(\.track)
 
         if let webcamOverlay = plan.webcamOverlay {
             let webcamOverlayComposition = try await insertWebcamOverlay(
@@ -285,10 +291,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             )
             layerInstructions.insert(webcamOverlayComposition.instruction, at: 0)
             webcamStyleSegments = webcamOverlayComposition.styleSegments
-            retimedTracks.append(webcamOverlayComposition.track)
         }
-
-        applySpeedRegions(plan.speedRegions, to: retimedTracks, sourceDuration: screenDuration)
 
         if let backgroundMusic = plan.audio.backgroundMusic {
             audioTracks += try await insertBackgroundMusicTrack(
@@ -368,10 +371,11 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         }
 
         let webcamDuration = try await webcamAsset.load(.duration)
-        try compositionWebcamTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: min(duration, webcamDuration)),
-            of: webcamVideoTrack,
-            at: .zero
+        try insertSourceTimeline(
+            from: webcamVideoTrack,
+            into: compositionWebcamTrack,
+            maxSourceDuration: min(duration, webcamDuration),
+            timelineMapper: timelineMapper
         )
 
         let naturalSize = try await webcamVideoTrack.load(.naturalSize)
@@ -397,6 +401,7 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             let mappedRange = timelineMapper.outputRange(
                 forSourceRange: EditTimeRange(startSeconds: startSeconds, endSeconds: endSeconds)
             )
+            guard mappedRange.durationSeconds > 0 else { continue }
             let mappedStartSeconds = mappedRange.startSeconds
             let mappedEndSeconds = mappedRange.endSeconds
             let start = CMTime(seconds: mappedStartSeconds, preferredTimescale: 600)
@@ -487,7 +492,9 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         guard durationSeconds.isFinite, durationSeconds > 0 else { return }
 
         let visibleClicks = clicks.filter {
-            $0.phase == .down && $0.timestampSeconds >= 0
+            $0.phase == .down &&
+                $0.timestampSeconds >= 0 &&
+                timelineMapper.isSourceTimeRetained($0.timestampSeconds)
         }.map {
             CursorClick(
                 timestampSeconds: timelineMapper.outputTime(forSourceTime: $0.timestampSeconds),
@@ -620,7 +627,8 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
         from asset: AVAsset,
         role: EditorAudioTrackRole,
         into composition: AVMutableComposition,
-        duration: CMTime
+        duration: CMTime,
+        timelineMapper: TimelineRetimingMapper? = nil
     ) async throws -> [InsertedAudioTrack] {
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
         var insertedTracks: [InsertedAudioTrack] = []
@@ -633,14 +641,53 @@ public final class AVFoundationRenderService: RenderService, @unchecked Sendable
             }
 
             let sourceDuration = try await asset.load(.duration)
-            try compositionAudioTrack.insertTimeRange(
-                CMTimeRange(start: .zero, duration: min(duration, sourceDuration)),
-                of: audioTrack,
-                at: .zero
-            )
+            let maxSourceDuration = min(duration, sourceDuration)
+            if let timelineMapper {
+                try insertSourceTimeline(
+                    from: audioTrack,
+                    into: compositionAudioTrack,
+                    maxSourceDuration: maxSourceDuration,
+                    timelineMapper: timelineMapper
+                )
+            } else {
+                try compositionAudioTrack.insertTimeRange(
+                    CMTimeRange(start: .zero, duration: maxSourceDuration),
+                    of: audioTrack,
+                    at: .zero
+                )
+            }
             insertedTracks.append(InsertedAudioTrack(track: compositionAudioTrack, role: role))
         }
         return insertedTracks
+    }
+
+    private func insertSourceTimeline(
+        from sourceTrack: AVAssetTrack,
+        into compositionTrack: AVMutableCompositionTrack,
+        maxSourceDuration: CMTime,
+        timelineMapper: TimelineRetimingMapper
+    ) throws {
+        let maxSourceDurationSeconds = maxSourceDuration.seconds.isFinite
+            ? max(0, maxSourceDuration.seconds)
+            : 0
+        for segment in timelineMapper.sourceSegments {
+            let sourceStartSeconds = min(segment.sourceRange.startSeconds, maxSourceDurationSeconds)
+            let sourceEndSeconds = min(segment.sourceRange.endSeconds, maxSourceDurationSeconds)
+            guard sourceEndSeconds > sourceStartSeconds else { continue }
+
+            let sourceRange = CMTimeRange(
+                start: time(sourceStartSeconds),
+                duration: time(sourceEndSeconds - sourceStartSeconds)
+            )
+            let outputStart = time(segment.outputRange.startSeconds)
+            try compositionTrack.insertTimeRange(sourceRange, of: sourceTrack, at: outputStart)
+            if segment.playbackRate != 1 {
+                compositionTrack.scaleTimeRange(
+                    CMTimeRange(start: outputStart, duration: sourceRange.duration),
+                    toDuration: time((sourceEndSeconds - sourceStartSeconds) / segment.playbackRate)
+                )
+            }
+        }
     }
 
     private func insertBackgroundMusicTrack(
@@ -790,6 +837,7 @@ private struct DisplayGeometry {
 public enum RenderExportError: Error, Equatable, LocalizedError, Sendable {
     case unableToCreateExportSession
     case unableToCreateCompositionTrack
+    case emptyRetainedTimeline
     case missingVideoTrack(String)
     case exportFailed(String)
     case exportCancelled
@@ -800,6 +848,8 @@ public enum RenderExportError: Error, Equatable, LocalizedError, Sendable {
             "Unable to create an AVFoundation export session."
         case .unableToCreateCompositionTrack:
             "Unable to create an AVFoundation composition track."
+        case .emptyRetainedTimeline:
+            "The saved trim and cut decisions remove the entire source timeline."
         case .missingVideoTrack(let path):
             "No video track found in \(path)."
         case .exportFailed(let message):
