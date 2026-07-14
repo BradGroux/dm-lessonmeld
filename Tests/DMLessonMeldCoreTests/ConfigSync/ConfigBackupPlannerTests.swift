@@ -69,6 +69,132 @@ struct ConfigBackupPlannerTests {
         })
     }
 
+    @Test("Classifies credential-bearing JSON, YAML, TOML, and Markdown")
+    func classifiesCredentialBearingConfigFormats() throws {
+        let temp = try TemporaryDirectory()
+        try write(#"{ "theme": "dark" }"#, to: temp.url.appendingPathComponent("safe/settings.json"))
+        try write("theme: dark", to: temp.url.appendingPathComponent("safe/settings.yaml"))
+        try write("title = \"Workshop\"", to: temp.url.appendingPathComponent("safe/settings.toml"))
+        try write("# Workshop template", to: temp.url.appendingPathComponent("safe/README.md"))
+        try write(
+            #"{ "header": "Bearer dummy-credential-123" }"#,
+            to: temp.url.appendingPathComponent("unsafe/header.json")
+        )
+        try write(
+            "connection_string: \"Endpoint=https://example.invalid;AccountKey=dummy-account-key-123\"",
+            to: temp.url.appendingPathComponent("unsafe/connection.yaml")
+        )
+        try write(
+            "account_key = \"dummy-account-key-123\"",
+            to: temp.url.appendingPathComponent("unsafe/account.toml")
+        )
+        try write(
+            "# Authorization: Bearer dummy-bearer-123",
+            to: temp.url.appendingPathComponent("unsafe/header.md")
+        )
+        try write(
+            #"{ "value": "github_pat_dummy-token-123" }"#,
+            to: temp.url.appendingPathComponent("unsafe/current-token.json")
+        )
+
+        let plan = try ConfigBackupPlanner().plan(rootURL: temp.url)
+
+        #expect(Set(plan.includePaths) == [
+            "safe/README.md",
+            "safe/settings.json",
+            "safe/settings.toml",
+            "safe/settings.yaml"
+        ])
+        for path in [
+            "unsafe/account.toml",
+            "unsafe/connection.yaml",
+            "unsafe/current-token.json",
+            "unsafe/header.json",
+            "unsafe/header.md"
+        ] {
+            #expect(plan.excludedPaths.contains { $0.path == path && $0.reason.contains("credential") })
+        }
+    }
+
+    @Test("Requires review for malformed, undecodable, and oversized config content")
+    func requiresReviewForUncertainContent() throws {
+        let temp = try TemporaryDirectory()
+        try write("{", to: temp.url.appendingPathComponent("review/malformed.json"))
+        try write("not a mapping", to: temp.url.appendingPathComponent("review/unclassified.yaml"))
+        try write("not an assignment", to: temp.url.appendingPathComponent("review/unclassified.toml"))
+        try write(Data([0xFF, 0xFE, 0xFD]), to: temp.url.appendingPathComponent("review/non-utf8.md"))
+        try write(
+            Data(repeating: UInt8(ascii: "a"), count: ConfigBackupPlanner.maxContentScanBytes),
+            to: temp.url.appendingPathComponent("safe/boundary.md")
+        )
+        try write(
+            Data(repeating: UInt8(ascii: "a"), count: ConfigBackupPlanner.maxContentScanBytes + 1),
+            to: temp.url.appendingPathComponent("review/oversized.md")
+        )
+
+        let plan = try ConfigBackupPlanner().plan(rootURL: temp.url)
+
+        #expect(plan.includePaths.contains("safe/boundary.md"))
+        #expect(Set(plan.reviewRequiredPaths.map(\.path)) == [
+            "review/malformed.json",
+            "review/non-utf8.md",
+            "review/oversized.md",
+            "review/unclassified.toml",
+            "review/unclassified.yaml"
+        ])
+        #expect(plan.reviewRequiredPaths.allSatisfy { !$0.reason.contains("{") })
+    }
+
+    @Test("Git backup stages review-required files only after exact path approval")
+    func commitsReviewRequiredFilesOnlyAfterApproval() throws {
+        try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))
+        let temp = try TemporaryDirectory()
+        try write("{}", to: temp.url.appendingPathComponent("templates/safe.json"))
+        try write("{", to: temp.url.appendingPathComponent("templates/review.json"))
+        let manager = ConfigGitBackupManager()
+
+        let safeResult = try manager.commit(rootURL: temp.url, message: "Commit safe config")
+        let initiallyTracked = try manager.trackedPaths(rootURL: temp.url)
+
+        #expect(safeResult.didCommit)
+        #expect(initiallyTracked.contains("templates/safe.json"))
+        #expect(!initiallyTracked.contains("templates/review.json"))
+
+        let reviewedResult = try manager.commit(
+            rootURL: temp.url,
+            message: "Commit reviewed config",
+            approvedReviewPaths: ["templates/review.json"]
+        )
+
+        #expect(reviewedResult.didCommit)
+        #expect(try manager.trackedPaths(rootURL: temp.url).contains("templates/review.json"))
+        #expect(throws: ConfigGitBackupError.invalidReviewApproval("templates/not-reviewed.json")) {
+            try manager.commit(
+                rootURL: temp.url,
+                message: "Reject invalid approval",
+                approvedReviewPaths: ["templates/not-reviewed.json"]
+            )
+        }
+    }
+
+    @Test("Git backup rejects unapproved paths already staged in the index")
+    func rejectsUnapprovedPreStagedPaths() throws {
+        try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))
+        let temp = try TemporaryDirectory()
+        let manager = ConfigGitBackupManager()
+        _ = try manager.ensureRepository(rootURL: temp.url)
+        try write("{}", to: temp.url.appendingPathComponent("templates/safe.json"))
+        try write(
+            #"{ "authorization": "Bearer dummy-credential-123" }"#,
+            to: temp.url.appendingPathComponent("profiles/benign.json")
+        )
+        try runGit(["add", "--", "profiles/benign.json"], rootURL: temp.url)
+
+        #expect(throws: ConfigGitBackupError.unapprovedStagedPath("profiles/benign.json")) {
+            try manager.commit(rootURL: temp.url, message: "Reject staged credential")
+        }
+    }
+
     @Test("Git backup initializes a local repository with safe ignore rules")
     func initializesLocalGitBackupRepository() throws {
         try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))
@@ -226,8 +352,26 @@ struct ConfigBackupPlannerTests {
         try value.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    private func write(_ data: Data, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: [.atomic])
+    }
+
     private func makeExecutable(_ url: URL) throws {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    }
+
+    private func runGit(_ arguments: [String], rootURL: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", rootURL.path] + arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw POSIXError(.EIO)
+        }
     }
 }
 

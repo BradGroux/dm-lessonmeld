@@ -27,6 +27,7 @@ struct DMLessonMeldCLI {
         "--normalized-x",
         "--normalized-y",
         "--output",
+        "--approve-review",
         "--preset",
         "--quality",
         "--reason",
@@ -1309,7 +1310,7 @@ struct DMLessonMeldCLI {
 
     static func runConfig(_ arguments: [String]) throws {
         guard let subcommand = arguments.first, arguments.count >= 2 else {
-            throw CLIError.usage("Usage: dmlesson config plan|init|status|commit <config-root> [--message <message>] [--json]")
+            throw CLIError.usage("Usage: dmlesson config plan|init|status|commit <config-root> [--message <message>] [--approve-review <relative-path>] [--json]")
         }
 
         let rootURL = pathURL(arguments[1])
@@ -1324,6 +1325,7 @@ struct DMLessonMeldCLI {
             } else {
                 print("Syncable files: \(plan.includePaths.count)")
                 print("Excluded files: \(plan.excludedPaths.count)")
+                print("Review required: \(plan.reviewRequiredPaths.count)")
             }
         case "init":
             let status = try manager.ensureRepository(rootURL: rootURL)
@@ -1334,10 +1336,14 @@ struct DMLessonMeldCLI {
         case "commit":
             guard let message = optionValue("--message", in: arguments) ?? optionValue("-m", in: arguments),
                   !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw CLIError.usage("Usage: dmlesson config commit <config-root> --message <message> [--json]")
+                throw CLIError.usage("Usage: dmlesson config commit <config-root> --message <message> [--approve-review <relative-path>] [--json]")
             }
 
-            let result = try manager.commit(rootURL: rootURL, message: message)
+            let result = try manager.commit(
+                rootURL: rootURL,
+                message: message,
+                approvedReviewPaths: optionValues("--approve-review", in: arguments)
+            )
             if arguments.contains("--json") {
                 try printJSON(includePaths ? result : result.redactedForAutomation())
             } else if result.didCommit {
@@ -1500,7 +1506,7 @@ struct DMLessonMeldCLI {
           connectors common-cartridge|scorm|xapi package <project> --output <directory> [--no-archive] [--json]
           connectors video-host handoff <project> --output <directory> [--archive] [--json]
           config plan|init|status <config-root> [--json] [--verbose]
-          config commit <config-root> --message <message> [--json] [--verbose]
+          config commit <config-root> --message <message> [--approve-review <relative-path>] [--json] [--verbose]
           agent manifest <project> [--settings <settings.json>] [--include-media-paths] [--include-transcript-references] [--include-project-path]
           agent workflows [--target openclaw|codex|veritas-kanban] [--json]
           app status|show-controls|start|pause|resume|toggle-pause|stop [--json] [--verbose]
@@ -1544,6 +1550,17 @@ struct DMLessonMeldCLI {
         }
         let value = arguments[index + 1]
         return looksLikeMissingOptionValue(value) ? nil : value
+    }
+
+    static func optionValues(_ option: String, in arguments: [String]) -> [String] {
+        arguments.indices.compactMap { index in
+            guard arguments[index] == option,
+                  arguments.indices.contains(index + 1),
+                  !looksLikeMissingOptionValue(arguments[index + 1]) else {
+                return nil
+            }
+            return arguments[index + 1]
+        }
     }
 
     static func validateOptionSyntax(_ arguments: [String]) throws {

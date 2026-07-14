@@ -1027,7 +1027,7 @@ private struct ConfigBackupSettingsPanel: View {
 
     private func planBackup() throws -> String {
         let plan = try ConfigBackupPlanner().plan(rootURL: rootURL())
-        return "Plan includes \(plan.includePaths.count) files and excludes \(plan.excludedPaths.count) files."
+        return "Plan includes \(plan.includePaths.count) files, excludes \(plan.excludedPaths.count), and requires review for \(plan.reviewRequiredPaths.count)."
     }
 
     private func initRepository() throws -> String {

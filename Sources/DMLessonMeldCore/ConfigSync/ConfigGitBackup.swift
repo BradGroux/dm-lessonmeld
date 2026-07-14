@@ -57,6 +57,8 @@ public enum ConfigGitBackupError: Error, Equatable, LocalizedError, Sendable {
     case gitFailed(String)
     case gitTimedOut(String)
     case gitIgnoreTooLarge(String, byteCount: Int64, limit: Int64)
+    case invalidReviewApproval(String)
+    case unapprovedStagedPath(String)
     case noSyncableFiles
 
     public var errorDescription: String? {
@@ -69,6 +71,10 @@ public enum ConfigGitBackupError: Error, Equatable, LocalizedError, Sendable {
             "Git command timed out: \(command)."
         case .gitIgnoreTooLarge(let path, let byteCount, let limit):
             ".gitignore is too large to update safely: \(path) is \(byteCount) bytes, limit is \(limit) bytes."
+        case .invalidReviewApproval(let path):
+            "Config review approval does not match a review-required path: \(path)."
+        case .unapprovedStagedPath(let path):
+            "Git index contains a path that this config commit did not approve: \(path)."
         case .noSyncableFiles:
             "No syncable config/template files were found."
         }
@@ -126,10 +132,20 @@ public struct ConfigGitBackupManager: Sendable {
         return ConfigGitBackupStatus(rootPath: rootURL.path, repositoryInitialized: true, changedPaths: changed)
     }
 
-    public func commit(rootURL: URL, message: String) throws -> ConfigGitBackupCommitResult {
+    public func commit(
+        rootURL: URL,
+        message: String,
+        approvedReviewPaths: [String] = []
+    ) throws -> ConfigGitBackupCommitResult {
         _ = try ensureRepository(rootURL: rootURL)
         let plan = try planner.plan(rootURL: rootURL)
-        var pathsToAdd = plan.includePaths
+        let reviewRequiredPaths = Set(plan.reviewRequiredPaths.map(\.path))
+        let approvedPaths = Set(approvedReviewPaths)
+        if let invalidApproval = approvedPaths.subtracting(reviewRequiredPaths).sorted().first {
+            throw ConfigGitBackupError.invalidReviewApproval(invalidApproval)
+        }
+
+        var pathsToAdd = plan.includePaths + approvedPaths
         if FileManager.default.fileExists(atPath: rootURL.appendingPathComponent(".gitignore").path) {
             pathsToAdd.append(".gitignore")
         }
@@ -140,6 +156,10 @@ public struct ConfigGitBackupManager: Sendable {
 
         try runGit(["add", "--"] + pathsToAdd, rootURL: rootURL)
         let changed = try stagedPaths(rootURL: rootURL)
+        let allowedStagedPaths = Set(pathsToAdd)
+        if let unapprovedPath = Set(changed).subtracting(allowedStagedPaths).sorted().first {
+            throw ConfigGitBackupError.unapprovedStagedPath(unapprovedPath)
+        }
         guard !changed.isEmpty else {
             return ConfigGitBackupCommitResult(
                 rootPath: rootURL.path,

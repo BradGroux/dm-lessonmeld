@@ -274,6 +274,8 @@ swift run dmlesson project create --lesson-title "Intro" --output /tmp/Intro.dml
 swift run dmlesson render plan /tmp/Intro.dmlm --output /tmp/lesson.mp4 --json
 swift run dmlesson transcript model-status --settings /tmp/settings.json --json
 swift run dmlesson agent manifest /tmp/Intro.dmlm --settings /tmp/settings.json --json
+swift run dmlesson config plan ~/.dm-lessonmeld --json
+swift run dmlesson config commit ~/.dm-lessonmeld --message "Backup config" --approve-review templates/review.json --json
 swift run dmlesson connectors common-cartridge package /tmp/Intro.dmlm --output /tmp/connectors --json
 swift run dmlesson agent workflows --target codex --json
 ```
@@ -281,6 +283,8 @@ swift run dmlesson agent workflows --target codex --json
 JSON output is intended to be stable enough for local agents and scripts. Metadata is safe by default; media paths and transcript contents should be included only when explicitly requested.
 
 Window listings redact titles by default in CLI output. Use `--include-window-titles` only for intentional interactive selection.
+
+Config backup planning reports three metadata-only path sets: `includePaths` for automatic staging, `excludedPaths` for credential-bearing or categorically blocked files, and `reviewRequiredPaths` for truncated, undecodable, malformed, or otherwise uncertain content. A commit stages only `includePaths` unless each review-required relative path is repeated with `--approve-review`. Approval cannot promote a credential exclusion, and classification remains a conservative guard rather than proof that a file is secret-free.
 
 Agent workflow JSON is available for `openclaw`, `codex`, and `veritas-kanban` targets. These workflows list safe command sequences for inspection, validation, packaging, and handoff without exposing media paths unless explicit flags are used. Agent manifests accept `--settings <settings.json>`; saved privacy defaults apply, explicit include flags can enable additional references, and generation fails when those settings disable agent manifests.
 
