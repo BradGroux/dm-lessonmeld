@@ -79,6 +79,31 @@ struct ConnectorPackageTests {
         #expect(resultJSON["archive_path"] is NSNull)
     }
 
+    @Test("Re-export removes stale files from an existing connector package")
+    func reexportRemovesStaleConnectorFiles() throws {
+        let temp = try TemporaryDirectory()
+        let projectURL = try makeProject(in: temp.url)
+        let outputURL = temp.url.appendingPathComponent("connectors", isDirectory: true)
+        let firstResult = try CommonCartridgePackageBuilder().buildPackage(
+            projectURL: projectURL,
+            outputDirectory: outputURL,
+            archive: false
+        )
+        let staleURL = URL(fileURLWithPath: firstResult.packagePath)
+            .appendingPathComponent("stale-secret.txt")
+        try Data("stale".utf8).write(to: staleURL)
+
+        let secondResult = try CommonCartridgePackageBuilder().buildPackage(
+            projectURL: projectURL,
+            outputDirectory: outputURL,
+            archive: false
+        )
+
+        #expect(secondResult.packagePath == firstResult.packagePath)
+        #expect(!FileManager.default.fileExists(atPath: staleURL.path))
+        #expect(!secondResult.manifest.files.map(\.relativePath).contains("stale-secret.txt"))
+    }
+
     @Test("Rejects connector package without primary video")
     func rejectsMissingPrimaryVideo() throws {
         let temp = try TemporaryDirectory()
