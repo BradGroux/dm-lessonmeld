@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import AVKit
 import DMLessonMeldCore
+import DMLessonMeldSupport
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -141,19 +142,6 @@ struct ProjectAssetItem: Identifiable {
     let url: URL?
     let canOpen: Bool
     let issues: [ProjectValidationIssue]
-}
-
-enum ProjectDirtyArea: String, CaseIterable, Hashable {
-    case metadata = "Metadata"
-    case markers = "Markers"
-    case editDecisions = "Timeline edits"
-    case editorSettings = "Editor settings"
-    case overlays = "Overlays"
-    case captions = "Captions"
-
-    var sortOrder: Int {
-        Self.allCases.firstIndex(of: self) ?? 0
-    }
 }
 
 enum TimelineSelection: Equatable {
@@ -421,4 +409,138 @@ struct EditableTimeRangeRow: Identifiable, Equatable {
     var id: String
     var startSeconds: String
     var endSeconds: String
+}
+
+struct ProjectEditorMetadataDirtySnapshot: Equatable {
+    var lessonTitle: String
+    var courseTitle: String
+    var moduleTitle: String
+    var instructor: String
+    var summary: String
+    var tags: String
+}
+
+struct ProjectEditorEditDecisionDirtySnapshot: Equatable {
+    var trimStartSeconds: String
+    var trimEndSeconds: String
+    var sourceDurationSeconds: String
+    var cuts: [EditableCutRow]
+    var speedRegions: [EditableSpeedRow]
+    var zoomRegions: [EditableZoomRow]
+    var cameraRegions: [EditableCameraRegionRow]
+    var cameraReactions: [EditableCameraReactionRow]
+    var audioVolumeRegions: [EditableAudioVolumeRegionRow]
+    var cursorHiddenRanges: [EditableTimeRangeRow]
+}
+
+struct ProjectEditorCanvasDirtySnapshot: Equatable {
+    var aspectRatio: EditorCanvasAspectRatio
+    var customWidth: String
+    var customHeight: String
+    var backgroundStyle: EditorCanvasBackgroundStyle
+    var primaryColor: RGBAColor
+    var secondaryColor: RGBAColor
+    var backgroundImagePath: String
+    var paddingRatio: Double
+    var insetRatio: Double
+    var cornerRadiusRatio: Double
+    var shadowEnabled: Bool
+    var shadowOpacity: Double
+    var cropEnabled: Bool
+    var cropX: String
+    var cropY: String
+    var cropWidth: String
+    var cropHeight: String
+}
+
+struct ProjectEditorCursorDirtySnapshot: Equatable {
+    var pointerStyle: EditorCursorPointerStyle
+    var pointerVisible: Bool
+    var smoothMovement: Bool
+    var pointerScale: Double
+    var pointerFillColor: RGBAColor
+    var pointerStrokeColor: RGBAColor
+    var clickEffectsVisible: Bool
+    var clickColor: RGBAColor
+    var clickScale: Double
+    var clickOpacity: Double
+    var clickDuration: Double
+    var clickSoundEnabled: Bool
+    var clickSoundVolume: Double
+    var keyboardVisible: Bool
+    var keyboardOpacity: Double
+}
+
+struct ProjectEditorCameraDirtySnapshot: Equatable {
+    var corner: PictureInPictureCorner
+    var widthRatio: String
+    var marginRatio: String
+    var aspectRatio: PictureInPictureAspectRatio
+    var frameShape: PictureInPictureFrameShape
+    var cornerRadius: String
+    var mirrored: Bool
+    var borderEnabled: Bool
+    var shadowEnabled: Bool
+}
+
+struct ProjectEditorAudioDirtySnapshot: Equatable {
+    var screenGain: String
+    var screenMuted: Bool
+    var screenSoloed: Bool
+    var microphoneGain: String
+    var microphoneMuted: Bool
+    var microphoneSoloed: Bool
+    var systemGain: String
+    var systemMuted: Bool
+    var systemSoloed: Bool
+    var backgroundMusicPath: String
+    var backgroundMusicStart: String
+    var backgroundMusicSourceStart: String
+    var backgroundMusicDuration: String
+    var backgroundMusicGain: String
+    var backgroundMusicLoop: Bool
+    var backgroundMusicDuckUnderVoice: Bool
+    var backgroundMusicDuckedGain: String
+    var backgroundMusicFadeIn: String
+    var backgroundMusicFadeOut: String
+}
+
+struct ProjectEditorExportDirtySnapshot: Equatable {
+    var quality: RenderQuality
+    var fileType: RenderFileType
+    var resolution: RenderResolution
+    var frameRate: RenderFrameRate
+    var codec: RenderCodec
+    var hardwareAccelerationEnabled: Bool
+    var maxConcurrentExports: Int
+    var alphaChannelEnabled: Bool
+    var animatedGIFEnabled: Bool
+    var proResEnabled: Bool
+}
+
+struct ProjectEditorCaptionDirtySnapshot: Equatable {
+    var rows: [EditableCaptionRow]
+    var burnInEnabled: Bool
+    var placement: EditorCaptionPlacement
+    var fontName: String
+    var fontSize: String
+    var textColor: RGBAColor
+    var backgroundColor: RGBAColor
+    var maxLineCount: Int
+    var safeMargin: String
+}
+
+enum ProjectEditorDirtySnapshot: Equatable {
+    case metadata(ProjectEditorMetadataDirtySnapshot)
+    case markers([EditableMarkerRow])
+    case editDecisions(ProjectEditorEditDecisionDirtySnapshot)
+    case editorSettings(ProjectEditorSettingsDirtySnapshot<
+        ProjectEditorCanvasDirtySnapshot,
+        ProjectEditorCursorDirtySnapshot,
+        ProjectEditorCameraDirtySnapshot,
+        ProjectEditorAudioDirtySnapshot,
+        ProjectEditorExportDirtySnapshot
+    >)
+    case overlays([EditableOverlayRow])
+    case captions(ProjectEditorCaptionDirtySnapshot)
 }
