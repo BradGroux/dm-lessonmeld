@@ -18,8 +18,8 @@ scripts/capture-device-matrix-smoke.sh --all --keep-output
 
 Useful options:
 
-- `--record`: capture display, region, and a screen-only `.dmlm` project.
-- `--all`: capture display, region, screen-only project, microphone, webcam, system audio, and combined project.
+- `--record`: capture display, region, a screen-only `.dmlm` project, a controlled fixture window, and a fixture-window `.dmlm` project; also verify stale window rejection.
+- `--all`: run the `--record` checks plus microphone, webcam, system audio, and combined project capture.
 - `--duration 3`: set the capture duration in seconds. Default is `2`.
 - `--output /tmp/lessonmeld-smoke`: choose the artifact directory. Default is a timestamped temp directory.
 - `--keep-output`: keep the directory path visible for attaching artifacts to a bug report.
@@ -47,6 +47,9 @@ Use `--video` for raw MP4/MOV files and `--project` for existing `.dmlm` bundles
 | CLI build | Always | `.build/debug/dmlesson` | Proves the current checkout can run smoke commands. |
 | Permission status | Always | JSON log | Does not request permissions or change OS state. |
 | Window listing | Always | JSON log | Runs `record windows --json` without starting capture. Titles are redacted unless `--include-window-titles` is used intentionally. |
+| Fixture window capture | `--record` or `--all` | `window.mp4` | Compiles and launches a controlled local AppKit fixture, records it in a subprocess, and fails on signals or nonzero exits. |
+| Fixture window project | `--record` or `--all` | `project-window.dmlm/screen.mp4` | Exercises the same core window filter through project recording and runs `project inspect --json`. |
+| Stale window rejection | `--record` or `--all` | Error log, no media | Requires a sanitized not-found error and rejects partial media output. |
 | Display capture | `--record` or `--all` | `display.mp4` | Requires Screen Recording permission. |
 | Area capture | `--record` or `--all` | `region.mp4` | Captures a 640x360 region at display origin. |
 | Screen project capture | `--record` or `--all` | `project-screen.dmlm/screen.mp4` | Also runs `project inspect --json`. |
@@ -54,7 +57,7 @@ Use `--video` for raw MP4/MOV files and `--project` for existing `.dmlm` bundles
 | Microphone capture | `--all` or `--record --with-microphone` | `microphone.m4a` | Requires Microphone permission and an input device. |
 | Webcam capture | `--all` or `--record --with-webcam` | `webcam.mov` | Requires Camera permission and a camera. |
 | Combined capture | `--all` or `--record --with-combined` | `project-combined.dmlm` with screen, mic, and webcam files | Exercises mixed capture orchestration. |
-| Window capture | Manual | `window.mp4` or `.dmlm/screen.mp4` | Run `record windows --include-window-titles --json` when choosing interactively, choose an ID, then run `record window --window-id <id> ...` or use the app recorder Window mode. |
+| App Window mode | Manual | `window.mp4` or `.dmlm/screen.mp4` | Record the controlled fixture or another safe window from the app to verify the native UI path through the shared core recorder. |
 | Permission denied or revoked | Manual | Explicit error in app or CLI | Revoke Screen Recording, Microphone, or Camera in System Settings and rerun the relevant capture. |
 | Missing camera or microphone | Manual | Clear device failure or skipped check | Run on hardware without that device, or disable it at the OS/device layer. |
 | Stop timeout and cancel timing | Manual | App status leaves `Stopping` | Start from the app control bar, stop immediately, and verify the status transitions. |

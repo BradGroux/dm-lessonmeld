@@ -16,6 +16,8 @@ USAGE
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 swift_bin="${SWIFT:-swift}"
+swiftc_bin="${SWIFTC:-swiftc}"
+python_bin="${PYTHON:-python3}"
 duration="${LESSONMELD_CAPTURE_SMOKE_DURATION:-2}"
 output_root=""
 record=0
@@ -95,6 +97,8 @@ pass_count=0
 skip_count=0
 manual_count=0
 fail_count=0
+fixture_pid=""
+fixture_window_id=""
 
 printf "status\tcheck\tdetail\n" > "$summary_file"
 
@@ -110,6 +114,65 @@ record_status() {
     MANUAL) manual_count=$((manual_count + 1)) ;;
     FAIL) fail_count=$((fail_count + 1)) ;;
   esac
+}
+
+cleanup_window_fixture() {
+  if [[ -n "$fixture_pid" ]] && kill -0 "$fixture_pid" 2>/dev/null; then
+    kill "$fixture_pid" 2>/dev/null || true
+    wait "$fixture_pid" 2>/dev/null || true
+  fi
+  fixture_pid=""
+}
+
+trap cleanup_window_fixture EXIT
+
+start_window_fixture() {
+  local fixture_binary="$output_root/LessonMeldFixture"
+  local fixture_log="$output_root/logs/window_capture_fixture.log"
+  local listing_log="$output_root/logs/window_capture_fixture_windows.json"
+
+  if "$swiftc_bin" -parse-as-library "$repo_root/scripts/fixtures/WindowCaptureFixture.swift" -o "$fixture_binary" >"$fixture_log" 2>&1; then
+    record_status "PASS" "build window capture fixture" "log: $fixture_log"
+  else
+    record_status "FAIL" "build window capture fixture" "log: $fixture_log"
+    return 1
+  fi
+
+  "$fixture_binary" >>"$fixture_log" 2>&1 &
+  fixture_pid=$!
+
+  for _ in {1..30}; do
+    if ! kill -0 "$fixture_pid" 2>/dev/null; then
+      record_status "FAIL" "launch window capture fixture" "fixture exited before publishing a window; log: $fixture_log"
+      return 1
+    fi
+    if "$cli_path" record windows --json >"$listing_log" 2>>"$fixture_log"; then
+      fixture_window_id="$($python_bin -c 'import json, sys; windows = json.load(open(sys.argv[1])); print(next((str(window["id"]) for window in windows if window.get("ownerName") == "LessonMeldFixture"), ""))' "$listing_log")"
+      if [[ -n "$fixture_window_id" ]]; then
+        record_status "PASS" "launch window capture fixture" "window id: $fixture_window_id"
+        return 0
+      fi
+    fi
+    sleep 0.1
+  done
+
+  record_status "FAIL" "launch window capture fixture" "fixture window was not listed; log: $fixture_log"
+  return 1
+}
+
+validate_stale_window_error() {
+  local log_path="$output_root/logs/stale_window_error.log"
+  local output_path="$output_root/stale-window.mp4"
+  if "$cli_path" record window --window-id 4294967295 --duration "$duration" --output "$output_path" --json >"$log_path" 2>&1; then
+    record_status "FAIL" "stale window rejection" "unexpected success; log: $log_path"
+    return 1
+  fi
+  if grep -q "Requested window was not found: 4294967295" "$log_path" && [[ ! -e "$output_path" ]]; then
+    record_status "PASS" "stale window rejection" "sanitized error without output; log: $log_path"
+    return 0
+  fi
+  record_status "FAIL" "stale window rejection" "missing expected error or partial output exists; log: $log_path"
+  return 1
 }
 
 run_step() {
@@ -169,10 +232,28 @@ if [[ "$record" -eq 1 ]]; then
     run_step "screen project inspect" "$cli_path" project inspect "$project_dir" --json
     validate_file "screen project media" "$project_dir/screen.mp4"
   fi
+
+  if start_window_fixture; then
+    window_file="$output_root/window.mp4"
+    if run_step "window capture" "$cli_path" record window --window-id "$fixture_window_id" --duration "$duration" --output "$window_file" --json; then
+      validate_file "window capture" "$window_file"
+    fi
+
+    window_project_dir="$output_root/project-window.dmlm"
+    if run_step "window project capture" "$cli_path" record project --window-id "$fixture_window_id" --duration "$duration" --output "$window_project_dir" --lesson-title "Capture Smoke Window" --json; then
+      run_step "window project inspect" "$cli_path" project inspect "$window_project_dir" --json
+      validate_file "window project media" "$window_project_dir/screen.mp4"
+    fi
+    cleanup_window_fixture
+  fi
+  validate_stale_window_error
 else
   skip_capture "display capture" "pass --record or --all to create local recordings"
   skip_capture "region capture" "pass --record or --all to create local recordings"
   skip_capture "screen project capture" "pass --record or --all to create local recordings"
+  skip_capture "window capture" "pass --record or --all to create a controlled fixture window recording"
+  skip_capture "window project capture" "pass --record or --all to create a controlled fixture window project"
+  skip_capture "stale window rejection" "pass --record or --all to validate sanitized window errors"
 fi
 
 if [[ "$record" -eq 1 && "$include_system_audio" -eq 1 ]]; then
@@ -215,7 +296,7 @@ else
   skip_capture "combined capture" "pass --all or --with-combined with --record"
 fi
 
-record_status "MANUAL" "window capture" "choose an ID from record windows --json, run record window --window-id <id>, and verify the output"
+record_status "MANUAL" "app window capture" "record the controlled fixture or another safe window from the app Window mode and verify the output"
 record_status "MANUAL" "permission denied or revoked" "revoke Screen Recording, Microphone, or Camera in System Settings, rerun the relevant capture, and verify the error is explicit"
 record_status "MANUAL" "missing camera or microphone" "run on hardware without that device or disable it at the OS/device layer and verify the row reports a clear failure"
 record_status "MANUAL" "stop timeout and cancel timing" "start from the app control bar, stop immediately, and verify the status leaves Stopping"

@@ -35,6 +35,7 @@ jobs:
           plutil -lint Packaging/Entitlements.plist
           bash -n scripts/cli-smoke-tests.sh
           bash -n scripts/capture-device-matrix-smoke.sh
+          swiftc -parse-as-library -typecheck scripts/fixtures/WindowCaptureFixture.swift
           bash -n scripts/real-media-fixture-smoke.sh
           python3 -m py_compile scripts/dmlesson-mcp-server.py
           test -f Packaging/AppIcon.icns

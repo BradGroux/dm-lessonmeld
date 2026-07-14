@@ -117,6 +117,11 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             displayScale: 1,
             retinaCapture: request.options.retinaCapture
         )
+        let filter = if let window {
+            SCContentFilter(desktopIndependentWindow: window)
+        } else {
+            SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+        }
 
         try reserveStart()
         do {
@@ -131,11 +136,6 @@ public final class DisplayScreenRecorder: NSObject, SCStreamOutput, SCStreamDele
             throw error
         }
 
-        let filter = if let window {
-            SCContentFilter(desktopIndependentWindow: window)
-        } else {
-            SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-        }
         let configuration = ScreenCaptureSession.configuration(
             sourceRect: validatedSourceRect,
             displayScale: 1,
