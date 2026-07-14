@@ -74,7 +74,7 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
     static let finishWritingTimeoutSeconds: TimeInterval = 15
 
     private let queue = DispatchQueue(label: "io.digitalmeld.dm-lessonmeld.microphone-recorder", qos: .userInitiated)
-    private let lock = NSLock()
+    private let lock: NSLock
     private var session: AVCaptureSession?
     private var writer: AVAssetWriter?
     private var audioInput: AVAssetWriterInput?
@@ -90,6 +90,24 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
     private var totalPausedDuration: TimeInterval = 0
 
     public override init() {
+        lock = NSLock()
+        super.init()
+    }
+
+    init(
+        activeSession session: AVCaptureSession,
+        writer: AVAssetWriter,
+        audioInput: AVAssetWriterInput,
+        request: AudioRecordingRequest,
+        startedAt: Date,
+        stateLock: NSLock = NSLock()
+    ) {
+        lock = stateLock
+        self.session = session
+        self.writer = writer
+        self.audioInput = audioInput
+        self.activeRequest = request
+        self.startedAt = startedAt
         super.init()
     }
 
@@ -242,7 +260,6 @@ public final class MicrophoneRecorder: NSObject, AVCaptureAudioDataOutputSampleB
         }
         let pausedDuration = totalPausedDuration + (pauseStartedAt.map { Date().timeIntervalSince($0) } ?? 0)
 
-        session.stopRunning()
         self.session = nil
         self.writer = nil
         self.audioInput = nil
