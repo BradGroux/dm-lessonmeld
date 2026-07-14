@@ -47,7 +47,7 @@ Tests/
 - Project media URL resolution is centralized through `ProjectBundle.fileURL(for:in:)` so project-relative and explicitly attached absolute files behave the same across app, CLI, render, validation, and LearnHouse package paths.
 - First-run onboarding covers Screen Recording, Microphone, Camera, Accessibility, Input Monitoring, teaching defaults, local-only posture, Git-safe settings backup, LearnHouse, and agent manifests.
 - Git-friendly settings exports use stable JSON object keys, including shortcut values, so backups diff cleanly.
-- Config backup commits stage only planner-approved JSON/YAML/TOML/Markdown files plus the generated `.gitignore`; media, transcripts, diagnostics, caches, projects, exports, and credential-like names are excluded.
+- Config backup planning classifies JSON/YAML/TOML/Markdown as safe to stage, credential-bearing and excluded, or review-required when inspection is incomplete or uncertain. Commits stage safe files plus exact review-required paths explicitly approved by the caller; media, transcripts, diagnostics, caches, projects, exports, and credential-like names remain excluded.
 - Launch diagnostics track previous clean exit, safe mode, launch count, and current permission health.
 
 ## Remaining implementation gaps

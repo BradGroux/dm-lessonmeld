@@ -168,10 +168,13 @@ swift run dmlesson connectors scorm package /tmp/Intro.dmlm --output /tmp/connec
 swift run dmlesson connectors xapi package /tmp/Intro.dmlm --output /tmp/connectors --json
 swift run dmlesson connectors video-host handoff /tmp/Intro.dmlm --output /tmp/connectors --json
 swift run dmlesson config plan ~/.dm-lessonmeld --json
+swift run dmlesson config commit ~/.dm-lessonmeld --message "Backup config" --approve-review templates/review.json --json
 swift run dmlesson app status --json
 ```
 
 `record windows --json` redacts window titles by default for automation logs. Add `--include-window-titles` only when you are intentionally choosing a window interactively.
+
+Config backup plans separate files that are safe to stage automatically, files excluded as credential-bearing, and files that require explicit review because inspection was incomplete or uncertain. Repeat `--approve-review <relative-path>` only after inspecting each review-required file; approvals never override credential exclusions.
 
 App-control commands use a Keychain-backed local token for authentication. Normal app launch and recording do not require Keychain access; the token is touched only when app-control automation is used.
 

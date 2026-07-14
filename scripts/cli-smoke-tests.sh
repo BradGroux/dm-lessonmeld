@@ -300,6 +300,33 @@ PY
   record_status "PASS" "$name" "$json_path"
 }
 
+validate_config_review_paths() {
+  local name="$1"
+  local plan_path="$2"
+  local commit_path="$3"
+
+  "$python_bin" - "$plan_path" "$commit_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    plan = json.load(handle)
+with open(sys.argv[2], "r", encoding="utf-8") as handle:
+    commit = json.load(handle)
+
+if "templates/safe.json" not in plan["includePaths"]:
+    raise AssertionError("safe config was not classified for automatic staging")
+reviewed = {item["path"]: item["reason"] for item in plan["reviewRequiredPaths"]}
+if "templates/review.json" not in reviewed:
+    raise AssertionError("malformed config was not classified for review")
+if "{" in reviewed["templates/review.json"]:
+    raise AssertionError("review reason exposed file content")
+if "templates/review.json" not in commit["committedPaths"]:
+    raise AssertionError("explicitly approved review path was not committed")
+PY
+  record_status "PASS" "$name" "$plan_path and $commit_path"
+}
+
 run_expected_failure() {
   local name="$1"
   local expected_stderr="$2"
@@ -349,6 +376,7 @@ swift run dmlesson --help
 swift run dmlesson agent manifest /tmp/Intro.dmlm --settings /tmp/settings.json --json
 swift run dmlesson app status --json
 swift run dmlesson config plan ~/.dm-lessonmeld --json
+swift run dmlesson config commit ~/.dm-lessonmeld --message "Backup config" --approve-review templates/review.json --json
 swift run dmlesson edit validate /tmp/Intro.dmlm --json
 swift run dmlesson agent workflows --target codex --json
 swift run dmlesson learnhouse package /tmp/Intro.dmlm --output /tmp/lesson-export --archive
@@ -628,12 +656,27 @@ run_json "connector video host" "connector-video-host" \
   "manifest.primary_launch_path=str" \
   -- "$cli_path" connectors video-host handoff "$project_url" --output "$connectors_url" --json
 
+mkdir -p "$config_root/templates"
+printf '{}' >"$config_root/templates/safe.json"
+printf '{' >"$config_root/templates/review.json"
+
 run_json "config plan" "config-plan" \
   "rootPath=str" \
   "includePaths=list" \
   "excludedPaths=list" \
+  "reviewRequiredPaths=list" \
   -- "$cli_path" config plan "$config_root" --json
 validate_json_omits_absolute_paths "config plan redacts local paths" "$logs_dir/config-plan.json" "$work_dir"
+
+run_json "config commit reviewed path" "config-commit-reviewed-path" \
+  "didCommit=bool" \
+  "committedPaths=list" \
+  -- "$cli_path" config commit "$config_root" --message "Commit reviewed config" \
+  --approve-review "templates/review.json" --json
+validate_config_review_paths \
+  "config review path requires and honors explicit approval" \
+  "$logs_dir/config-plan.json" \
+  "$logs_dir/config-commit-reviewed-path.json"
 
 run_json "agent manifest" "agent-manifest" \
   "schemaVersion=int" \
