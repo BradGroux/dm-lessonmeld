@@ -16,5 +16,9 @@ cask "dm-lessonmeld" do
 
   app "Digital Meld LessonMeld.app"
 
+  # v0.0.12 predates the bundled CLI. Keep that published cask installable,
+  # then expose dmlesson for every archive built from the current packaging flow.
+  binary "#{appdir}/Digital Meld LessonMeld.app/Contents/Resources/bin/dmlesson" if version >= "0.0.13"
+
   zap trash: "~/Library/Preferences/io.digitalmeld.dm-lessonmeld.plist"
 end

@@ -60,6 +60,7 @@ jobs:
           bash -n scripts/test-release-provenance.sh
           bash -n scripts/test-release-signing-cleanup.sh
           bash -n scripts/test-cask-release.sh
+          bash -n scripts/test-cli-packaging.sh
           bash -n scripts/test-release-workflow-gates.sh
           bash -n scripts/verify-release-publication.sh
           bash -n scripts/verify-release-provenance.sh
@@ -74,6 +75,7 @@ jobs:
           scripts/test-release-workflow-gates.sh
           scripts/verify-cask-release.sh
           scripts/build-app.sh release >/dev/null
+          scripts/test-cli-packaging.sh --skip-build
           codesign --verify --strict --deep "Packaging/Digital Meld LessonMeld.app"
           app_entitlements="$(codesign -d --entitlements :- "Packaging/Digital Meld LessonMeld.app" 2>/dev/null)"
           printf '%s' "${app_entitlements}" | grep -q '<key>com.apple.security.device.audio-input</key>'
