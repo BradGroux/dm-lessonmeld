@@ -59,6 +59,12 @@ Tests/
 - Config backup planning classifies JSON/YAML/TOML/Markdown as safe to stage, credential-bearing and excluded, or review-required when inspection is incomplete or uncertain. Commits stage safe files plus exact review-required paths explicitly approved by the caller; media, transcripts, diagnostics, caches, projects, exports, and credential-like names remain excluded.
 - Launch diagnostics track previous clean exit, safe mode, launch count, and current permission health.
 
+## Optional hosted community boundary
+
+The native suite remains local-first and fully usable without an account or backend. The accepted community architecture is a separate multi-tenant hosted service connected only through an explicit Publication of selected derived assets and metadata. Complete `.dmlm` projects, raw captures, local transcripts, file paths, settings, and authoring history do not synchronize automatically.
+
+See [Community Platform Architecture and Product Boundaries](COMMUNITY_PLATFORM_ARCHITECTURE.md), [ADR 0001](adr/0001-hybrid-native-authoring-hosted-community.md), and the root [product glossary](../CONTEXT.md). Hosted identity, tenant content, commerce, messaging, analytics, and moderation belong to the hosted boundary, not this native runtime.
+
 ## Remaining implementation gaps
 
 - Effect controls beyond trims, cuts, zooms, markers, annotations, and export readiness.
