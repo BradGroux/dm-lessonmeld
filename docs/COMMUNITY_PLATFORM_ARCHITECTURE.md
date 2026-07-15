@@ -245,7 +245,7 @@ The dependency-wired implementation backlog is maintained in [Community Platform
 
 ## Decisions deferred to issue-backed work
 
-- Hosted repository name, runtime language/framework, cloud, region, and deployment platform.
+- Hosted repository name, runtime language/framework, cloud, region, and deployment platform. [ADR 0002](adr/0002-hosted-community-runtime-and-deployment-baseline.md) records the proposed baseline pending explicit approval in issue #288.
 - Specific identity, payment, email, object storage, live video, analytics, AI, and push providers.
 - Pricing, legal entity/merchant model, tax handling, refund policy, and mobile in-app purchase scope.
 - Exact default retention periods and launch jurisdictions.

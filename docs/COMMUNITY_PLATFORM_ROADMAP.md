@@ -99,4 +99,4 @@ A parent closes only when:
 
 ## Current frontier
 
-The only implementation frontier is `237A`, and it is intentionally blocked on explicit approval to create the separate hosted repository and choose a runtime/deployment baseline. Documentation and tracker wiring can complete without that approval; hosted implementation cannot.
+The only implementation frontier is `237A`, and it is intentionally blocked on explicit approval to create the separate hosted repository and choose a runtime/deployment baseline. [ADR 0002](adr/0002-hosted-community-runtime-and-deployment-baseline.md) records the proposed baseline and exact approval surface. Documentation and tracker wiring can complete without that approval; hosted implementation cannot.
