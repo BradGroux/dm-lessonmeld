@@ -226,6 +226,8 @@ The first hosted implementation should be split into reviewable tracer bullets:
 
 No production dependency or vendor contract is approved by this document. Each codebase bootstrap or vendor selection remains a scoped, reviewed issue with operational cost, exit path, data handling, and failure-mode evidence.
 
+The dependency-wired implementation backlog is maintained in [Community Platform Delivery Map](COMMUNITY_PLATFORM_ROADMAP.md). Work starts only from its current frontier.
+
 ## Primary risks and controls
 
 | Risk | Control |
