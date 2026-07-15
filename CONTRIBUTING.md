@@ -55,9 +55,11 @@ ruby -c Casks/dm-lessonmeld.rb
 
 ## Product Guardrails
 
-- Keep normal operation local-only.
-- Do not add telemetry, analytics, accounts, or hosted processing.
-- Do not add production dependencies without a strong reason.
+- Keep native normal operation local-only and fully useful without an account.
+- Do not add native telemetry, implicit cloud sync, background media upload, or hosted processing.
+- Hosted community work follows `docs/COMMUNITY_PLATFORM_ARCHITECTURE.md` and belongs in the approved hosted codebase. This repository owns only the explicit, metadata-safe Publication contract and client boundary.
+- Do not mix hosted service dependencies, credentials, tenant state, or provider SDKs into the native process.
+- Do not add production dependencies without explicit approval and a strong reason.
 - Do not expose media paths, transcripts, or sensitive project data in agent output by default.
 - Keep macOS permissions contextual and understandable.
 
