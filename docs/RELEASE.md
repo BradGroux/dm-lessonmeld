@@ -260,6 +260,8 @@ This repository keeps a mirrored cask at:
 Casks/dm-lessonmeld.rb
 ```
 
+Normal Homebrew uninstall and upgrade operations quit the running app before replacing it. `brew uninstall --zap dm-lessonmeld` additionally removes app-owned preferences, caches, saved window state, local transcription models, and config backups under `~/Library/Application Support/DMLessonMeld`. It does not remove user `.dmlm` lesson projects stored elsewhere.
+
 Before tagging a cask-backed release, update the mirrored cask with the release version. After the GitHub Release is published, verify the mirrored cask against the downloaded release zip before updating the public tap. The current cask installs the zip artifact, so hash the zip unless the cask is intentionally switched to the DMG artifact:
 
 ```sh
