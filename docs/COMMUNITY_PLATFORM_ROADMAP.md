@@ -25,7 +25,7 @@ Stable keys are used while issues are created. After creation, tracker issue num
 
 | Issue / key | Parent | Phase | Ticket | What it delivers | Blocked by |
 | --- | --- | --- | --- | --- | --- |
-| [#288](https://github.com/BradGroux/dm-lessonmeld/issues/288)<br>`237A` | #237 | 0 | Bootstrap the hosted community repository and delivery baseline | A separately deployed hello-tenant path with environments, migrations, rollback, health, CI, secrets boundary, and restore smoke | Explicit approval for repository creation and runtime/deployment baseline |
+| [#288](https://github.com/BradGroux/dm-lessonmeld/issues/288)<br>`237A` | #237 | 0 | Bootstrap the hosted community repository and delivery baseline | A separately deployed hello-tenant path with environments, migrations, rollback, health, CI, secrets boundary, and restore smoke | Brad completing GitHub sign-in in the handed-off Render tab for approved staging |
 | [#289](https://github.com/BradGroux/dm-lessonmeld/issues/289)<br>`237B` | #237 | 0 | Prove tenant isolation, authorization, audit, and outbox end to end | Two tenants exercise one protected resource with deny-by-default policy, cross-tenant attack tests, immutable audit, and transactional domain event | 237A |
 | [#290](https://github.com/BradGroux/dm-lessonmeld/issues/290)<br>`222A` | #222 | 0 | Invite an identity into a tenant Member and editable Profile | An invited person authenticates externally, accepts membership, manages a privacy-safe profile, and can leave or be suspended | 237A, 237B |
 | [#291](https://github.com/BradGroux/dm-lessonmeld/issues/291)<br>`237C` | #237 | 0 | Add secure sessions, MFA policy, revocation, and support access | Members manage sessions, tenant admins require provider MFA, and reasoned time-bounded support access is separately audited | 237B, 222A |
@@ -99,4 +99,6 @@ A parent closes only when:
 
 ## Current frontier
 
-The only implementation frontier is `237A`, and it is intentionally blocked on explicit approval to create the separate hosted repository and choose a runtime/deployment baseline. [ADR 0002](adr/0002-hosted-community-runtime-and-deployment-baseline.md) records the proposed baseline and exact approval surface. Documentation and tracker wiring can complete without that approval; hosted implementation cannot.
+The only implementation frontier is [Bootstrap the hosted community repository and delivery baseline](https://github.com/BradGroux/dm-lessonmeld/issues/288) (`237A`). Its accepted repository/runtime baseline and merged hosted scaffold are complete, but the issue remains open for authorized Render staging, live route and browser accessibility, failed-readiness traffic-preservation, managed recovery, secret-boundary, and workspace-access evidence. The approved deployment is blocked only on Brad completing GitHub sign-in in the handed-off Render tab.
+
+No other tracer is ready. [Prove tenant isolation, authorization, audit, and outbox end to end](https://github.com/BradGroux/dm-lessonmeld/issues/289) (`237B`) is the contingent next issue after the current frontier closes. [ADR 0002](adr/0002-hosted-community-runtime-and-deployment-baseline.md) records the accepted baseline and remaining evidence gates.
