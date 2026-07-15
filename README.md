@@ -29,6 +29,7 @@ It records lessons into local `.dmlm` project bundles, lets you review and annot
 - [Usage guide](docs/USAGE.md)
 - [Architecture notes](docs/ARCHITECTURE.md)
 - [Community platform architecture](docs/COMMUNITY_PLATFORM_ARCHITECTURE.md)
+- [Community platform delivery map](docs/COMMUNITY_PLATFORM_ROADMAP.md)
 - [Release guide](docs/RELEASE.md)
 - [Capture device QA](docs/CAPTURE_DEVICE_QA.md)
 - [Codebase audit](docs/CODEBASE_AUDIT.md)
