@@ -1,0 +1,116 @@
+name: Publish staged release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Existing draft release tag to verify and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-release:
+    name: Verify cask and publish release
+    runs-on: macos-15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout current default branch and tag history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify staged release provenance
+        id: release
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          git check-ref-format "refs/tags/${TAG_NAME}" >/dev/null 2>&1 \
+            || { echo "error: invalid release tag ${TAG_NAME}." >&2; exit 1; }
+          tagged_revision="$(git rev-parse --verify "refs/tags/${TAG_NAME}^{commit}")"
+          case "${TAG_NAME}" in
+            *-preview.*) release_mode="unsigned-preview" ;;
+            *) release_mode="signed" ;;
+          esac
+
+          scripts/verify-release-provenance.sh \
+            "${tagged_revision}" \
+            "${DEFAULT_BRANCH}" \
+            "${TAG_NAME}" \
+            Packaging/Info.plist \
+            "${release_mode}" \
+            | tee "${RUNNER_TEMP}/release-provenance"
+          cat "${RUNNER_TEMP}/release-provenance" >> "${GITHUB_OUTPUT}"
+          git show "refs/tags/${TAG_NAME}:Packaging/Info.plist" > "${RUNNER_TEMP}/release-Info.plist"
+
+          is_draft="$(gh release view "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft)"
+          is_prerelease="$(gh release view "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" --json isPrerelease --jq .isPrerelease)"
+          [[ "${is_draft}" == "true" ]] \
+            || { echo "error: release ${TAG_NAME} is not a draft." >&2; exit 1; }
+          if [[ "${release_mode}" == "unsigned-preview" ]]; then
+            [[ "${is_prerelease}" == "true" ]] \
+              || { echo "error: unsigned preview ${TAG_NAME} is not marked as a prerelease." >&2; exit 1; }
+          else
+            [[ "${is_prerelease}" == "false" ]] \
+              || { echo "error: signed release ${TAG_NAME} is unexpectedly marked as a prerelease." >&2; exit 1; }
+          fi
+
+      - name: Download exact staged artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          mkdir -p release-artifacts
+          gh release download "${TAG_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir release-artifacts
+
+      - name: Verify checksums and current cask
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          cd release-artifacts
+          shasum -a 256 -c "dm-lessonmeld-${VERSION}-macos.dmg.sha256"
+          shasum -a 256 -c "dm-lessonmeld-${VERSION}-macos.zip.sha256"
+          cd ..
+
+          ruby -c Casks/dm-lessonmeld.rb
+          brew style Casks/dm-lessonmeld.rb
+          scripts/verify-cask-release.sh \
+            "release-artifacts/dm-lessonmeld-${VERSION}-macos.zip" \
+            Casks/dm-lessonmeld.rb \
+            "${RUNNER_TEMP}/release-Info.plist"
+
+      - name: Publish verified draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.release.outputs.latest }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+          RELEASE_MODE: ${{ steps.release.outputs.mode }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          release_flags=()
+          case "${RELEASE_MODE}:${PRERELEASE}:${LATEST}" in
+            signed:0:1)
+              release_flags+=(--prerelease=false --latest)
+              ;;
+            unsigned-preview:1:0)
+              release_flags+=(--prerelease --latest=false)
+              ;;
+            *)
+              echo "error: invalid verified release publication policy ${RELEASE_MODE}:${PRERELEASE}:${LATEST}." >&2
+              exit 1
+              ;;
+          esac
+
+          gh release edit "${TAG_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft=false \
+            "${release_flags[@]}"

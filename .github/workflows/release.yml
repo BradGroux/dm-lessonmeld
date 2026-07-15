@@ -88,6 +88,8 @@ jobs:
           bash -n scripts/package-dmg.sh
           bash -n scripts/package-release.sh
           bash -n scripts/real-media-fixture-smoke.sh
+          bash -n scripts/test-cask-release.sh
+          bash -n scripts/test-release-workflow-gates.sh
           bash -n scripts/test-release-signing-cleanup.sh
           bash -n scripts/test-release-publication.sh
           bash -n scripts/test-release-provenance.sh
@@ -339,8 +341,8 @@ jobs:
           path: .build/release-artifacts/
           if-no-files-found: error
 
-  publish-release:
-    name: Publish release
+  stage-release:
+    name: Stage draft release
     runs-on: macos-15
     needs: build-release
     permissions:
@@ -359,7 +361,7 @@ jobs:
           shasum -a 256 -c "dm-lessonmeld-${{ needs.build-release.outputs.version }}-macos.dmg.sha256"
           shasum -a 256 -c "dm-lessonmeld-${{ needs.build-release.outputs.version }}-macos.zip.sha256"
 
-      - name: Create GitHub release
+      - name: Create draft GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           LATEST: ${{ needs.build-release.outputs.latest }}
@@ -371,7 +373,7 @@ jobs:
           case "${RELEASE_MODE}:${PRERELEASE}:${LATEST}" in
             signed:0:1) ;;
             unsigned-preview:1:0)
-              release_flags+=(--prerelease --latest=false)
+              release_flags+=(--prerelease)
               ;;
             *)
               echo "error: invalid verified release publication policy ${RELEASE_MODE}:${PRERELEASE}:${LATEST}." >&2
@@ -387,4 +389,6 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --title "dm-lessonmeld ${GITHUB_REF_NAME#v}" \
             --notes-file release-artifacts/release-notes.md \
+            --draft \
+            --latest=false \
             "${release_flags[@]}"

@@ -2,9 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CASK_PATH="${ROOT_DIR}/Casks/dm-lessonmeld.rb"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${ROOT_DIR}/Packaging/Info.plist")"
 ZIP_PATH="${1:-}"
+CASK_PATH="${2:-${ROOT_DIR}/Casks/dm-lessonmeld.rb}"
+INFO_PLIST="${3:-${ROOT_DIR}/Packaging/Info.plist}"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${INFO_PLIST}")"
 
 if [[ ! -f "${CASK_PATH}" ]]; then
   echo "error: cask not found: ${CASK_PATH}" >&2
@@ -15,7 +16,12 @@ cask_version="$(ruby -e 'text = File.read(ARGV.fetch(0)); match = text.match(/^\
 cask_sha="$(ruby -e 'text = File.read(ARGV.fetch(0)); match = text.match(/^\s*sha256 "([^"]+)"/); abort("missing cask sha256") unless match; puts match[1]' "${CASK_PATH}")"
 
 if [[ "${cask_version}" != "${VERSION}" ]]; then
-  echo "error: cask version ${cask_version} does not match Info.plist version ${VERSION}" >&2
+  echo "error: cask version ${cask_version} does not match release version ${VERSION}" >&2
+  exit 1
+fi
+
+if [[ ! "${cask_sha}" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "error: cask sha256 is not a lowercase 64-character SHA256 digest" >&2
   exit 1
 fi
 
