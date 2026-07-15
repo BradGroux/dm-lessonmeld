@@ -59,15 +59,19 @@ jobs:
           bash -n scripts/test-release-publication.sh
           bash -n scripts/test-release-provenance.sh
           bash -n scripts/test-release-signing-cleanup.sh
+          bash -n scripts/test-cask-release.sh
+          bash -n scripts/test-release-workflow-gates.sh
           bash -n scripts/verify-release-publication.sh
           bash -n scripts/verify-release-provenance.sh
           bash -n scripts/verify-cask-release.sh
           bash -n scripts/verify-dmg.sh
           ruby -c Casks/dm-lessonmeld.rb
           brew style Casks/dm-lessonmeld.rb
+          scripts/test-cask-release.sh
           scripts/test-release-publication.sh
           scripts/test-release-provenance.sh
           scripts/test-release-signing-cleanup.sh
+          scripts/test-release-workflow-gates.sh
           scripts/verify-cask-release.sh
           scripts/build-app.sh release >/dev/null
           codesign --verify --strict --deep "Packaging/Digital Meld LessonMeld.app"

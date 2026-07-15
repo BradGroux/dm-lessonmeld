@@ -123,7 +123,7 @@ The tag-driven workflow is:
 .github/workflows/release.yml
 ```
 
-To publish a signed public release, update `Packaging/Info.plist`, commit the change, then push its exact version tag:
+To stage a signed public release, update `Packaging/Info.plist`, commit the change, then push its exact version tag:
 
 ```sh
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
@@ -140,7 +140,7 @@ git tag "v${VERSION}-preview.${PREVIEW_NUMBER}"
 git push origin "v${VERSION}-preview.${PREVIEW_NUMBER}"
 ```
 
-Preview numbers start at 1 and must increase for another preview of the same bundle version. The workflow marks every unsigned preview as a GitHub prerelease and passes `--latest=false`, so it cannot replace the current public release.
+Preview numbers start at 1 and must increase for another preview of the same bundle version. The tag workflow builds the exact release bytes and creates a private draft release. It does not make the release public.
 
 Before any secret-bearing job starts, the workflow fails unless all of these are true:
 
@@ -161,7 +161,21 @@ Configure these repository controls before the next release:
 5. Create an active tag ruleset for `refs/tags/v*` that restricts tag creation, update, and deletion to the approved maintainer or release automation path. Keep bypass access as narrow as recovery requires.
 6. Inspect the environment and tag ruleset through the GitHub API before a release. Do not treat a successful workflow-file review as proof that the repository controls exist.
 
-The provenance job runs without an environment or release secrets. Only after it succeeds can GitHub request approval for the secret-bearing `build-release` job. Publishing still depends on the verified artifacts produced by that job.
+The provenance job runs without an environment or release secrets. Only after it succeeds can GitHub request approval for the secret-bearing `build-release` job. The resulting draft keeps the exact signed or preview artifacts stable while the cask is updated and reviewed.
+
+### Publish a staged draft
+
+After the tag workflow succeeds:
+
+1. Download the staged ZIP checksum from the draft release.
+2. Update `Casks/dm-lessonmeld.rb` to the staged artifact version and exact ZIP SHA256.
+3. Run `ruby -c Casks/dm-lessonmeld.rb`, `brew style Casks/dm-lessonmeld.rb`, and `scripts/verify-cask-release.sh PATH_TO_STAGED_ZIP` locally.
+4. Merge the cask update to the default branch.
+5. Run the `Publish staged release` workflow manually with the existing draft tag.
+
+The publish workflow revalidates tag provenance, confirms the release is still a draft, downloads the exact staged assets, verifies both checksum sidecars, runs Ruby and Homebrew style checks, and compares the current cask version and SHA against the staged ZIP. Only then does it clear the draft flag. Signed releases become latest; unsigned previews remain prereleases with latest explicitly disabled.
+
+Do not rebuild the ZIP merely to update the cask SHA. Developer ID secure timestamps and notarization can change rebuilt bytes. The cask must match the exact staged artifact that the publish workflow will expose.
 
 ### Rejected-release recovery
 
@@ -170,6 +184,8 @@ The provenance job runs without an environment or release secrets. Only after it
 - If environment approval is rejected, leave the run rejected until the reviewer concern is resolved. A retry must still pass provenance and receive a fresh environment decision.
 - If environment secrets are incomplete, repair their names or values in the protected environment. Do not copy them back to repository scope as a workaround.
 - If any signing credential may have been exposed, stop the release. Credential rotation is an explicit maintainer action and must not be performed as routine workflow recovery.
+- If staged-asset or cask verification fails, leave the release as a draft, correct the cask on the default branch, and rerun `Publish staged release`.
+- If a staged artifact itself is wrong, do not replace bytes under the same public tag. Discard the draft and prepare a new reviewed version or preview number.
 
 Set the release mode before pushing the tag:
 
@@ -193,14 +209,16 @@ The workflow runs:
 - SHA256 generation for DMG and zip artifacts
 - SHA256 verification before publishing downloaded release artifacts
 - mounted DMG content validation
-- cask version checks
+- cask version and exact staged ZIP SHA checks before a draft can become public
 
-It then creates a GitHub Release and attaches:
+The tag workflow creates a draft GitHub Release and attaches:
 
 - `dm-lessonmeld-VERSION-macos.dmg`
 - `dm-lessonmeld-VERSION-macos.dmg.sha256`
 - `dm-lessonmeld-VERSION-macos.zip`
 - `dm-lessonmeld-VERSION-macos.zip.sha256`
+
+The separate `.github/workflows/publish-release.yml` workflow publishes that draft only after the default-branch cask matches the staged ZIP.
 
 ## Signing secrets
 
