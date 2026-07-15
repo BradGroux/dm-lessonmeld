@@ -4,7 +4,7 @@
 
 It records lessons into local `.dmlm` project bundles, lets you review and annotate them, renders teaching-ready videos, and packages exports for course workflows without accounts, telemetry, analytics, or cloud processing.
 
-> Status: v0.0.5 source baseline. The core app, CLI, project bundle, recording, annotation, render, export, settings, packaging foundations, local capture smoke harness, and package-first connector exports are in place. Tagged release automation is configured for Developer ID signed and Apple-notarized DMG and zip artifacts by default; unsigned developer previews require explicit release-mode opt-in.
+> Status: Active pre-1.0 development. The native app, CLI, project bundle, recording, annotation, render, export, settings, release packaging, local capture smoke harness, and package-first connector exports are in place. Tagged release automation stages Developer ID signed and Apple-notarized DMG and zip artifacts by default; unsigned developer previews require explicit release-mode opt-in.
 
 ## Features
 
