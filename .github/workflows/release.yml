@@ -89,6 +89,7 @@ jobs:
           bash -n scripts/package-release.sh
           bash -n scripts/real-media-fixture-smoke.sh
           bash -n scripts/test-cask-release.sh
+          bash -n scripts/test-cli-packaging.sh
           bash -n scripts/test-release-workflow-gates.sh
           bash -n scripts/test-release-signing-cleanup.sh
           bash -n scripts/test-release-publication.sh

@@ -55,6 +55,8 @@ Run the app-level keyboard, VoiceOver, layout, capture-device, and real-media fi
 
 ```sh
 scripts/build-app.sh release
+test -x "Packaging/Digital Meld LessonMeld.app/Contents/Resources/bin/dmlesson"
+"Packaging/Digital Meld LessonMeld.app/Contents/Resources/bin/dmlesson" --help
 ```
 
 Output:

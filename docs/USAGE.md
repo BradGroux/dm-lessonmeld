@@ -267,6 +267,10 @@ Text annotations use a focused text editor. Press **Enter** to commit, **Shift+E
 
 Use `dmlesson` for automation and smoke tests:
 
+- Homebrew cask releases starting with v0.0.13 install `dmlesson` on `PATH` with the app.
+- Direct release archives contain the executable at `Digital Meld LessonMeld.app/Contents/Resources/bin/dmlesson`.
+- Source checkouts can continue to use `swift run dmlesson`.
+
 ```sh
 swift run dmlesson --help
 swift run dmlesson permissions status --json
@@ -300,7 +304,7 @@ Agent workflow JSON is available for `openclaw`, `codex`, and `veritas-kanban` t
 - `dmlesson_agent_workflows`
 - `dmlesson_transcript_model_status`
 
-The wrapper defaults to `.build/debug/dmlesson` when it exists, falls back to `swift run dmlesson`, and accepts `DMLESSON_CLI=/path/to/dmlesson` for packaged binaries. It does not expose recording or export execution tools.
+The wrapper defaults to `.build/debug/dmlesson` when it exists, falls back to `swift run dmlesson`, and accepts `DMLESSON_CLI="/Applications/Digital Meld LessonMeld.app/Contents/Resources/bin/dmlesson"` for direct packaged installs. Homebrew cask installs starting with v0.0.13 can use `DMLESSON_CLI="$(command -v dmlesson)"`. It does not expose recording or export execution tools.
 
 MCP responses redact media paths and transcript references unless the host sets `DMLESSON_MCP_ALLOW_DISCLOSURE=1` and the tool call explicitly requests those fields. Passing a settings file to `dmlesson_agent_manifest` also requires that host policy because saved defaults may enable path disclosure. The wrapper removes absolute local paths from successful structured content and CLI error text at the MCP response boundary. `DMLESSON_MCP_TIMEOUT` controls subprocess timeouts, and `DMLESSON_MCP_MAX_OUTPUT_BYTES` caps returned stdout/stderr.
 
