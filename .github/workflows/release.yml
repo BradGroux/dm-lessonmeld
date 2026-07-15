@@ -83,10 +83,12 @@ jobs:
           plutil -lint Packaging/Entitlements.plist
           bash -n scripts/build-app.sh
           bash -n scripts/capture-device-matrix-smoke.sh
+          bash -n scripts/cleanup-release-signing-material.sh
           bash -n scripts/package-app.sh
           bash -n scripts/package-dmg.sh
           bash -n scripts/package-release.sh
           bash -n scripts/real-media-fixture-smoke.sh
+          bash -n scripts/test-release-signing-cleanup.sh
           bash -n scripts/test-release-publication.sh
           bash -n scripts/test-release-provenance.sh
           bash -n scripts/verify-release-publication.sh
@@ -157,17 +159,28 @@ jobs:
           APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
           APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
         run: |
+          umask 077
           certificate_path="${RUNNER_TEMP}/developer-id.p12"
           keychain_path="${RUNNER_TEMP}/app-signing.keychain-db"
+          original_keychains_path="${RUNNER_TEMP}/original-user-keychains.txt"
           keychain_password="$(uuidgen)"
 
+          security list-keychains -d user \
+            | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//' \
+            > "${original_keychains_path}"
+
           echo "${APPLE_DEVELOPER_ID_CERTIFICATE_BASE64}" | base64 --decode > "${certificate_path}"
+          chmod 600 "${certificate_path}"
 
           security create-keychain -p "${keychain_password}" "${keychain_path}"
           security set-keychain-settings -lut 21600 "${keychain_path}"
           security unlock-keychain -p "${keychain_password}" "${keychain_path}"
           security import "${certificate_path}" -P "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD}" -t cert -f pkcs12 -k "${keychain_path}" -T /usr/bin/codesign
-          security list-keychains -d user -s "${keychain_path}"
+          active_keychains=("${keychain_path}")
+          while IFS= read -r original_keychain; do
+            [[ -n "${original_keychain}" ]] && active_keychains+=("${original_keychain}")
+          done < "${original_keychains_path}"
+          security list-keychains -d user -s "${active_keychains[@]}"
           security set-key-partition-list -S apple-tool:,apple: -s -k "${keychain_password}" "${keychain_path}"
           security find-identity -v -p codesigning "${keychain_path}"
 
@@ -177,10 +190,11 @@ jobs:
         env:
           APPLE_NOTARIZATION_KEY_BASE64: ${{ secrets.APPLE_NOTARIZATION_KEY_BASE64 }}
         run: |
+          umask 077
           notarization_key_path="${RUNNER_TEMP}/notarization-key.p8"
+          echo "key_path=${notarization_key_path}" >> "${GITHUB_OUTPUT}"
           echo "${APPLE_NOTARIZATION_KEY_BASE64}" | base64 --decode > "${notarization_key_path}"
           chmod 600 "${notarization_key_path}"
-          echo "key_path=${notarization_key_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Package app
         id: package
@@ -244,14 +258,19 @@ jobs:
           cp "${zip_path}" .build/release-artifacts/
           cp "${zip_path}.sha256" .build/release-artifacts/
 
-      - name: Remove notarization material
+      - name: Remove release signing material
         if: always() && steps.signing.outputs.configured == '1'
         env:
-          NOTARIZE_KEY_PATH: ${{ steps.notarization.outputs.key_path }}
+          CERTIFICATE_PATH: ${{ runner.temp }}/developer-id.p12
+          KEYCHAIN_PATH: ${{ runner.temp }}/app-signing.keychain-db
+          NOTARIZE_KEY_PATH: ${{ runner.temp }}/notarization-key.p8
+          ORIGINAL_KEYCHAINS_PATH: ${{ runner.temp }}/original-user-keychains.txt
         run: |
-          if [[ -n "${NOTARIZE_KEY_PATH:-}" ]]; then
-            rm -f "${NOTARIZE_KEY_PATH}"
-          fi
+          scripts/cleanup-release-signing-material.sh \
+            "${CERTIFICATE_PATH:-}" \
+            "${KEYCHAIN_PATH:-}" \
+            "${ORIGINAL_KEYCHAINS_PATH:-}" \
+            "${NOTARIZE_KEY_PATH:-}"
 
       - name: Write release notes
         env:

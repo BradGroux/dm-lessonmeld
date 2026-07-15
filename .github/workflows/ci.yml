@@ -46,6 +46,7 @@ jobs:
           plutil -lint Packaging/Info.plist
           plutil -lint Packaging/Entitlements.plist
           bash -n scripts/cli-smoke-tests.sh
+          bash -n scripts/cleanup-release-signing-material.sh
           bash -n scripts/capture-device-matrix-smoke.sh
           swiftc -parse-as-library -typecheck scripts/fixtures/WindowCaptureFixture.swift
           bash -n scripts/real-media-fixture-smoke.sh
@@ -57,6 +58,7 @@ jobs:
           bash -n scripts/package-release.sh
           bash -n scripts/test-release-publication.sh
           bash -n scripts/test-release-provenance.sh
+          bash -n scripts/test-release-signing-cleanup.sh
           bash -n scripts/verify-release-publication.sh
           bash -n scripts/verify-release-provenance.sh
           bash -n scripts/verify-cask-release.sh
@@ -65,6 +67,7 @@ jobs:
           brew style Casks/dm-lessonmeld.rb
           scripts/test-release-publication.sh
           scripts/test-release-provenance.sh
+          scripts/test-release-signing-cleanup.sh
           scripts/verify-cask-release.sh
           scripts/build-app.sh release >/dev/null
           codesign --verify --strict --deep "Packaging/Digital Meld LessonMeld.app"
