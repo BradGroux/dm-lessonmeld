@@ -10,6 +10,8 @@ import Foundation
 enum RenderedUIRegressionHarness {
     private static let loadDelayNanoseconds: UInt64 = 1_000_000_000
     private static let settleDelayNanoseconds: UInt64 = 1_000_000_000
+    private static let previewReadinessPollDelayNanoseconds: UInt64 = 50_000_000
+    private static let previewReadinessPollLimit = 100
 
     static func run(
         configuration: RenderedUIRegressionLaunchConfiguration,
@@ -43,6 +45,7 @@ enum RenderedUIRegressionHarness {
 
             try await Task.sleep(nanoseconds: loadDelayNanoseconds)
             resizeMainWindow(for: configuration.fixtureID)
+            try await waitForPreviewDuration(model)
             model.seek(to: 0.5)
             NSApplication.shared.activate(ignoringOtherApps: true)
             try await Task.sleep(nanoseconds: settleDelayNanoseconds)
@@ -53,6 +56,16 @@ enum RenderedUIRegressionHarness {
             writeHarnessFailure(error, configuration: configuration)
             Foundation.exit(EXIT_FAILURE)
         }
+    }
+
+    private static func waitForPreviewDuration(_ model: ProjectEditorModel) async throws {
+        for _ in 0..<previewReadinessPollLimit {
+            if model.previewDurationSeconds > 0 {
+                return
+            }
+            try await Task.sleep(nanoseconds: previewReadinessPollDelayNanoseconds)
+        }
+        throw RenderedUIRegressionError.previewDurationTimedOut
     }
 
     private static func resizeMainWindow(for fixtureID: String) {
@@ -317,6 +330,7 @@ private struct RenderedUIScreenshotArtifact {
 private enum RenderedUIRegressionError: LocalizedError {
     case unknownFixture(String)
     case auditFailed(Int)
+    case previewDurationTimedOut
     case videoWriterFailed(String)
     case pixelBufferCreationFailed(CVReturn)
 
@@ -324,6 +338,7 @@ private enum RenderedUIRegressionError: LocalizedError {
         switch self {
         case .unknownFixture(let fixture): "Unknown rendered UI fixture: \(fixture)"
         case .auditFailed(let count): "Rendered UI audit reported \(count) finding(s)."
+        case .previewDurationTimedOut: "Rendered UI preview duration did not load within 5 seconds."
         case .videoWriterFailed(let message): "Synthetic video writer failed: \(message)"
         case .pixelBufferCreationFailed(let status): "Synthetic video pixel buffer failed with status \(status)."
         }
