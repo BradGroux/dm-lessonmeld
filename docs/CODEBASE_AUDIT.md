@@ -43,7 +43,7 @@ This audit covers the Swift app, shared core, CLI, packaging, release workflow, 
 ## Product And Expansion Backlog
 
 - Keep the required Developer ID signing and App Store Connect notarization secrets configured before tagging public releases.
-- Keep release notes explicit about signing status; unsigned tags are allowed only when the repository release mode is intentionally set to `unsigned-preview`.
+- Keep release notes explicit about signing status; unsigned tags are allowed only in `unsigned-preview` mode with the `vVERSION-preview.N` form and publish only as non-latest prereleases.
 - Update the repo cask and public tap cask together after the next signed release, and decide whether to keep zip-backed cask installs or switch the cask to the DMG artifact.
 - Keep release workflow permissions under review as GitHub Actions evolves; current build/package verification and publish permissions are separated.
 - Add local transcription runtime execution and model download/install assistance.

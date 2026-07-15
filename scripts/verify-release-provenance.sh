@@ -5,6 +5,8 @@ tagged_revision="${1:-}"
 default_branch="${2:-}"
 tag_name="${3:-}"
 info_plist="${4:-Packaging/Info.plist}"
+release_mode="${5:-signed}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 fail() {
   echo "release provenance verification failed: $*" >&2
@@ -33,13 +35,13 @@ git show-ref --verify --quiet "${default_ref}" \
 git merge-base --is-ancestor "${tagged_commit}" "${default_ref}" \
   || fail "tagged commit is not reachable from origin/${default_branch}"
 
-python3 - "${tagged_commit}" "${info_plist}" "${tag_name}" <<'PY'
+metadata_output="$(python3 - "${tagged_commit}" "${info_plist}" <<'PY'
 import plistlib
 import re
 import subprocess
 import sys
 
-commit, plist_path, tag_name = sys.argv[1:]
+commit, plist_path = sys.argv[1:]
 
 try:
     payload = subprocess.check_output(
@@ -62,12 +64,6 @@ if not isinstance(version, str) or not version:
 if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
     print("release provenance verification failed: bundle version is invalid", file=sys.stderr)
     raise SystemExit(1)
-if tag_name != f"v{version}":
-    print(
-        f"release provenance verification failed: bundle version {version} does not match tag {tag_name}",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
 if not isinstance(build, str) or re.fullmatch(r"[1-9][0-9]*(?:\.[0-9]+){0,2}", build) is None:
     print("release provenance verification failed: bundle build metadata is invalid", file=sys.stderr)
     raise SystemExit(1)
@@ -75,3 +71,7 @@ if not isinstance(build, str) or re.fullmatch(r"[1-9][0-9]*(?:\.[0-9]+){0,2}", b
 print(f"version={version}")
 print(f"build={build}")
 PY
+)"
+printf '%s\n' "${metadata_output}"
+version="$(printf '%s\n' "${metadata_output}" | awk -F= '/^version=/{print $2}')"
+"${script_dir}/verify-release-publication.sh" "${release_mode}" "${tag_name}" "${version}"

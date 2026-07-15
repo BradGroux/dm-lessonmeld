@@ -126,7 +126,7 @@ All optional files should be referenced by the manifest or known sidecar names. 
 - MIT licensed.
 - Public source repo.
 - Homebrew Cask distribution.
-- Developer-preview builds can be ad-hoc signed only when the release mode is explicitly set to `unsigned-preview`.
+- Developer-preview builds can be ad-hoc signed only when the release mode is explicitly set to `unsigned-preview`; their tags use `vVERSION-preview.N` and publish only as non-latest prereleases.
 - Broad binary distribution uses Developer ID signing, Apple notarization, and a DMG-first install path.
 - Release artifacts should include DMG, zip, and SHA256 checksums.
 
