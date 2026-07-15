@@ -62,15 +62,18 @@ jobs:
           bash -n scripts/test-cask-release.sh
           bash -n scripts/test-cask-lifecycle.sh
           bash -n scripts/test-cli-packaging.sh
+          bash -n scripts/test-capture-release-gate.sh
           bash -n scripts/test-release-workflow-gates.sh
           bash -n scripts/verify-release-publication.sh
           bash -n scripts/verify-release-provenance.sh
           bash -n scripts/verify-cask-release.sh
+          bash -n scripts/verify-capture-release-gate.sh
           bash -n scripts/verify-dmg.sh
           ruby -c Casks/dm-lessonmeld.rb
           brew style Casks/dm-lessonmeld.rb
           scripts/test-cask-lifecycle.sh
           scripts/test-cask-release.sh
+          scripts/test-capture-release-gate.sh
           scripts/test-release-publication.sh
           scripts/test-release-provenance.sh
           scripts/test-release-signing-cleanup.sh

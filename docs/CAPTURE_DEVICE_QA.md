@@ -40,6 +40,27 @@ scripts/real-media-fixture-smoke.sh --video /path/to/sample.mp4 --project /path/
 
 Use `--video` for raw MP4/MOV files and `--project` for existing `.dmlm` bundles. The harness builds the CLI, copies raw videos into disposable lesson bundles, runs project inspect and render-plan checks, and optionally exports final MP4 files with `--render`.
 
+## Tracked Release Gate
+
+Every public release needs a successful `Capture release gate` workflow run for the exact commit being tagged. Complete it before creating the tag: the tag workflow refuses to start signing when no retained successful gate matches the tagged commit. Run the full device matrix, a real-media render, and every manual matrix row first. Keep the private logs and media local, then fingerprint the two summary files:
+
+```sh
+CAPTURE_SUMMARY=/path/to/capture-smoke/summary.tsv
+REAL_MEDIA_SUMMARY=/path/to/real-media-smoke/summary.tsv
+shasum -a 256 "${CAPTURE_SUMMARY}"
+shasum -a 256 "${REAL_MEDIA_SUMMARY}"
+git rev-parse HEAD
+```
+
+Dispatch `.github/workflows/capture-release-gate.yml` with:
+
+- The exact 40-character commit SHA.
+- `passed` for the full capture-device matrix and its summary SHA-256.
+- `passed` for the real-media fixture render and its summary SHA-256.
+- `passed` for all manual rows, plus notes naming the macOS version, tested devices and fixtures, and the scenarios exercised.
+
+The workflow rejects failed results, malformed fingerprints, and commits outside the default branch. A successful run retains a metadata-only JSON artifact for 90 days. The artifact records the operator, commit, run ID, result statuses, summary fingerprints, and manual notes without uploading captured screen contents, media, or local paths. Record that workflow run ID; the staged-release publish workflow will reject any run that is unsuccessful, from another workflow, or tied to a different commit.
+
 ## Matrix
 
 | Area | Automated by harness | Expected artifact | Notes |
@@ -69,3 +90,4 @@ Use `--video` for raw MP4/MOV files and `--project` for existing `.dmlm` bundles
 - Keep captured artifacts local unless the content is safe to share.
 - Do not commit generated media or `.dmlm` smoke projects.
 - Do not commit real fixture media; commit only scripts, fixture notes, and anonymized failure summaries.
+- Do not upload capture or real-media logs to the release gate. Only the summary fingerprints and non-sensitive manual notes belong in the tracked artifact.

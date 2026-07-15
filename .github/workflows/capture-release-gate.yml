@@ -1,0 +1,137 @@
+name: Capture release gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Exact 40-character commit SHA tested for the release
+        required: true
+        type: string
+      capture_device_matrix_result:
+        description: Result from capture-device-matrix-smoke.sh --all
+        required: true
+        type: choice
+        options:
+          - passed
+          - failed
+      capture_summary_sha256:
+        description: SHA-256 of the capture matrix summary.tsv
+        required: true
+        type: string
+      real_media_result:
+        description: Result from real-media-fixture-smoke.sh --render
+        required: true
+        type: choice
+        options:
+          - passed
+          - failed
+      real_media_summary_sha256:
+        description: SHA-256 of the real-media summary.tsv
+        required: true
+        type: string
+      manual_checks_result:
+        description: Result for the manual rows in docs/CAPTURE_DEVICE_QA.md
+        required: true
+        type: choice
+        options:
+          - passed
+          - failed
+      manual_check_notes:
+        description: Devices, fixtures, OS version, and manual scenarios exercised
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  record-gate:
+    name: Record capture and real-media evidence
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout default branch history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate results and create evidence
+        env:
+          CAPTURE_RESULT: ${{ inputs.capture_device_matrix_result }}
+          CAPTURE_SUMMARY_SHA256: ${{ inputs.capture_summary_sha256 }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          MANUAL_CHECK_NOTES: ${{ inputs.manual_check_notes }}
+          MANUAL_RESULT: ${{ inputs.manual_checks_result }}
+          REAL_MEDIA_RESULT: ${{ inputs.real_media_result }}
+          REAL_MEDIA_SUMMARY_SHA256: ${{ inputs.real_media_summary_sha256 }}
+          RELEASE_REVISION: ${{ inputs.revision }}
+          RUN_ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          [[ "${WORKFLOW_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]] \
+            || { echo "error: capture release gate must run from ${DEFAULT_BRANCH}." >&2; exit 1; }
+          [[ "${RELEASE_REVISION}" =~ ^[0-9a-f]{40}$ ]] \
+            || { echo "error: revision must be a lowercase 40-character commit SHA." >&2; exit 1; }
+          git rev-parse --verify "${RELEASE_REVISION}^{commit}" >/dev/null
+          git merge-base --is-ancestor "${RELEASE_REVISION}" "origin/${DEFAULT_BRANCH}" \
+            || { echo "error: revision is not on ${DEFAULT_BRANCH}." >&2; exit 1; }
+
+          for result_name in CAPTURE_RESULT REAL_MEDIA_RESULT MANUAL_RESULT; do
+            [[ "${!result_name}" == "passed" ]] \
+              || { echo "error: ${result_name} must be passed." >&2; exit 1; }
+          done
+          for digest_name in CAPTURE_SUMMARY_SHA256 REAL_MEDIA_SUMMARY_SHA256; do
+            [[ "${!digest_name}" =~ ^[0-9a-f]{64}$ ]] \
+              || { echo "error: ${digest_name} must be a lowercase SHA-256." >&2; exit 1; }
+          done
+          [[ -n "${MANUAL_CHECK_NOTES//[[:space:]]/}" ]] \
+            || { echo "error: manual check notes are required." >&2; exit 1; }
+
+          export RECORDED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p capture-release-gate
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = {
+              "schema": "io.digitalmeld.dm-lessonmeld.capture-release-gate.v1",
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "revision": os.environ["RELEASE_REVISION"],
+              "workflowRunId": os.environ["RUN_ID"],
+              "recordedAt": os.environ["RECORDED_AT"],
+              "actor": os.environ["RUN_ACTOR"],
+              "results": {
+                  "captureDeviceMatrix": {
+                      "status": os.environ["CAPTURE_RESULT"],
+                      "summarySha256": os.environ["CAPTURE_SUMMARY_SHA256"],
+                  },
+                  "realMediaFixture": {
+                      "status": os.environ["REAL_MEDIA_RESULT"],
+                      "summarySha256": os.environ["REAL_MEDIA_SUMMARY_SHA256"],
+                  },
+                  "manualChecks": {
+                      "status": os.environ["MANUAL_RESULT"],
+                      "notes": os.environ["MANUAL_CHECK_NOTES"],
+                  },
+              },
+          }
+          output = Path("capture-release-gate/capture-release-gate.json")
+          output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+          scripts/verify-capture-release-gate.sh \
+            capture-release-gate/capture-release-gate.json \
+            "${RELEASE_REVISION}" \
+            "${GITHUB_REPOSITORY}" \
+            "${RUN_ID}"
+
+      - name: Upload tracked gate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: capture-release-gate-${{ github.run_id }}
+          path: capture-release-gate/capture-release-gate.json
+          if-no-files-found: error
+          retention-days: 90
