@@ -38,11 +38,14 @@ bash -n scripts/build-app.sh
 bash -n scripts/package-app.sh
 bash -n scripts/package-dmg.sh
 bash -n scripts/package-release.sh
+bash -n scripts/verify-release-publication.sh
 bash -n scripts/verify-cask-release.sh
 bash -n scripts/capture-device-matrix-smoke.sh
 bash -n scripts/real-media-fixture-smoke.sh
 ruby -c Casks/dm-lessonmeld.rb
 brew style Casks/dm-lessonmeld.rb
+scripts/test-release-publication.sh
+scripts/test-release-provenance.sh
 scripts/verify-cask-release.sh
 ```
 
@@ -120,7 +123,7 @@ The tag-driven workflow is:
 .github/workflows/release.yml
 ```
 
-To publish a release, update `Packaging/Info.plist`, commit the change, then push a matching version tag:
+To publish a signed public release, update `Packaging/Info.plist`, commit the change, then push its exact version tag:
 
 ```sh
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
@@ -128,10 +131,21 @@ git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```
 
+An unsigned developer preview must use a numbered preview tag for the same bundle version:
+
+```sh
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
+PREVIEW_NUMBER=1
+git tag "v${VERSION}-preview.${PREVIEW_NUMBER}"
+git push origin "v${VERSION}-preview.${PREVIEW_NUMBER}"
+```
+
+Preview numbers start at 1 and must increase for another preview of the same bundle version. The workflow marks every unsigned preview as a GitHub prerelease and passes `--latest=false`, so it cannot replace the current public release.
+
 Before any secret-bearing job starts, the workflow fails unless all of these are true:
 
 - The tagged commit is reachable from the repository's current default branch.
-- The tag exactly matches `v` plus `CFBundleShortVersionString`.
+- A signed tag exactly matches `v` plus `CFBundleShortVersionString`, or an unsigned-preview tag matches `vVERSION-preview.N` with `N` greater than zero.
 - `CFBundleVersion` is valid numeric build metadata.
 
 The `build-release` job is bound to the protected `release-signing` GitHub Environment. Configure that environment and the release-tag rules below before pushing a release tag. Workflow YAML alone is not the authorization boundary.
@@ -159,10 +173,10 @@ The provenance job runs without an environment or release secrets. Only after it
 
 Set the release mode before pushing the tag:
 
-- Signed public release: leave `DM_LESSONMELD_RELEASE_MODE` unset, or set the repository variable to `signed`.
-- Unsigned developer preview: set repository variable `DM_LESSONMELD_RELEASE_MODE=unsigned-preview` before pushing the tag, then restore it when preview releases are no longer intended.
+- Signed public release: leave `DM_LESSONMELD_RELEASE_MODE` unset, or set the repository variable to `signed`, and push only `vVERSION`.
+- Unsigned developer preview: set repository variable `DM_LESSONMELD_RELEASE_MODE=unsigned-preview`, push only `vVERSION-preview.N`, then restore the variable when preview releases are no longer intended.
 
-Signed mode fails closed unless every required Apple signing and notarization secret is present. Unsigned-preview mode is allowed only as an explicit repository decision; partial Apple secret sets fail in either mode. The `BradGroux/dm-lessonmeld` repository is configured with the complete signed-release secret set.
+Signed mode rejects preview tags and fails closed unless every required Apple signing and notarization secret is present. Unsigned-preview mode rejects normal version tags, always publishes a non-latest prerelease, and is allowed only as an explicit repository decision. Partial Apple secret sets fail in either mode. The `BradGroux/dm-lessonmeld` repository is configured with the complete signed-release secret set.
 
 The workflow runs:
 
@@ -170,9 +184,11 @@ The workflow runs:
 - `swift test`
 - `plutil -lint Packaging/Info.plist`
 - packaging script syntax checks
+- release provenance and publication-policy tests
 - `scripts/package-release.sh`
 - Developer ID signing and Apple notarization when release mode is `signed`
-- unsigned, non-notarized artifact publication only when release mode is `unsigned-preview`
+- unsigned, non-notarized artifact publication only from a numbered preview tag when release mode is `unsigned-preview`
+- `--prerelease --latest=false` for every unsigned preview
 - SHA256 generation for DMG and zip artifacts
 - SHA256 verification before publishing downloaded release artifacts
 - mounted DMG content validation

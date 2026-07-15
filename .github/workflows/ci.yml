@@ -55,12 +55,15 @@ jobs:
           bash -n scripts/package-app.sh
           bash -n scripts/package-dmg.sh
           bash -n scripts/package-release.sh
+          bash -n scripts/test-release-publication.sh
           bash -n scripts/test-release-provenance.sh
+          bash -n scripts/verify-release-publication.sh
           bash -n scripts/verify-release-provenance.sh
           bash -n scripts/verify-cask-release.sh
           bash -n scripts/verify-dmg.sh
           ruby -c Casks/dm-lessonmeld.rb
           brew style Casks/dm-lessonmeld.rb
+          scripts/test-release-publication.sh
           scripts/test-release-provenance.sh
           scripts/verify-cask-release.sh
           scripts/build-app.sh release >/dev/null

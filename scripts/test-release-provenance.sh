@@ -62,10 +62,19 @@ reviewed_sha="$(git -C "${work}" rev-parse HEAD)"
   cd "${work}"
   git tag v1.2.3 "${reviewed_sha}"
   "${verifier}" "${reviewed_sha}" main v1.2.3 Packaging/Info.plist
+  git tag v1.2.3-preview.1 "${reviewed_sha}"
+  "${verifier}" "${reviewed_sha}" main v1.2.3-preview.1 Packaging/Info.plist unsigned-preview
 )
 
+expect_failure "unsigned normal tag" "unsigned-preview tag must match v1.2.3-preview.N" \
+  bash -c 'cd "$1" && "$2" "$3" main v1.2.3 Packaging/Info.plist unsigned-preview' \
+  _ "${work}" "${verifier}" "${reviewed_sha}"
+expect_failure "signed preview tag" "signed release tag must be v1.2.3" \
+  bash -c 'cd "$1" && "$2" "$3" main v1.2.3-preview.1 Packaging/Info.plist signed' \
+  _ "${work}" "${verifier}" "${reviewed_sha}"
+
 git -C "${work}" tag v9.9.9 "${reviewed_sha}"
-expect_failure "version mismatch" "does not match tag" \
+expect_failure "version mismatch" "signed release tag must be v1.2.3" \
   bash -c 'cd "$1" && "$2" "$3" main v9.9.9 Packaging/Info.plist' \
   _ "${work}" "${verifier}" "${reviewed_sha}"
 
