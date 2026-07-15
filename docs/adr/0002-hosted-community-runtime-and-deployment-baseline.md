@@ -1,12 +1,12 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Bootstrap the hosted community on TypeScript, PostgreSQL, and Render
 
-Issue [#288](https://github.com/BradGroux/dm-lessonmeld/issues/288) needs an explicit repository, runtime, and deployment decision before hosted implementation can begin. This ADR proposes the baseline below. It does not authorize repository creation, production dependencies, paid resources, deployment, credentials, or secrets.
+Issue [#288](https://github.com/BradGroux/dm-lessonmeld/issues/288) needs an explicit repository, runtime, and deployment decision before hosted implementation can begin. This ADR records the accepted baseline below. Brad approved repository creation, the named production dependencies, and paid Render staging on 2026-07-15. Production provisioning, credentials, and secrets remain outside that approval.
 
-## Proposed decision
+## Decision
 
 | Concern | Baseline |
 | --- | --- |
@@ -39,7 +39,7 @@ The first tracer exposes only a metadata-safe hello-Tenant path, health/readines
 - Paid Render Postgres provides point-in-time recovery and logical export/restore. Free Postgres does not satisfy the recovery acceptance criteria. [Render PostgreSQL recovery and backups](https://render.com/docs/postgresql-backups)
 - Render environments can block private cross-environment traffic and restrict resource deletion, secret access, shell access, and other listed operations to administrators. Render explicitly warns that non-admins can still modify Blueprint-managed protected resources through `render.yaml`, so protected GitHub review is part of the control rather than an optional backstop. [Render projects and environments](https://render.com/docs/projects)
 
-Ohio is the proposed initial region because the first operated Tenant is US-based and this is the closest listed Render region to the maintainer's operating location. This is an inference, not a data-residency conclusion. Render documents that a service region cannot be changed after creation, so region approval must happen before provisioning. [Render Blueprint specification](https://render.com/docs/blueprint-spec)
+Ohio is the initial region because the first operated Tenant is US-based and this is the closest listed Render region to the maintainer's operating location. This is an inference, not a data-residency conclusion. Render documents that a service region cannot be changed after creation, so the approved region is recorded before provisioning. [Render Blueprint specification](https://render.com/docs/blueprint-spec)
 
 ## Repository shape
 
@@ -136,20 +136,21 @@ This is rejected for the bootstrap because the mandatory worker, durable jobs, r
 
 This repeats the repository-boundary problem already rejected by ADR 0001 and narrows the hosted web ecosystem around the native author's implementation language. The explicit Publication protocol, not a shared runtime, is the supported native/hosted integration boundary.
 
-## Approval required
+## Approval record
 
-The next implementation step requires one explicit approval covering:
+Brad approved the following scope on 2026-07-15:
 
 1. Create private repository `BradGroux/dm-community`.
 2. Configure the new repository's `main` ruleset, required checks, CODEOWNERS ownership, and GitHub `production` deployment environment. The production workflow is manually dispatched and allowlists `BradGroux`; it does not depend on private-repository required reviewers.
 3. Use Node.js 24 LTS, strict TypeScript, one npm package, Fastify, React, React Router, PostgreSQL, `pg`, Kysely, and Ajv.
 4. Target Render in `ohio` with a Docker web service and paid PostgreSQL. Disable auto-deploy and restrict launch workspace access to named release administrators.
-5. Create paid staging resources first, then protected production resources only after staging evidence passes.
+5. Create paid staging resources first. Protected production resources remain deferred until staging evidence passes and Brad separately approves production provisioning.
 
-Repository scaffolding can begin after items 1 through 3 are approved. No Render resource will be created and no charge incurred until items 4 and 5 are separately confirmed if the approval response does not clearly include paid provisioning.
+The approval was explicit: `Approve #240 settings and #288 scaffold plus paid Render staging`. It authorizes items 1 through 4 and the staging portion of item 5. It does not authorize production resources, a public launch, credentials beyond what staging needs, or release publication.
 
-## Decision outcome
+## Consequences
 
-- **If accepted:** change `status` to `accepted`, link the approval in issue #288, create the private repository, and execute the bootstrap evidence list through an issue-linked PR in that repository.
-- **If amended:** update this ADR before implementation so the source tree, CI, and operations do not encode an unreviewed platform assumption.
-- **If rejected:** keep #288 blocked and record the selected repository/runtime/deployment replacement with equivalent rollback, recovery, isolation, and portability evidence.
+- Create the private repository and execute the bootstrap evidence list through issue-linked work there.
+- Provision staging only after the repository baseline and its CI controls are verified.
+- Amend this ADR before encoding a materially different repository, runtime, data, or deployment decision.
+- Keep production provisioning blocked until staging evidence passes and Brad gives separate approval.
