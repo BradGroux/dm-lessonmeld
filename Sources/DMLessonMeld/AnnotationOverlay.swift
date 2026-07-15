@@ -1321,6 +1321,8 @@ private struct AnnotationOverlayToolbarView: View {
     static let buttonSize: CGFloat = 32
     static let actionButtonCount = 10
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @ObservedObject var session: AnnotationOverlaySession
     let onClose: () -> Void
     let onCopyAnnotatedScreen: () -> Void
@@ -1333,6 +1335,13 @@ private struct AnnotationOverlayToolbarView: View {
         GridItem(.fixed(buttonSize), spacing: 6)
     ]
 
+    private var contrastPolicy: AnnotationToolbarContrastPolicy {
+        AnnotationToolbarContrastPolicy.resolve(
+            reduceTransparency: reduceTransparency,
+            increaseContrast: colorSchemeContrast == .increased
+        )
+    }
+
     var body: some View {
         Group {
             if session.isToolbarCollapsed {
@@ -1343,14 +1352,18 @@ private struct AnnotationOverlayToolbarView: View {
                 horizontalBody
             }
         }
+        .environment(\.colorScheme, .dark)
         .padding(6)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Color(rgba: contrastPolicy.surface), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(.white.opacity(0.18), lineWidth: 1)
+                .stroke(
+                    Color(rgba: contrastPolicy.foreground).opacity(contrastPolicy.boundaryOpacity),
+                    lineWidth: CGFloat(contrastPolicy.boundaryLineWidth)
+                )
         )
-        .shadow(color: .black.opacity(0.28), radius: 7, y: 3)
-        .foregroundStyle(.white)
+        .shadow(color: .black.opacity(0.58), radius: 8, y: 3)
+        .foregroundStyle(Color(rgba: contrastPolicy.foreground))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("LessonMeld annotation toolbar")
     }
@@ -1422,7 +1435,7 @@ private struct AnnotationOverlayToolbarView: View {
     private var collapsedDragBar: some View {
         ZStack {
             Capsule()
-                .fill(.white.opacity(0.32))
+                .fill(Color(rgba: contrastPolicy.foreground).opacity(contrastPolicy.dragOpacity))
                 .frame(width: 7, height: 28)
             WindowDragHandle()
         }
@@ -1435,7 +1448,7 @@ private struct AnnotationOverlayToolbarView: View {
     private var dragBar: some View {
         ZStack {
             Capsule()
-                .fill(.white.opacity(0.32))
+                .fill(Color(rgba: contrastPolicy.foreground).opacity(contrastPolicy.dragOpacity))
                 .frame(
                     width: session.toolbarLayout == .vertical ? 42 : 7,
                     height: session.toolbarLayout == .vertical ? 5 : 28
@@ -1498,11 +1511,27 @@ private struct AnnotationOverlayToolbarView: View {
                     .frame(width: 24, height: 24)
                     .overlay(
                         Circle()
-                            .stroke(session.selectedColor == swatch.color ? .white : .white.opacity(0.35), lineWidth: session.selectedColor == swatch.color ? 3 : 1)
+                            .stroke(
+                                .black.opacity(session.selectedColor == swatch.color ? 0.88 : 0.62),
+                                lineWidth: session.selectedColor == swatch.color
+                                    ? CGFloat(contrastPolicy.selectedSwatchLineWidth + 2)
+                                    : 3
+                            )
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                Color(rgba: contrastPolicy.foreground).opacity(
+                                    session.selectedColor == swatch.color ? 1 : contrastPolicy.swatchStrokeOpacity
+                                ),
+                                lineWidth: session.selectedColor == swatch.color
+                                    ? CGFloat(contrastPolicy.selectedSwatchLineWidth)
+                                    : 1
+                            )
                     )
                     .frame(width: Self.buttonSize, height: Self.buttonSize)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AnnotationToolbarSwatchButtonStyle(policy: contrastPolicy))
             .overlayHelp(swatch.accessibilityLabel, enabled: session.tooltipsEnabled)
             .accessibilityLabel(swatch.accessibilityLabel)
             .accessibilityValue(session.selectedColor == swatch.color ? "Selected" : "Not selected")
@@ -1522,7 +1551,11 @@ private struct AnnotationOverlayToolbarView: View {
         }
         .menuStyle(.borderlessButton)
         .frame(width: 60, height: Self.buttonSize)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .background(
+            Color(rgba: contrastPolicy.foreground).opacity(contrastPolicy.inactiveFillOpacity),
+            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+        )
+        .modifier(AnnotationToolbarFocusRing(policy: contrastPolicy))
         .overlayHelp("Line width", enabled: session.tooltipsEnabled)
         .accessibilityLabel("Line width")
         .accessibilityValue("\(Int(session.lineWidth)) pixels")
@@ -1540,7 +1573,11 @@ private struct AnnotationOverlayToolbarView: View {
         }
         .menuStyle(.borderlessButton)
         .frame(width: 60, height: Self.buttonSize)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .background(
+            Color(rgba: contrastPolicy.foreground).opacity(contrastPolicy.inactiveFillOpacity),
+            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+        )
+        .modifier(AnnotationToolbarFocusRing(policy: contrastPolicy))
         .overlayHelp("Text size", enabled: session.tooltipsEnabled)
         .accessibilityLabel("Text size")
         .accessibilityValue("\(Int(session.textSize)) pixels")
@@ -1610,9 +1647,9 @@ private struct AnnotationOverlayToolbarView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .frame(width: Self.buttonSize, height: Self.buttonSize)
         }
-        .buttonStyle(AnnotationToolbarButtonStyle(active: active))
+        .buttonStyle(AnnotationToolbarButtonStyle(active: active, policy: contrastPolicy))
         .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.38)
+        .opacity(enabled ? 1 : contrastPolicy.disabledOpacity)
         .overlayHelp(label, enabled: session.tooltipsEnabled)
         .accessibilityLabel(label)
         .accessibilityValue(active ? "Selected" : (enabled ? "Available" : "Disabled"))
@@ -1633,7 +1670,7 @@ private struct AnnotationOverlayToolbarView: View {
 
     private var sectionDivider: some View {
         Rectangle()
-            .fill(.white.opacity(0.16))
+            .fill(Color(rgba: contrastPolicy.foreground).opacity(contrastPolicy.dividerOpacity))
             .frame(height: 1)
             .padding(.vertical, 2)
             .accessibilityHidden(true)
@@ -1641,7 +1678,7 @@ private struct AnnotationOverlayToolbarView: View {
 
     private var verticalDivider: some View {
         Rectangle()
-            .fill(.white.opacity(0.16))
+            .fill(Color(rgba: contrastPolicy.foreground).opacity(contrastPolicy.dividerOpacity))
             .frame(width: 1, height: 28)
             .padding(.horizontal, 1)
             .accessibilityHidden(true)
@@ -1653,14 +1690,116 @@ private struct AnnotationOverlayToolbarView: View {
 
 private struct AnnotationToolbarButtonStyle: ButtonStyle {
     var active: Bool
+    var policy: AnnotationToolbarContrastPolicy
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(Color.white)
+        AnnotationToolbarButtonStyleBody(
+            label: configuration.label,
+            isPressed: configuration.isPressed,
+            active: active,
+            policy: policy
+        )
+    }
+}
+
+private struct AnnotationToolbarButtonStyleBody<Label: View>: View {
+    @Environment(\.isFocused) private var isFocused
+    @State private var isHovering = false
+
+    let label: Label
+    let isPressed: Bool
+    let active: Bool
+    let policy: AnnotationToolbarContrastPolicy
+
+    var body: some View {
+        label
+            .foregroundStyle(Color(rgba: policy.foreground))
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(active ? Color.accentColor : Color.white.opacity(configuration.isPressed ? 0.14 : 0.08))
+                    .fill(
+                        active
+                            ? Color(rgba: policy.activeFill).opacity(
+                                isPressed ? policy.activePressedOpacity : 1
+                            )
+                            : Color(rgba: policy.foreground).opacity(
+                                isPressed
+                                    ? policy.pressedFillOpacity
+                                    : (isHovering ? policy.hoverFillOpacity : policy.inactiveFillOpacity)
+                            )
+                    )
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(
+                        Color(rgba: policy.foreground).opacity(isFocused ? policy.focusOpacity : (active ? policy.boundaryOpacity : 0)),
+                        lineWidth: isFocused ? CGFloat(policy.focusLineWidth) : 1
+                    )
+            )
+            .overlay(alignment: .bottom) {
+                Capsule()
+                    .fill(Color(rgba: policy.foreground))
+                    .frame(width: 12, height: 2)
+                    .padding(.bottom, 2)
+                    .opacity(active ? 1 : 0)
+            }
+            .onHover { isHovering = $0 }
+    }
+}
+
+private struct AnnotationToolbarSwatchButtonStyle: ButtonStyle {
+    var policy: AnnotationToolbarContrastPolicy
+
+    func makeBody(configuration: Configuration) -> some View {
+        AnnotationToolbarSwatchButtonStyleBody(
+            label: configuration.label,
+            isPressed: configuration.isPressed,
+            policy: policy
+        )
+    }
+}
+
+private struct AnnotationToolbarSwatchButtonStyleBody<Label: View>: View {
+    @Environment(\.isFocused) private var isFocused
+    @State private var isHovering = false
+
+    let label: Label
+    let isPressed: Bool
+    let policy: AnnotationToolbarContrastPolicy
+
+    var body: some View {
+        label
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(
+                        Color(rgba: policy.foreground).opacity(
+                            isPressed ? policy.pressedFillOpacity : (isHovering ? policy.hoverFillOpacity : 0)
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(
+                        Color(rgba: policy.foreground).opacity(isFocused ? policy.focusOpacity : 0),
+                        lineWidth: CGFloat(policy.focusLineWidth)
+                    )
+            )
+            .onHover { isHovering = $0 }
+    }
+}
+
+private struct AnnotationToolbarFocusRing: ViewModifier {
+    @Environment(\.isFocused) private var isFocused
+
+    var policy: AnnotationToolbarContrastPolicy
+
+    func body(content: Content) -> some View {
+        content.overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(
+                    Color(rgba: policy.foreground).opacity(isFocused ? policy.focusOpacity : 0),
+                    lineWidth: CGFloat(policy.focusLineWidth)
+                )
+        )
     }
 }
 
