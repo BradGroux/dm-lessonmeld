@@ -24,7 +24,7 @@ public enum AppUILayoutSurface: String, CaseIterable, Sendable {
         case .mainEditor:
             UILayoutSize(width: 960, height: 680)
         case .videoEditor:
-            UILayoutSize(width: 960, height: 640)
+            UILayoutSize(width: 960, height: 680)
         case .recorderControlBar:
             RecorderControlBarLayout.stableWindowMinimumSize
         case .onboarding:
@@ -33,6 +33,77 @@ public enum AppUILayoutSurface: String, CaseIterable, Sendable {
             UILayoutSize(width: 900, height: 620)
         case .commandPalette:
             UILayoutSize(width: 560, height: 360)
+        }
+    }
+}
+
+public enum TimelineToolbarAction: String, CaseIterable, Hashable, Identifiable, Sendable {
+    case backOneSecond
+    case forwardOneSecond
+    case cut
+    case zoom
+    case volume
+    case speed
+    case overlay
+    case caption
+    case hideCursor
+    case delete
+    case save
+
+    public var id: Self { self }
+
+    public var title: String {
+        switch self {
+        case .backOneSecond: "Back 1s"
+        case .forwardOneSecond: "Forward 1s"
+        case .cut: "Cut"
+        case .zoom: "Zoom"
+        case .volume: "Volume"
+        case .speed: "Speed"
+        case .overlay: "Overlay"
+        case .caption: "Caption"
+        case .hideCursor: "Hide Cursor"
+        case .delete: "Delete"
+        case .save: "Save"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .backOneSecond: "backward.frame"
+        case .forwardOneSecond: "forward.frame"
+        case .cut: "scissors"
+        case .zoom: "plus.magnifyingglass"
+        case .volume: "speaker.wave.2"
+        case .speed: "speedometer"
+        case .overlay: "textformat"
+        case .caption: "captions.bubble"
+        case .hideCursor: "cursorarrow.slash"
+        case .delete: "trash"
+        case .save: "checkmark.circle"
+        }
+    }
+}
+
+public enum TimelineToolbarPresentation: CaseIterable, Sendable {
+    case expanded
+    case compact
+
+    public var directActions: [TimelineToolbarAction] {
+        switch self {
+        case .expanded:
+            TimelineToolbarAction.allCases
+        case .compact:
+            [.backOneSecond, .forwardOneSecond, .cut, .zoom, .delete, .save]
+        }
+    }
+
+    public var overflowActions: [TimelineToolbarAction] {
+        switch self {
+        case .expanded:
+            []
+        case .compact:
+            [.volume, .speed, .overlay, .caption, .hideCursor]
         }
     }
 }
@@ -175,7 +246,7 @@ public struct UISmokeScenario: Equatable, Sendable {
 public enum UIRegressionFixtures {
     public static let laptop = UILayoutSize(width: 1180, height: 760)
     public static let desktop = UILayoutSize(width: 1680, height: 980)
-    public static let narrow = UILayoutSize(width: 960, height: 640)
+    public static let narrow = AppUILayoutSurface.videoEditor.minimumSize
 
     public static let scenarios: [UISmokeScenario] = [
         UISmokeScenario(
@@ -214,7 +285,7 @@ public enum UIRegressionFixtures {
             id: "video-editor-narrow",
             surface: .videoEditor,
             viewport: narrow,
-            requiredPrimaryControls: ["Play", "Timeline", "Layout"]
+            requiredPrimaryControls: ["Play", "Timeline", "Cut", "More timeline actions", "Timeline scale", "Layout"]
         ),
         UISmokeScenario(
             id: "settings-search",
