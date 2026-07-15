@@ -38,6 +38,7 @@ The first tracer exposes only a metadata-safe hello-Tenant path, health/readines
 - Render health checks gate new traffic and retain the prior healthy service when a new deployment never becomes ready. [Render health checks](https://render.com/docs/health-checks)
 - Paid Render Postgres provides point-in-time recovery and logical export/restore. Free Postgres does not satisfy the recovery acceptance criteria. [Render PostgreSQL recovery and backups](https://render.com/docs/postgresql-backups)
 - Render environments can block private cross-environment traffic and restrict resource deletion, secret access, shell access, and other listed operations to administrators. Render explicitly warns that non-admins can still modify Blueprint-managed protected resources through `render.yaml`, so protected GitHub review is part of the control rather than an optional backstop. [Render projects and environments](https://render.com/docs/projects)
+- GitHub native secret scanning for a user-owned private repository is unavailable outside the documented Enterprise Managed Users case. The bootstrap therefore runs a pinned Gitleaks scan as a required CI job and fails the protected check on any finding. Native GitHub Secret Protection can replace or supplement this control only after an approved repository-ownership and plan change. [GitHub secret scanning availability](https://docs.github.com/en/code-security/reference/secret-security/supported-secret-scanning-patterns)
 
 Ohio is the initial region because the first operated Tenant is US-based and this is the closest listed Render region to the maintainer's operating location. This is an inference, not a data-residency conclusion. Render documents that a service region cannot be changed after creation, so the approved region is recorded before provisioning. [Render Blueprint specification](https://render.com/docs/blueprint-spec)
 
@@ -105,7 +106,7 @@ TypeScript, the build tool, linting, unit/integration test tooling, Playwright, 
 
 Issue #288 is not complete until the separate repository demonstrates all of the following:
 
-- A private repository with a `main` ruleset, required CI, recorded CODEOWNERS ownership, dependency updates, and secret scanning.
+- A private repository with a `main` ruleset, required CI, recorded CODEOWNERS ownership, dependency updates, and required CI secret scanning.
 - A clean checkout can install, lint, typecheck, test, build the Dockerfile, migrate up, migrate back where safe, and run the web process.
 - `GET /health/live`, `GET /health/ready`, and the hello-Tenant API/UI operate in local, CI, and authorized staging environments.
 - The migration path is repeatable from empty and from the prior schema version.
