@@ -79,7 +79,7 @@ enum RenderedUIRegressionHarness {
                     id: "ui-regression-overlay",
                     kind: .text,
                     timeRange: EditTimeRange(startSeconds: 0.2, durationSeconds: 1.2),
-                    frame: NormalizedEditRect(x: 0.12, y: 0.12, width: 0.42, height: 0.18),
+                    frame: NormalizedEditRect(x: 0.12, y: 0.12, width: 0.70, height: 0.18),
                     opacity: 0.94,
                     zIndex: 10,
                     style: OverlayStyle(
@@ -206,7 +206,7 @@ enum RenderedUIRegressionHarness {
             ]
         case "annotation-toolbar":
             Dictionary(
-                uniqueKeysWithValues: ["Pen", "Highlighter", "Yellow, #FFD733", "Line width", "Clear annotations"]
+                uniqueKeysWithValues: ["Pen", "Highlighter", "Yellow, #FFD733", "Line width", "Undo", "Redo"]
                     .map { ($0, "LessonMeld annotation toolbar") }
             )
         default:
@@ -261,7 +261,7 @@ enum RenderedUIRegressionHarness {
                 let y = min(bitmap.pixelsHigh - 1, max(0, (row * bitmap.pixelsHigh + bitmap.pixelsHigh / 2) / rows))
                 let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB)
                 let value = color.map { 0.2126 * $0.redComponent + 0.7152 * $0.greenComponent + 0.0722 * $0.blueComponent } ?? 0
-                luminance.append((value * 10_000).rounded() / 10_000)
+                luminance.append(RenderedUIScreenshotFingerprint.structuralLuminance(value))
             }
         }
         return RenderedUIScreenshotFingerprint(columns: columns, rows: rows, luminance: luminance)

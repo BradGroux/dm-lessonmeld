@@ -129,7 +129,7 @@ struct ProjectEditorView: View {
         guard let renderedUIRegression, !didStartRenderedUIRegression else { return }
         didStartRenderedUIRegression = true
         mediaEditorInspectorVisible = true
-        if renderedUIRegression.fixtureID == "video-editor-captions" {
+        if ["video-editor-overlays", "video-editor-captions"].contains(renderedUIRegression.fixtureID) {
             mediaEditorInspectorWidth = EditorWorkspaceLayout.minimumInspectorWidth
         }
         Task { @MainActor in

@@ -77,6 +77,7 @@ struct DMLessonMeldApp: App {
                 .handlesLessonMeldAppEvents(appRouter: appRouter)
                 .defaultAppStorage(appDefaults)
                 .preferredColorScheme(renderedUIRegressionColorScheme)
+                .tint(renderedUIRegression == nil ? nil : Color(red: 0.68, green: 0.28, blue: 0.72))
                 .onAppear {
                     annotationOverlay.openSettingsHandler = { section in
                         appRouter.openSettings(section)

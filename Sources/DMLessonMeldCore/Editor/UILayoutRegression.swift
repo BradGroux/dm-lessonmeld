@@ -29,7 +29,7 @@ public enum AppUILayoutSurface: String, CaseIterable, Sendable {
         case .recorderControlBar:
             RecorderControlBarLayout.stableWindowMinimumSize
         case .annotationToolbar:
-            UILayoutSize(width: 72, height: 755)
+            UILayoutSize(width: 96, height: 656)
         case .onboarding:
             UILayoutSize(width: 760, height: 640)
         case .settings:
@@ -282,19 +282,19 @@ public enum UIRegressionFixtures {
             id: "annotation-toolbar",
             surface: .annotationToolbar,
             viewport: AppUILayoutSurface.annotationToolbar.minimumSize,
-            requiredPrimaryControls: ["LessonMeld annotation toolbar", "Pen", "Highlighter", "Yellow, #FFD733", "Line width", "Clear annotations"]
+            requiredPrimaryControls: ["LessonMeld annotation toolbar", "Pen", "Highlighter", "Yellow, #FFD733", "Line width", "Undo", "Redo"]
         ),
         UISmokeScenario(
             id: "video-editor-overlays",
             surface: .videoEditor,
-            viewport: desktop,
+            viewport: UILayoutSize(width: 1180, height: 680),
             requiredPrimaryControls: ["Play", "Trim In", "Trim Out", "Cut", "Zoom", "More timeline actions", "Text", "Highlight", "Text overlay", "Caption overlay", "Video timeline"],
             exercisesOverlayInspector: true
         ),
         UISmokeScenario(
             id: "video-editor-captions",
             surface: .videoEditor,
-            viewport: laptop,
+            viewport: UILayoutSize(width: 1180, height: 680),
             requiredPrimaryControls: ["Play", "Add Caption", "Burn-in Style", "Caption overlay", "Video timeline"],
             exercisesCaptionInspector: true
         ),
@@ -471,6 +471,12 @@ public struct RenderedUIScreenshotFingerprint: Codable, Equatable, Sendable {
         self.columns = columns
         self.rows = rows
         self.luminance = luminance
+    }
+
+    public static func structuralLuminance(_ value: Double) -> Double {
+        if value < 0.35 { return 0 }
+        if value > 0.75 { return 1 }
+        return 0.5
     }
 
     public func meanAbsoluteDifference(from other: RenderedUIScreenshotFingerprint) -> Double? {

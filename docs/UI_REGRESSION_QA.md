@@ -18,7 +18,7 @@ Omit `--skip-build` when the app has not been built. The rendered command exerci
 
 The rendered gate uses semantic accessibility labels and frames as its primary oracle. Every required control must exist with its reviewed label and remain within a rendered app window. The video preview, editor inspector, and timeline pane must not overlap. The timeline lane viewport scrolls on both axes so content that does not fit remains reachable instead of being clipped.
 
-The overlay editor also has reviewed Light and Dark structural screenshot fingerprints in `Tests/UIRegressionBaselines/`. Each fingerprint samples an 8×6 luminance grid. This catches a blank, missing, displaced, or materially changed surface while tolerating small font rasterization and runner-scale differences. It is intentionally not a byte-for-byte pixel snapshot.
+The overlay editor also has reviewed Light and Dark structural screenshot fingerprints in `Tests/UIRegressionBaselines/`. Each fingerprint samples an 8×6 luminance grid and classifies each sample as dark, midtone, or light. The fixture uses a fixed 1180×680 content size and accent tint so it renders consistently on the 1024×768 hosted runner and larger local displays. This catches a blank, missing, displaced, or materially changed surface while tolerating font rasterization, backing-scale, color-profile, and system-accent differences. It is intentionally not a byte-for-byte pixel snapshot.
 
 To review a proposed baseline change:
 
