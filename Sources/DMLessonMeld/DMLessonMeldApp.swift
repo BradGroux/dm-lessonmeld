@@ -10,9 +10,35 @@ struct DMLessonMeldApp: App {
     @StateObject private var annotationOverlay = AnnotationOverlayCoordinator()
     @StateObject private var preferences: AppPreferencesController
     @StateObject private var quickRecorder: QuickRecorderModel
+    private let renderedUIRegression: RenderedUIRegressionLaunchConfiguration?
+    private let appDefaults: UserDefaults
 
     init() {
-        let preferences = AppPreferencesController()
+        #if DEBUG
+        let renderedUIRegression = ProcessInfo.processInfo.environment["DM_LESSONMELD_ENABLE_UI_REGRESSION"] == "1"
+            ? RenderedUIRegressionLaunchConfiguration.parse(arguments: ProcessInfo.processInfo.arguments)
+            : nil
+        #else
+        let renderedUIRegression: RenderedUIRegressionLaunchConfiguration? = nil
+        #endif
+        self.renderedUIRegression = renderedUIRegression
+        let defaults: UserDefaults
+        if let renderedUIRegression {
+            let suiteName = "io.digitalmeld.dm-lessonmeld.ui-regression.\(renderedUIRegression.fixtureID).\(renderedUIRegression.appearance.rawValue)"
+            defaults = UserDefaults(suiteName: suiteName) ?? .standard
+            defaults.removePersistentDomain(forName: suiteName)
+        } else {
+            defaults = .standard
+        }
+        self.appDefaults = defaults
+        let preferences = AppPreferencesController(defaults: defaults)
+        if renderedUIRegression != nil {
+            preferences.update { snapshot in
+                snapshot.firstRunCompletedAt = Date(timeIntervalSince1970: 1_700_000_000)
+                snapshot.general.showMainWindowAtLaunch = true
+                snapshot.general.showAnnotationOverlayAtLaunch = false
+            }
+        }
         let quickRecorder = QuickRecorderModel()
         _preferences = StateObject(wrappedValue: preferences)
         _quickRecorder = StateObject(wrappedValue: quickRecorder)
@@ -37,7 +63,8 @@ struct DMLessonMeldApp: App {
                 quickRecorder: quickRecorder,
                 fallbackAnnotationOverlayHandler: { preferences in
                     annotationOverlay.toggle(preferences: preferences, forceToolbarVisible: true)
-                }
+                },
+                renderedUIRegression: renderedUIRegression
             )
                 .frame(
                     minWidth: AppUILayoutSurface.mainEditor.minimumSize.width,
@@ -48,6 +75,9 @@ struct DMLessonMeldApp: App {
                 .disablesWindowRestoration()
                 .hidesWindowTitle()
                 .handlesLessonMeldAppEvents(appRouter: appRouter)
+                .defaultAppStorage(appDefaults)
+                .preferredColorScheme(renderedUIRegressionColorScheme)
+                .tint(renderedUIRegression == nil ? nil : Color(red: 0.68, green: 0.28, blue: 0.72))
                 .onAppear {
                     annotationOverlay.openSettingsHandler = { section in
                         appRouter.openSettings(section)
@@ -121,6 +151,14 @@ struct DMLessonMeldApp: App {
             .presented
         case .suppress:
             .suppressed
+        }
+    }
+
+    private var renderedUIRegressionColorScheme: ColorScheme? {
+        switch renderedUIRegression?.appearance {
+        case .light: .light
+        case .dark: .dark
+        case nil: nil
         }
     }
 }

@@ -12,6 +12,7 @@ struct ProjectEditorView: View {
     @ObservedObject var annotationOverlay: AnnotationOverlayCoordinator
     @ObservedObject var quickRecorder: QuickRecorderModel
     let fallbackAnnotationOverlayHandler: (LessonMeldPreferences) -> Void
+    let renderedUIRegression: RenderedUIRegressionLaunchConfiguration?
     @StateObject var model = ProjectEditorModel()
     @State var showRecoveryNotice = false
     @State var didShowRecoveryNoticeThisLaunch = false
@@ -23,6 +24,7 @@ struct ProjectEditorView: View {
     @State var activeOverlayDrag: OverlayPreviewDragState?
     @State var activeOverlayResizeDrag: OverlayPreviewResizeDragState?
     @State var selectedTimelineItem: TimelineSelection?
+    @State var didStartRenderedUIRegression = false
     @AppStorage("LessonMeld.mediaEditor.inspectorVisible") var mediaEditorInspectorVisible = true
     @AppStorage("LessonMeld.mediaEditor.timelineVisible") var mediaEditorTimelineVisible = true
     @AppStorage("LessonMeld.mediaEditor.inspectorWidth") var mediaEditorInspectorWidth = 420.0
@@ -68,6 +70,7 @@ struct ProjectEditorView: View {
                 didShowRecoveryNoticeThisLaunch = true
             }
             applyLaunchPreferences()
+            startRenderedUIRegressionIfNeeded()
         }
         .onDisappear {
             quickRecorder.openProjectHandler = nil
@@ -99,6 +102,7 @@ struct ProjectEditorView: View {
     }
 
     func applyLaunchPreferences() {
+        guard renderedUIRegression == nil else { return }
         guard !preferences.didApplyLaunchPreferences else { return }
         preferences.didApplyLaunchPreferences = true
 
@@ -118,6 +122,26 @@ struct ProjectEditorView: View {
                 openWindow(id: "onboarding")
             }
         }
+    }
+
+    func startRenderedUIRegressionIfNeeded() {
+        #if DEBUG
+        guard let renderedUIRegression, !didStartRenderedUIRegression else { return }
+        didStartRenderedUIRegression = true
+        mediaEditorInspectorVisible = true
+        if ["video-editor-overlays", "video-editor-captions"].contains(renderedUIRegression.fixtureID) {
+            mediaEditorInspectorWidth = EditorWorkspaceLayout.minimumInspectorWidth
+        }
+        Task { @MainActor in
+            await RenderedUIRegressionHarness.run(
+                configuration: renderedUIRegression,
+                model: model,
+                annotationOverlay: annotationOverlay,
+                preferences: preferences,
+                selectInspector: { editorInspectorTab = $0 }
+            )
+        }
+        #endif
     }
 
     func syncProjectCommandState() {

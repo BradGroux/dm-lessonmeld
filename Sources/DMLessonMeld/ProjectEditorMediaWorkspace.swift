@@ -46,6 +46,12 @@ extension ProjectEditorView {
 
                     mediaTimelineEditor(manifest: manifest)
                         .frame(height: CGFloat(layout.timelineHeight))
+                        .clipped()
+                        .overlay {
+                            Color.clear
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Timeline pane")
+                        }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -544,6 +550,8 @@ extension ProjectEditorView {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
         .clipped()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Editor inspector")
     }
 
     var inspectorPanelHeader: some View {
@@ -1370,7 +1378,7 @@ extension ProjectEditorView {
         VStack(alignment: .leading, spacing: 12) {
             inspectorSectionTitle("Captions")
             inspectorActionGrid([
-                EditorInspectorAction("Add", systemImage: "plus") {
+                EditorInspectorAction("Add Caption", systemImage: "plus") {
                     model.addCaptionAtPlayhead()
                 },
                 EditorInspectorAction("Import", systemImage: "square.and.arrow.down") {
