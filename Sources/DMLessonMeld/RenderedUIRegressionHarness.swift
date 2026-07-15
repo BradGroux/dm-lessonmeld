@@ -254,14 +254,34 @@ enum RenderedUIRegressionHarness {
     private static func fingerprint(for bitmap: NSBitmapImageRep) -> RenderedUIScreenshotFingerprint {
         let columns = 8
         let rows = 6
+        let horizontalSamplesPerCell = 16
+        let verticalSamplesPerCell = 12
+        let horizontalSampleColumns = columns * horizontalSamplesPerCell
+        let verticalSampleRows = rows * verticalSamplesPerCell
         var luminance: [Double] = []
         for row in 0..<rows {
             for column in 0..<columns {
-                let x = min(bitmap.pixelsWide - 1, max(0, (column * bitmap.pixelsWide + bitmap.pixelsWide / 2) / columns))
-                let y = min(bitmap.pixelsHigh - 1, max(0, (row * bitmap.pixelsHigh + bitmap.pixelsHigh / 2) / rows))
-                let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB)
-                let value = color.map { 0.2126 * $0.redComponent + 0.7152 * $0.greenComponent + 0.0722 * $0.blueComponent } ?? 0
-                luminance.append(RenderedUIScreenshotFingerprint.structuralLuminance(value))
+                var total = 0.0
+                var sampleCount = 0
+                for sampleY in 0..<verticalSamplesPerCell {
+                    let gridY = row * verticalSamplesPerCell + sampleY
+                    let y = min(
+                        bitmap.pixelsHigh - 1,
+                        max(0, (gridY * bitmap.pixelsHigh + bitmap.pixelsHigh / (verticalSampleRows * 2)) / verticalSampleRows)
+                    )
+                    for sampleX in 0..<horizontalSamplesPerCell {
+                        let gridX = column * horizontalSamplesPerCell + sampleX
+                        let x = min(
+                            bitmap.pixelsWide - 1,
+                            max(0, (gridX * bitmap.pixelsWide + bitmap.pixelsWide / (horizontalSampleColumns * 2)) / horizontalSampleColumns)
+                        )
+                        guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                        total += 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
+                        sampleCount += 1
+                    }
+                }
+                let value = sampleCount == 0 ? 0 : total / Double(sampleCount)
+                luminance.append((value * 10_000).rounded() / 10_000)
             }
         }
         return RenderedUIScreenshotFingerprint(columns: columns, rows: rows, luminance: luminance)

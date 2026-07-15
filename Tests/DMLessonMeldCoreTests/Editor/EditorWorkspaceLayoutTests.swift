@@ -221,8 +221,5 @@ struct EditorWorkspaceLayoutTests {
         #expect(try #require(baseline.meanAbsoluteDifference(from: close)) < 0.02)
         #expect(try #require(baseline.meanAbsoluteDifference(from: changed)) > 0.40)
         #expect(baseline.meanAbsoluteDifference(from: RenderedUIScreenshotFingerprint(columns: 1, rows: 1, luminance: [0.1])) == nil)
-        #expect(RenderedUIScreenshotFingerprint.structuralLuminance(0.2) == 0)
-        #expect(RenderedUIScreenshotFingerprint.structuralLuminance(0.5) == 0.5)
-        #expect(RenderedUIScreenshotFingerprint.structuralLuminance(0.9) == 1)
     }
 }

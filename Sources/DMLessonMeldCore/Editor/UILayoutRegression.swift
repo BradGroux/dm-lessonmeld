@@ -473,12 +473,6 @@ public struct RenderedUIScreenshotFingerprint: Codable, Equatable, Sendable {
         self.luminance = luminance
     }
 
-    public static func structuralLuminance(_ value: Double) -> Double {
-        if value < 0.35 { return 0 }
-        if value > 0.75 { return 1 }
-        return 0.5
-    }
-
     public func meanAbsoluteDifference(from other: RenderedUIScreenshotFingerprint) -> Double? {
         guard columns == other.columns,
               rows == other.rows,
