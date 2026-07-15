@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-public struct UILayoutSize: Equatable, Sendable {
+public struct UILayoutSize: Codable, Equatable, Sendable {
     public var width: CGFloat
     public var height: CGFloat
 
@@ -15,6 +15,7 @@ public enum AppUILayoutSurface: String, CaseIterable, Sendable {
     case mainEditor
     case videoEditor
     case recorderControlBar
+    case annotationToolbar
     case onboarding
     case settings
     case commandPalette
@@ -27,6 +28,8 @@ public enum AppUILayoutSurface: String, CaseIterable, Sendable {
             UILayoutSize(width: 960, height: 680)
         case .recorderControlBar:
             RecorderControlBarLayout.stableWindowMinimumSize
+        case .annotationToolbar:
+            UILayoutSize(width: 72, height: 755)
         case .onboarding:
             UILayoutSize(width: 760, height: 640)
         case .settings:
@@ -133,7 +136,7 @@ public enum RecorderControlBarLayout {
     }
 }
 
-public struct UILayoutRect: Equatable, Sendable {
+public struct UILayoutRect: Codable, Equatable, Sendable {
     public var x: Double
     public var y: Double
     public var width: Double
@@ -153,6 +156,14 @@ public struct UILayoutRect: Equatable, Sendable {
     public func intersects(_ other: UILayoutRect) -> Bool {
         guard !isEmpty, !other.isEmpty else { return false }
         return x < other.maxX && maxX > other.x && y < other.maxY && maxY > other.y
+    }
+
+    public func contains(_ other: UILayoutRect, tolerance: Double = 0.5) -> Bool {
+        guard !isEmpty, !other.isEmpty else { return false }
+        return other.x >= x - tolerance
+            && other.y >= y - tolerance
+            && other.maxX <= maxX + tolerance
+            && other.maxY <= maxY + tolerance
     }
 }
 
@@ -268,24 +279,30 @@ public enum UIRegressionFixtures {
             requiredPrimaryControls: ["Hide", "Annotate", "Flag", "Pause", "Restart", "Delete", "Stop"]
         ),
         UISmokeScenario(
+            id: "annotation-toolbar",
+            surface: .annotationToolbar,
+            viewport: AppUILayoutSurface.annotationToolbar.minimumSize,
+            requiredPrimaryControls: ["LessonMeld annotation toolbar", "Pen", "Highlighter", "Yellow, #FFD733", "Line width", "Clear annotations"]
+        ),
+        UISmokeScenario(
             id: "video-editor-overlays",
             surface: .videoEditor,
             viewport: desktop,
-            requiredPrimaryControls: ["Play", "Trim In", "Trim Out", "Cut", "Zoom", "Overlay", "Caption", "Timeline"],
+            requiredPrimaryControls: ["Play", "Trim In", "Trim Out", "Cut", "Zoom", "More timeline actions", "Text", "Highlight", "Text overlay", "Caption overlay", "Video timeline"],
             exercisesOverlayInspector: true
         ),
         UISmokeScenario(
             id: "video-editor-captions",
             surface: .videoEditor,
             viewport: laptop,
-            requiredPrimaryControls: ["Play", "Captions", "Add Caption", "Burn-in Style", "Timeline"],
+            requiredPrimaryControls: ["Play", "Add Caption", "Burn-in Style", "Caption overlay", "Video timeline"],
             exercisesCaptionInspector: true
         ),
         UISmokeScenario(
             id: "video-editor-narrow",
             surface: .videoEditor,
             viewport: narrow,
-            requiredPrimaryControls: ["Play", "Timeline", "Cut", "More timeline actions", "Timeline scale", "Layout"]
+            requiredPrimaryControls: ["Play", "Video timeline", "Cut", "More timeline actions", "Timeline scale", "Layout"]
         ),
         UISmokeScenario(
             id: "settings-search",
@@ -306,4 +323,167 @@ public enum UIRegressionFixtures {
             requiredPrimaryControls: ["Command search", "Show Main Window", "Settings", "Command Palette"]
         )
     ]
+}
+
+public enum RenderedUIRegressionAppearance: String, Codable, CaseIterable, Sendable {
+    case light
+    case dark
+}
+
+public struct RenderedUIRegressionLaunchConfiguration: Equatable, Sendable {
+    public var fixtureID: String
+    public var outputDirectory: String
+    public var appearance: RenderedUIRegressionAppearance
+
+    public init(fixtureID: String, outputDirectory: String, appearance: RenderedUIRegressionAppearance) {
+        self.fixtureID = fixtureID
+        self.outputDirectory = outputDirectory
+        self.appearance = appearance
+    }
+
+    public static func parse(arguments: [String]) -> RenderedUIRegressionLaunchConfiguration? {
+        guard let fixtureID = value(after: "--ui-regression-fixture", in: arguments),
+              let outputDirectory = value(after: "--ui-regression-output", in: arguments),
+              UIRegressionFixtures.scenarios.contains(where: { $0.id == fixtureID }) else {
+            return nil
+        }
+        let appearance = value(after: "--ui-regression-appearance", in: arguments)
+            .flatMap(RenderedUIRegressionAppearance.init(rawValue:)) ?? .dark
+        return RenderedUIRegressionLaunchConfiguration(
+            fixtureID: fixtureID,
+            outputDirectory: outputDirectory,
+            appearance: appearance
+        )
+    }
+
+    private static func value(after option: String, in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: option), arguments.indices.contains(index + 1) else {
+            return nil
+        }
+        let value = arguments[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}
+
+public struct RenderedUIElement: Codable, Equatable, Sendable {
+    public var label: String
+    public var role: String
+    public var frame: UILayoutRect
+
+    public init(label: String, role: String, frame: UILayoutRect) {
+        self.label = label
+        self.role = role
+        self.frame = frame
+    }
+}
+
+public enum RenderedUIFindingKind: String, Codable, Sendable {
+    case missing
+    case clipped
+    case overlap
+}
+
+public struct RenderedUIFinding: Codable, Equatable, Sendable {
+    public var kind: RenderedUIFindingKind
+    public var label: String
+    public var detail: String
+
+    public init(kind: RenderedUIFindingKind, label: String, detail: String) {
+        self.kind = kind
+        self.label = label
+        self.detail = detail
+    }
+}
+
+public enum RenderedUIAudit {
+    public static func findings(
+        elements: [RenderedUIElement],
+        windowFrame: UILayoutRect,
+        requiredLabels: [String],
+        paneLabels: [String],
+        ownerLabels: [String: String] = [:]
+    ) -> [RenderedUIFinding] {
+        var findings: [RenderedUIFinding] = []
+        let elementsByLabel = Dictionary(grouping: elements, by: \.label)
+
+        for label in requiredLabels {
+            guard let matches = elementsByLabel[label], !matches.isEmpty else {
+                findings.append(RenderedUIFinding(
+                    kind: .missing,
+                    label: label,
+                    detail: "Required accessibility label was not rendered."
+                ))
+                continue
+            }
+            let visibleMatches = matches.filter { windowFrame.contains($0.frame) }
+            guard !visibleMatches.isEmpty else {
+                findings.append(RenderedUIFinding(
+                    kind: .clipped,
+                    label: label,
+                    detail: "Rendered frame is outside the owning window."
+                ))
+                continue
+            }
+            if let ownerLabel = ownerLabels[label],
+               let owners = elementsByLabel[ownerLabel],
+               !owners.contains(where: { owner in
+                   visibleMatches.contains(where: { owner.frame.contains($0.frame) })
+               }) {
+                findings.append(RenderedUIFinding(
+                    kind: .clipped,
+                    label: label,
+                    detail: "Rendered frame is outside the \(ownerLabel) pane."
+                ))
+            }
+        }
+
+        let panes = paneLabels.flatMap { elementsByLabel[$0] ?? [] }
+        for paneLabel in paneLabels where elementsByLabel[paneLabel] == nil {
+            findings.append(RenderedUIFinding(
+                kind: .missing,
+                label: paneLabel,
+                detail: "Named pane accessibility boundary was not rendered."
+            ))
+        }
+        for leftIndex in panes.indices {
+            for rightIndex in panes.indices where rightIndex > leftIndex {
+                let left = panes[leftIndex]
+                let right = panes[rightIndex]
+                if left.frame.intersects(right.frame) {
+                    findings.append(RenderedUIFinding(
+                        kind: .overlap,
+                        label: "\(left.label) / \(right.label)",
+                        detail: "Rendered pane frames overlap."
+                    ))
+                }
+            }
+        }
+        return findings
+    }
+}
+
+public struct RenderedUIScreenshotFingerprint: Codable, Equatable, Sendable {
+    public var columns: Int
+    public var rows: Int
+    public var luminance: [Double]
+
+    public init(columns: Int, rows: Int, luminance: [Double]) {
+        self.columns = columns
+        self.rows = rows
+        self.luminance = luminance
+    }
+
+    public func meanAbsoluteDifference(from other: RenderedUIScreenshotFingerprint) -> Double? {
+        guard columns == other.columns,
+              rows == other.rows,
+              luminance.count == columns * rows,
+              other.luminance.count == other.columns * other.rows,
+              !luminance.isEmpty else {
+            return nil
+        }
+        let total = zip(luminance, other.luminance).reduce(0.0) { partial, pair in
+            partial + abs(pair.0 - pair.1)
+        }
+        return total / Double(luminance.count)
+    }
 }

@@ -116,6 +116,7 @@ struct LessonMeldInspectorSectionTitle: View {
         Text(title.uppercased())
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
+            .accessibilityLabel(title)
     }
 }
 

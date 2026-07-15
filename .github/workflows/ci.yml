@@ -29,6 +29,18 @@ jobs:
       - name: CLI smoke
         run: scripts/cli-smoke-tests.sh --skip-build
 
+      - name: Rendered UI regression
+        run: scripts/ui-regression-smoke.sh --skip-build --output .build/ui-regression-artifacts
+
+      - name: Upload rendered UI diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rendered-ui-regression-${{ github.run_id }}
+          path: .build/ui-regression-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Validate packaging
         run: |
           plutil -lint Packaging/Info.plist

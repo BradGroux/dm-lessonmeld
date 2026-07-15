@@ -128,9 +128,98 @@ struct EditorWorkspaceLayoutTests {
         let scenario = try #require(UIRegressionFixtures.scenarios.first { $0.id == "video-editor-narrow" })
 
         #expect(scenario.viewport == AppUILayoutSurface.videoEditor.minimumSize)
-        #expect(scenario.requiredPrimaryControls.contains("Timeline"))
+        #expect(scenario.requiredPrimaryControls.contains("Video timeline"))
         #expect(scenario.requiredPrimaryControls.contains("Cut"))
         #expect(scenario.requiredPrimaryControls.contains("More timeline actions"))
         #expect(scenario.requiredPrimaryControls.contains("Timeline scale"))
+    }
+
+    @Test("Rendered UI launch arguments require an explicit fixture and artifact directory")
+    func renderedUILaunchArgumentsRequireFixtureAndArtifactDirectory() throws {
+        let configuration = try #require(RenderedUIRegressionLaunchConfiguration.parse(arguments: [
+            "DMLessonMeld",
+            "--ui-regression-fixture", "video-editor-overlays",
+            "--ui-regression-output", "/tmp/ui-artifacts",
+            "--ui-regression-appearance", "dark"
+        ]))
+
+        #expect(configuration.fixtureID == "video-editor-overlays")
+        #expect(configuration.outputDirectory == "/tmp/ui-artifacts")
+        #expect(configuration.appearance == .dark)
+        #expect(RenderedUIRegressionLaunchConfiguration.parse(arguments: [
+            "DMLessonMeld",
+            "--ui-regression-fixture", "video-editor-overlays"
+        ]) == nil)
+    }
+
+    @Test("Rendered UI audit catches missing, clipped, mislabeled, and overlapping controls")
+    func renderedUIAuditCatchesStructuralRegressions() {
+        let window = UILayoutRect(x: 0, y: 0, width: 960, height: 680)
+        let elements = [
+            RenderedUIElement(label: "Video preview", role: "group", frame: UILayoutRect(x: 250, y: 0, width: 510, height: 480)),
+            RenderedUIElement(label: "Timeline", role: "group", frame: UILayoutRect(x: 250, y: 480, width: 710, height: 200)),
+            RenderedUIElement(label: "Cut", role: "button", frame: UILayoutRect(x: 300, y: 500, width: 44, height: 28)),
+            RenderedUIElement(label: "Timeline scale", role: "slider", frame: UILayoutRect(x: 880, y: 500, width: 96, height: 28)),
+            RenderedUIElement(label: "Detached action", role: "button", frame: UILayoutRect(x: 300, y: 300, width: 90, height: 28))
+        ]
+
+        let findings = RenderedUIAudit.findings(
+            elements: elements,
+            windowFrame: window,
+            requiredLabels: ["Cut", "More timeline actions", "Timeline scale", "Detached action"],
+            paneLabels: ["Video preview", "Timeline"],
+            ownerLabels: [
+                "Cut": "Timeline",
+                "Timeline scale": "Timeline",
+                "Detached action": "Timeline"
+            ]
+        )
+
+        #expect(findings.contains { $0.kind == .missing && $0.label == "More timeline actions" })
+        #expect(findings.contains { $0.kind == .clipped && $0.label == "Timeline scale" })
+        #expect(findings.contains { $0.kind == .clipped && $0.label == "Detached action" })
+        #expect(!findings.contains { $0.kind == .overlap })
+
+        let missingPaneFindings = RenderedUIAudit.findings(
+            elements: elements,
+            windowFrame: window,
+            requiredLabels: [],
+            paneLabels: ["Missing pane"]
+        )
+        #expect(missingPaneFindings.contains { $0.kind == .missing && $0.label == "Missing pane" })
+
+        let overlapping = elements + [
+            RenderedUIElement(label: "Editor panel", role: "group", frame: UILayoutRect(x: 700, y: 0, width: 260, height: 520))
+        ]
+        let overlapFindings = RenderedUIAudit.findings(
+            elements: overlapping,
+            windowFrame: window,
+            requiredLabels: [],
+            paneLabels: ["Video preview", "Timeline", "Editor panel"]
+        )
+        #expect(overlapFindings.contains { $0.kind == .overlap })
+    }
+
+    @Test("Rendered UI screenshot fingerprints tolerate small variance and reject structural change")
+    func renderedUIScreenshotFingerprintsDetectStructuralChange() throws {
+        let baseline = RenderedUIScreenshotFingerprint(
+            columns: 2,
+            rows: 2,
+            luminance: [0.10, 0.20, 0.30, 0.40]
+        )
+        let close = RenderedUIScreenshotFingerprint(
+            columns: 2,
+            rows: 2,
+            luminance: [0.11, 0.19, 0.31, 0.39]
+        )
+        let changed = RenderedUIScreenshotFingerprint(
+            columns: 2,
+            rows: 2,
+            luminance: [0.70, 0.80, 0.90, 1.00]
+        )
+
+        #expect(try #require(baseline.meanAbsoluteDifference(from: close)) < 0.02)
+        #expect(try #require(baseline.meanAbsoluteDifference(from: changed)) > 0.40)
+        #expect(baseline.meanAbsoluteDifference(from: RenderedUIScreenshotFingerprint(columns: 1, rows: 1, luminance: [0.1])) == nil)
     }
 }

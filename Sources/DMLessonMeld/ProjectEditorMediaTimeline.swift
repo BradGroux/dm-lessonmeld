@@ -23,7 +23,7 @@ extension ProjectEditorView {
             GeometryReader { proxy in
                 let duration = editorTimelineDuration
                 let timelineWidth = max(proxy.size.width, proxy.size.width * CGFloat(timelineZoom))
-                ScrollView(.horizontal) {
+                ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 8) {
                         timelineRuler(width: timelineWidth, duration: duration)
                         timelineLane(
@@ -131,10 +131,10 @@ extension ProjectEditorView {
                     )
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Video timeline")
         }
         .padding(.top, 12)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Video timeline")
         .accessibilityHint("Use Left and Right Arrow to move the playhead. Use Delete to remove the selected timeline item.")
         .onMoveCommand { direction in
             switch direction {
