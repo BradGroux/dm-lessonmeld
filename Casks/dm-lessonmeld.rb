@@ -20,5 +20,12 @@ cask "dm-lessonmeld" do
   # then expose dmlesson for every archive built from the current packaging flow.
   binary "#{appdir}/Digital Meld LessonMeld.app/Contents/Resources/bin/dmlesson" if version >= "0.0.13"
 
-  zap trash: "~/Library/Preferences/io.digitalmeld.dm-lessonmeld.plist"
+  uninstall quit: "io.digitalmeld.dm-lessonmeld"
+
+  zap trash: [
+    "~/Library/Application Support/DMLessonMeld",
+    "~/Library/Caches/io.digitalmeld.dm-lessonmeld",
+    "~/Library/Preferences/io.digitalmeld.dm-lessonmeld.plist",
+    "~/Library/Saved Application State/io.digitalmeld.dm-lessonmeld.savedState",
+  ]
 end

@@ -60,6 +60,7 @@ jobs:
           bash -n scripts/test-release-provenance.sh
           bash -n scripts/test-release-signing-cleanup.sh
           bash -n scripts/test-cask-release.sh
+          bash -n scripts/test-cask-lifecycle.sh
           bash -n scripts/test-cli-packaging.sh
           bash -n scripts/test-release-workflow-gates.sh
           bash -n scripts/verify-release-publication.sh
@@ -68,6 +69,7 @@ jobs:
           bash -n scripts/verify-dmg.sh
           ruby -c Casks/dm-lessonmeld.rb
           brew style Casks/dm-lessonmeld.rb
+          scripts/test-cask-lifecycle.sh
           scripts/test-cask-release.sh
           scripts/test-release-publication.sh
           scripts/test-release-provenance.sh
