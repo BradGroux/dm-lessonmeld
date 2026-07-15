@@ -187,6 +187,7 @@ The workflow runs:
 - release provenance and publication-policy tests
 - `scripts/package-release.sh`
 - Developer ID signing and Apple notarization when release mode is `signed`
+- restoration of the runner's original user keychain list and deletion of the temporary certificate, signing keychain, and notarization key in an `always()` cleanup step
 - unsigned, non-notarized artifact publication only from a numbered preview tag when release mode is `unsigned-preview`
 - `--prerelease --latest=false` for every unsigned preview
 - SHA256 generation for DMG and zip artifacts
