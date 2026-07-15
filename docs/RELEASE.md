@@ -39,6 +39,7 @@ bash -n scripts/package-app.sh
 bash -n scripts/package-dmg.sh
 bash -n scripts/package-release.sh
 bash -n scripts/verify-release-publication.sh
+bash -n scripts/verify-capture-release-gate.sh
 bash -n scripts/verify-cask-release.sh
 bash -n scripts/capture-device-matrix-smoke.sh
 bash -n scripts/real-media-fixture-smoke.sh
@@ -46,6 +47,7 @@ ruby -c Casks/dm-lessonmeld.rb
 brew style Casks/dm-lessonmeld.rb
 scripts/test-release-publication.sh
 scripts/test-release-provenance.sh
+scripts/test-capture-release-gate.sh
 scripts/verify-cask-release.sh
 ```
 
@@ -125,7 +127,7 @@ The tag-driven workflow is:
 .github/workflows/release.yml
 ```
 
-To stage a signed public release, update `Packaging/Info.plist`, commit the change, then push its exact version tag:
+To stage a signed public release, update `Packaging/Info.plist`, commit the change, complete the tracked capture gate in `docs/CAPTURE_DEVICE_QA.md` for that exact commit, then push its exact version tag:
 
 ```sh
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
@@ -149,6 +151,7 @@ Before any secret-bearing job starts, the workflow fails unless all of these are
 - The tagged commit is reachable from the repository's current default branch.
 - A signed tag exactly matches `v` plus `CFBundleShortVersionString`, or an unsigned-preview tag matches `vVERSION-preview.N` with `N` greater than zero.
 - `CFBundleVersion` is valid numeric build metadata.
+- A retained successful `Capture release gate` artifact matches the exact tagged commit.
 
 The `build-release` job is bound to the protected `release-signing` GitHub Environment. Configure that environment and the release-tag rules below before pushing a release tag. Workflow YAML alone is not the authorization boundary.
 
@@ -173,9 +176,10 @@ After the tag workflow succeeds:
 2. Update `Casks/dm-lessonmeld.rb` to the staged artifact version and exact ZIP SHA256.
 3. Run `ruby -c Casks/dm-lessonmeld.rb`, `brew style Casks/dm-lessonmeld.rb`, and `scripts/verify-cask-release.sh PATH_TO_STAGED_ZIP` locally.
 4. Merge the cask update to the default branch.
-5. Run the `Publish staged release` workflow manually with the existing draft tag.
+5. Use the successful capture gate workflow run ID recorded before tagging.
+6. Run the `Publish staged release` workflow manually with the existing draft tag and capture gate run ID.
 
-The publish workflow revalidates tag provenance, confirms the release is still a draft, downloads the exact staged assets, verifies both checksum sidecars, runs Ruby and Homebrew style checks, and compares the current cask version and SHA against the staged ZIP. Only then does it clear the draft flag. Signed releases become latest; unsigned previews remain prereleases with latest explicitly disabled.
+The publish workflow revalidates tag provenance, confirms the release is still a draft, downloads and verifies the retained capture gate artifact for that exact tagged commit, downloads the exact staged assets, verifies both checksum sidecars, runs Ruby and Homebrew style checks, and compares the current cask version and SHA against the staged ZIP. Only then does it clear the draft flag. Signed releases become latest; unsigned previews remain prereleases with latest explicitly disabled.
 
 Do not rebuild the ZIP merely to update the cask SHA. Developer ID secure timestamps and notarization can change rebuilt bytes. The cask must match the exact staged artifact that the publish workflow will expose.
 
@@ -212,6 +216,7 @@ The workflow runs:
 - SHA256 verification before publishing downloaded release artifacts
 - mounted DMG content validation
 - cask version and exact staged ZIP SHA checks before a draft can become public
+- tracked capture-device, real-media, and manual-check evidence for the exact tagged commit before a draft can become public
 
 The tag workflow creates a draft GitHub Release and attaches:
 
@@ -220,7 +225,7 @@ The tag workflow creates a draft GitHub Release and attaches:
 - `dm-lessonmeld-VERSION-macos.zip`
 - `dm-lessonmeld-VERSION-macos.zip.sha256`
 
-The separate `.github/workflows/publish-release.yml` workflow publishes that draft only after the default-branch cask matches the staged ZIP.
+The separate `.github/workflows/publish-release.yml` workflow publishes that draft only after the default-branch cask matches the staged ZIP and the retained capture gate matches the tagged commit.
 
 ## Signing secrets
 

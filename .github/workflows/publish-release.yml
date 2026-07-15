@@ -7,8 +7,13 @@ on:
         description: Existing draft release tag to verify and publish
         required: true
         type: string
+      capture_gate_run_id:
+        description: Successful Capture release gate workflow run for the tagged commit
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -16,6 +21,7 @@ jobs:
     name: Verify cask and publish release
     runs-on: macos-15
     permissions:
+      actions: read
       contents: write
 
     steps:
@@ -48,6 +54,7 @@ jobs:
             "${release_mode}" \
             | tee "${RUNNER_TEMP}/release-provenance"
           cat "${RUNNER_TEMP}/release-provenance" >> "${GITHUB_OUTPUT}"
+          echo "revision=${tagged_revision}" >> "${GITHUB_OUTPUT}"
           git show "refs/tags/${TAG_NAME}:Packaging/Info.plist" > "${RUNNER_TEMP}/release-Info.plist"
 
           is_draft="$(gh release view "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft)"
@@ -61,6 +68,39 @@ jobs:
             [[ "${is_prerelease}" == "false" ]] \
               || { echo "error: signed release ${TAG_NAME} is unexpectedly marked as a prerelease." >&2; exit 1; }
           fi
+
+      - name: Verify tracked capture and real-media gate
+        env:
+          CAPTURE_GATE_RUN_ID: ${{ inputs.capture_gate_run_id }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          TAGGED_REVISION: ${{ steps.release.outputs.revision }}
+        run: |
+          [[ "${CAPTURE_GATE_RUN_ID}" =~ ^[0-9]+$ ]] \
+            || { echo "error: capture gate run ID must be numeric." >&2; exit 1; }
+
+          gate_metadata="$(gh run view "${CAPTURE_GATE_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --json conclusion,event,headBranch,workflowName)"
+          [[ "$(jq -r .workflowName <<<"${gate_metadata}")" == "Capture release gate" ]] \
+            || { echo "error: run ${CAPTURE_GATE_RUN_ID} is not the Capture release gate workflow." >&2; exit 1; }
+          [[ "$(jq -r .event <<<"${gate_metadata}")" == "workflow_dispatch" ]] \
+            || { echo "error: capture gate run was not manually dispatched." >&2; exit 1; }
+          [[ "$(jq -r .headBranch <<<"${gate_metadata}")" == "${DEFAULT_BRANCH}" ]] \
+            || { echo "error: capture gate run did not execute from ${DEFAULT_BRANCH}." >&2; exit 1; }
+          [[ "$(jq -r .conclusion <<<"${gate_metadata}")" == "success" ]] \
+            || { echo "error: capture gate run did not succeed." >&2; exit 1; }
+
+          mkdir -p capture-release-gate
+          gh run download "${CAPTURE_GATE_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name "capture-release-gate-${CAPTURE_GATE_RUN_ID}" \
+            --dir capture-release-gate
+          scripts/verify-capture-release-gate.sh \
+            capture-release-gate/capture-release-gate.json \
+            "${TAGGED_REVISION}" \
+            "${GITHUB_REPOSITORY}" \
+            "${CAPTURE_GATE_RUN_ID}"
 
       - name: Download exact staged artifacts
         env:
