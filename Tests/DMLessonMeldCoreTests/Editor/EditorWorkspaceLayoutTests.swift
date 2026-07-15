@@ -24,7 +24,7 @@ struct EditorWorkspaceLayoutTests {
     @Test("Viewport snapshots keep editor panes from overlapping", arguments: [
         (name: "desktop", width: 1680.0, height: 980.0, showsInspector: true, showsTimeline: true),
         (name: "laptop", width: 1180.0, height: 760.0, showsInspector: true, showsTimeline: true),
-        (name: "narrow", width: 960.0, height: 640.0, showsInspector: false, showsTimeline: true),
+        (name: "narrow", width: 960.0, height: 680.0, showsInspector: false, showsTimeline: true),
         (name: "short", width: 1180.0, height: 420.0, showsInspector: true, showsTimeline: false)
     ])
     func viewportSnapshotsKeepEditorPanesFromOverlapping(name: String, width: Double, height: Double, showsInspector: Bool, showsTimeline: Bool) {
@@ -99,5 +99,38 @@ struct EditorWorkspaceLayoutTests {
         #expect(setupWidth <= RecorderControlBarLayout.stableContentWidth)
         #expect(activeRecordingWidth <= RecorderControlBarLayout.stableContentWidth)
         #expect(RecorderControlBarLayout.stableWindowMinimumSize.width == 640)
+    }
+
+    @Test("Timeline toolbar presentations preserve every action exactly once")
+    func timelineToolbarPresentationsPreserveEveryActionExactlyOnce() {
+        for presentation in TimelineToolbarPresentation.allCases {
+            let direct = presentation.directActions
+            let overflow = presentation.overflowActions
+
+            #expect(Set(direct).isDisjoint(with: Set(overflow)))
+            #expect(Set(direct + overflow) == Set(TimelineToolbarAction.allCases))
+            #expect(direct.count + overflow.count == TimelineToolbarAction.allCases.count)
+        }
+    }
+
+    @Test("Compact timeline toolbar keeps precision actions direct and names every command")
+    func compactTimelineToolbarKeepsPrecisionActionsDirectAndNamesEveryCommand() {
+        let compact = TimelineToolbarPresentation.compact
+
+        #expect(compact.directActions == [.backOneSecond, .forwardOneSecond, .cut, .zoom, .delete, .save])
+        #expect(!compact.overflowActions.isEmpty)
+        #expect(Set(TimelineToolbarAction.allCases.map(\.title)).count == TimelineToolbarAction.allCases.count)
+        #expect(TimelineToolbarAction.delete.title == "Delete")
+    }
+
+    @Test("Narrow video editor fixture matches runtime minimum and guards timeline controls")
+    func narrowVideoEditorFixtureMatchesRuntimeMinimumAndGuardsTimelineControls() throws {
+        let scenario = try #require(UIRegressionFixtures.scenarios.first { $0.id == "video-editor-narrow" })
+
+        #expect(scenario.viewport == AppUILayoutSurface.videoEditor.minimumSize)
+        #expect(scenario.requiredPrimaryControls.contains("Timeline"))
+        #expect(scenario.requiredPrimaryControls.contains("Cut"))
+        #expect(scenario.requiredPrimaryControls.contains("More timeline actions"))
+        #expect(scenario.requiredPrimaryControls.contains("Timeline scale"))
     }
 }

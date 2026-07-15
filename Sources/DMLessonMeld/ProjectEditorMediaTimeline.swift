@@ -8,99 +8,9 @@ import UniformTypeIdentifiers
 extension ProjectEditorView {
     func mediaTimelineEditor(manifest: ProjectManifest) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Label("Timeline", systemImage: "timeline.selection")
-                    .font(.headline)
-                Text(model.formattedCurrentTime)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    model.stepPlayhead(by: -1)
-                } label: {
-                    Label("Back 1s", systemImage: "backward.frame")
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-                Button {
-                    model.stepPlayhead(by: 1)
-                } label: {
-                    Label("Forward 1s", systemImage: "forward.frame")
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [])
-                Button {
-                    model.addCutAtPlayhead()
-                    persistTimelineEditChanges(for: .moveCut)
-                    editorInspectorTab = .cuts
-                } label: {
-                    Label("Cut", systemImage: "scissors")
-                }
-                .keyboardShortcut("b", modifiers: [.option])
-                Button {
-                    model.addZoomAtPlayhead()
-                    persistTimelineEditChanges(for: .moveZoom)
-                    editorInspectorTab = .zooms
-                } label: {
-                    Label("Zoom", systemImage: "plus.magnifyingglass")
-                }
-                .keyboardShortcut("z", modifiers: [.option])
-                Button {
-                    model.addAudioVolumeRegionAtPlayhead()
-                    persistTimelineEditChanges(for: .moveAudioVolume)
-                    editorInspectorTab = .audio
-                } label: {
-                    Label("Volume", systemImage: "speaker.wave.2")
-                }
-                .keyboardShortcut("v", modifiers: [.option])
-                Button {
-                    model.addSpeedRegionAtPlayhead(rate: 2)
-                    persistTimelineEditChanges(for: .moveSpeed)
-                    editorInspectorTab = .audio
-                } label: {
-                    Label("Speed", systemImage: "speedometer")
-                }
-                .keyboardShortcut("s", modifiers: [.option])
-                Button {
-                    model.addOverlayAtPlayhead(kind: .text)
-                    persistTimelineEditChanges(for: .moveOverlay)
-                    editorInspectorTab = .overlays
-                } label: {
-                    Label("Overlay", systemImage: "textformat")
-                }
-                .keyboardShortcut("t", modifiers: [.option])
-                Button {
-                    model.addCaptionAtPlayhead()
-                    persistTimelineEditChanges(for: .moveCaption)
-                    editorInspectorTab = .captions
-                } label: {
-                    Label("Caption", systemImage: "captions.bubble")
-                }
-                .keyboardShortcut("c", modifiers: [.option])
-                Button {
-                    model.addCursorHiddenRangeAtPlayhead()
-                    persistTimelineEditChanges(for: .moveCursorHide)
-                    editorInspectorTab = .cursor
-                } label: {
-                    Label("Hide Cursor", systemImage: "cursorarrow.slash")
-                }
-                .keyboardShortcut("h", modifiers: [.option])
-                Button {
-                    deleteSelectedTimelineItem()
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-                .keyboardShortcut(.delete, modifiers: [])
-                .disabled(selectedTimelineItem == nil)
-                Button {
-                    model.saveEditDecisions()
-                } label: {
-                    Label("Save", systemImage: "checkmark.circle")
-                }
-                Label("Scale", systemImage: "arrow.left.and.right")
-                    .foregroundStyle(.secondary)
-                Slider(value: $timelineZoom, in: 1...6)
-                    .frame(width: 120)
-                    .accessibilityLabel("Timeline scale")
-                    .accessibilityValue(String(format: "%.1fx", timelineZoom))
+            ViewThatFits(in: .horizontal) {
+                timelineToolbar(presentation: .expanded)
+                timelineToolbar(presentation: .compact)
             }
             if !model.editValidationIssues.isEmpty {
                 Text(model.editValidationIssues.map(\.message).joined(separator: " "))
@@ -223,7 +133,6 @@ extension ProjectEditorView {
             }
         }
         .padding(.top, 12)
-        .focusable()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Video timeline")
         .accessibilityHint("Use Left and Right Arrow to move the playhead. Use Delete to remove the selected timeline item.")
@@ -239,6 +148,134 @@ extension ProjectEditorView {
         }
         .onDeleteCommand {
             deleteSelectedTimelineItem()
+        }
+    }
+
+    func timelineToolbar(presentation: TimelineToolbarPresentation) -> some View {
+        HStack(spacing: presentation == .expanded ? 10 : 6) {
+            HStack(spacing: 8) {
+                Label("Timeline", systemImage: "timeline.selection")
+                    .font(.headline)
+                    .fixedSize()
+                Text(model.formattedCurrentTime)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+
+            Spacer(minLength: 8)
+
+            ForEach(presentation.directActions) { action in
+                timelineToolbarButton(action, compact: presentation == .compact)
+            }
+
+            if !presentation.overflowActions.isEmpty {
+                Menu {
+                    ForEach(presentation.overflowActions) { action in
+                        timelineToolbarMenuButton(action)
+                    }
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                        .fixedSize()
+                }
+                .accessibilityLabel("More timeline actions")
+                .help("More timeline actions")
+            }
+
+            HStack(spacing: 6) {
+                Label("Scale", systemImage: "arrow.left.and.right")
+                    .foregroundStyle(.secondary)
+                    .timelineToolbarLabelStyle(compact: presentation == .compact)
+                    .accessibilityLabel("Scale")
+                    .help("Timeline scale")
+                Slider(value: $timelineZoom, in: 1...6)
+                    .frame(width: presentation == .expanded ? 120 : 96)
+                    .accessibilityLabel("Timeline scale")
+                    .accessibilityValue(String(format: "%.1fx", timelineZoom))
+            }
+            .fixedSize()
+        }
+        .overlay {
+            if presentation == .compact {
+                // Menu items show shortcut glyphs but do not register them while the menu is closed.
+                ForEach(presentation.overflowActions) { action in
+                    Button {
+                        performTimelineToolbarAction(action)
+                    } label: {
+                        Color.clear
+                            .frame(width: 0, height: 0)
+                    }
+                    .timelineKeyboardShortcut(action)
+                    .buttonStyle(.plain)
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                }
+            }
+        }
+    }
+
+    func timelineToolbarButton(_ action: TimelineToolbarAction, compact: Bool) -> some View {
+        Button {
+            performTimelineToolbarAction(action)
+        } label: {
+            Label(action.title, systemImage: action.systemImage)
+                .timelineToolbarLabelStyle(compact: compact)
+        }
+        .timelineKeyboardShortcut(action)
+        .buttonStyle(.bordered)
+        .disabled(action == .delete && selectedTimelineItem == nil)
+        .accessibilityLabel(action.title)
+        .help(action.title)
+    }
+
+    func timelineToolbarMenuButton(_ action: TimelineToolbarAction) -> some View {
+        Button {
+            performTimelineToolbarAction(action)
+        } label: {
+            Label(action.title, systemImage: action.systemImage)
+        }
+        .timelineKeyboardShortcut(action)
+        .disabled(action == .delete && selectedTimelineItem == nil)
+    }
+
+    func performTimelineToolbarAction(_ action: TimelineToolbarAction) {
+        switch action {
+        case .backOneSecond:
+            model.stepPlayhead(by: -1)
+        case .forwardOneSecond:
+            model.stepPlayhead(by: 1)
+        case .cut:
+            model.addCutAtPlayhead()
+            persistTimelineEditChanges(for: .moveCut)
+            editorInspectorTab = .cuts
+        case .zoom:
+            model.addZoomAtPlayhead()
+            persistTimelineEditChanges(for: .moveZoom)
+            editorInspectorTab = .zooms
+        case .volume:
+            model.addAudioVolumeRegionAtPlayhead()
+            persistTimelineEditChanges(for: .moveAudioVolume)
+            editorInspectorTab = .audio
+        case .speed:
+            model.addSpeedRegionAtPlayhead(rate: 2)
+            persistTimelineEditChanges(for: .moveSpeed)
+            editorInspectorTab = .audio
+        case .overlay:
+            model.addOverlayAtPlayhead(kind: .text)
+            persistTimelineEditChanges(for: .moveOverlay)
+            editorInspectorTab = .overlays
+        case .caption:
+            model.addCaptionAtPlayhead()
+            persistTimelineEditChanges(for: .moveCaption)
+            editorInspectorTab = .captions
+        case .hideCursor:
+            model.addCursorHiddenRangeAtPlayhead()
+            persistTimelineEditChanges(for: .moveCursorHide)
+            editorInspectorTab = .cursor
+        case .delete:
+            deleteSelectedTimelineItem()
+        case .save:
+            model.saveEditDecisions()
         }
     }
 
@@ -1040,4 +1077,43 @@ extension ProjectEditorView {
     }
 
     var timelineTrackInset: CGFloat { 76 }
+}
+
+private extension View {
+    @ViewBuilder
+    func timelineToolbarLabelStyle(compact: Bool) -> some View {
+        if compact {
+            labelStyle(.iconOnly)
+        } else {
+            labelStyle(.titleAndIcon)
+        }
+    }
+
+    @ViewBuilder
+    func timelineKeyboardShortcut(_ action: TimelineToolbarAction) -> some View {
+        switch action {
+        case .backOneSecond:
+            keyboardShortcut(.leftArrow, modifiers: [])
+        case .forwardOneSecond:
+            keyboardShortcut(.rightArrow, modifiers: [])
+        case .cut:
+            keyboardShortcut("b", modifiers: [.option])
+        case .zoom:
+            keyboardShortcut("z", modifiers: [.option])
+        case .volume:
+            keyboardShortcut("v", modifiers: [.option])
+        case .speed:
+            keyboardShortcut("s", modifiers: [.option])
+        case .overlay:
+            keyboardShortcut("t", modifiers: [.option])
+        case .caption:
+            keyboardShortcut("c", modifiers: [.option])
+        case .hideCursor:
+            keyboardShortcut("h", modifiers: [.option])
+        case .delete:
+            keyboardShortcut(.delete, modifiers: [])
+        case .save:
+            self
+        }
+    }
 }
