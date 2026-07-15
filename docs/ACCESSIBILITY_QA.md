@@ -40,7 +40,7 @@ Run this checklist before tagging a release or after changing primary app surfac
 
 - `Option-Command-A` opens and closes annotation tools.
 - Tab reaches toolbar orientation, collapse, tools, color swatches, width, text size, undo/redo, lock, visibility, pin, display, copy, clear, settings, and close controls.
-- Tool and color controls announce selected state.
+- Tool controls announce selected state. Color swatches announce a distinct color name and canonical hex value plus selected state, including custom and duplicate palette entries.
 - Escape exits the active drawing tool without closing the whole app.
 
 ## Export

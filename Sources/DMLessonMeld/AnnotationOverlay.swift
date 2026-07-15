@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import DMLessonMeldCore
+import DMLessonMeldSupport
 @preconcurrency import ScreenCaptureKit
 import SwiftUI
 
@@ -1486,25 +1487,25 @@ private struct AnnotationOverlayToolbarView: View {
     }
 
     @ViewBuilder private var colorButtons: some View {
-        ForEach(session.palette.prefix(8), id: \.self) { color in
+        ForEach(AnnotationPaletteAccessibility.descriptors(for: session.palette)) { swatch in
             Button {
                 runToolbarAction {
-                    session.selectedColor = color
+                    session.selectedColor = swatch.color
                 }
             } label: {
                 Circle()
-                    .fill(Color(rgba: color))
+                    .fill(Color(rgba: swatch.color))
                     .frame(width: 24, height: 24)
                     .overlay(
                         Circle()
-                            .stroke(session.selectedColor == color ? .white : .white.opacity(0.35), lineWidth: session.selectedColor == color ? 3 : 1)
+                            .stroke(session.selectedColor == swatch.color ? .white : .white.opacity(0.35), lineWidth: session.selectedColor == swatch.color ? 3 : 1)
                     )
                     .frame(width: Self.buttonSize, height: Self.buttonSize)
             }
             .buttonStyle(.plain)
-            .overlayHelp(color.accessibilityName, enabled: session.tooltipsEnabled)
-            .accessibilityLabel(color.accessibilityName)
-            .accessibilityValue(session.selectedColor == color ? "Selected" : "Not selected")
+            .overlayHelp(swatch.accessibilityLabel, enabled: session.tooltipsEnabled)
+            .accessibilityLabel(swatch.accessibilityLabel)
+            .accessibilityValue(session.selectedColor == swatch.color ? "Selected" : "Not selected")
             .accessibilityHint("Sets the annotation color.")
         }
     }
@@ -2007,18 +2008,6 @@ private extension RGBAColor {
         )
     }
 
-    var accessibilityName: String {
-        switch self {
-        case .yellow: "Yellow"
-        case .cyan: "Cyan"
-        case .green: "Green"
-        case .red: "Red"
-        case .purple: "Purple"
-        case .white: "White"
-        case .black: "Black"
-        default: "Color"
-        }
-    }
 }
 
 private extension AnnotationTextWeight {
